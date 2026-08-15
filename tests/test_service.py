@@ -219,6 +219,31 @@ def test_the_settle_window_catches_a_hesitation_after_the_wake_word(running):
     assert [item["text"] for item in result["heard"]] == ["jarvis", "what is the weather"]
 
 
+def test_a_timeout_does_not_swallow_the_chatter_it_waited_through(running):
+    """The bug: /heard reported the transcript's cursor even when it returned
+    nothing, so unaddressed speech that arrived during a wait was skipped and
+    never reached the agent as context."""
+    service, client, _ = running
+    start = client.status()["cursor"]
+
+    service.transcript.add("the one in the parser", addressed=False)
+    timed_out = client.heard(since=start, wait=0.3, addressed_only=True)
+    assert timed_out["heard"] == []
+    assert timed_out["cursor"] == start, "cursor must not move past undelivered context"
+
+    service.transcript.add("jarvis fix it", addressed=True, command="fix it")
+    result = client.heard(since=timed_out["cursor"], wait=5, addressed_only=True, settle=0)
+    assert [i["text"] for i in result["heard"]] == ["the one in the parser", "jarvis fix it"]
+
+
+def test_the_cursor_only_advances_past_what_was_delivered(running):
+    service, client, _ = running
+    start = client.status()["cursor"]
+    first = service.transcript.add("jarvis one", addressed=True, command="one")
+    result = client.heard(since=start, wait=2, addressed_only=True, settle=0)
+    assert result["cursor"] == first.id
+
+
 def test_speech_during_a_long_task_is_waiting_at_the_next_checkpoint(running):
     """Nothing is missed while the agent is busy - it is queued behind the cursor."""
     service, client, _ = running

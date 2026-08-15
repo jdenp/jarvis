@@ -41,7 +41,24 @@ class AudioConfig:
 class WakeConfig:
     """Wake word gating."""
 
-    words: tuple[str, ...] = ("jarvis", "hey jarvis", "jervis", "travis")
+    # Includes the mis-hearings that actually come back from the recogniser.
+    # Anything not listed is still caught by the fuzzy match below.
+    words: tuple[str, ...] = (
+        "jarvis",
+        "hey jarvis",
+        "jervis",
+        "javis",
+        "jovis",
+        "jarvus",
+        "darvis",
+        "darvus",
+        "travis",
+        "javas",
+    )
+    # Proper nouns come back mangled, and differently per accent. Without this
+    # the assistant just ignores you and gives no clue why.
+    fuzzy: bool = True
+    fuzzy_threshold: float = 0.78
     required: bool = True
 
 
@@ -56,6 +73,8 @@ class SttConfig:
     whisper_compute_type: str = "default"
     whisper_beam_size: int = 1
     whisper_vad: bool = True
+    # Biases decoding towards these, so the wake word survives an accent.
+    hotwords: str = "JARVIS"
 
 
 @dataclass(frozen=True)

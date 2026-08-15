@@ -20,7 +20,16 @@ pause_threshold = 0.8
 echo_guard_seconds = 0.5
 
 [wake]
-words = ["jarvis", "hey jarvis", "jervis", "travis"]
+# Includes mis-hearings the recogniser actually produces. Anything not listed
+# is still caught by the fuzzy match, so you rarely need to add to this.
+words = ["jarvis", "hey jarvis", "jervis", "javis", "jovis", "jarvus",
+         "darvis", "darvus", "travis", "javas"]
+# Proper nouns come back mangled, and differently depending on your accent.
+# Raise the threshold if ordinary words start being taken as the wake word,
+# lower it if you are being ignored. 0.78 is tuned so "jovis" matches but
+# "jars in the cupboard" does not.
+fuzzy = true
+fuzzy_threshold = 0.78
 # Everything heard is recorded either way. This only decides what counts as an
 # instruction: with it on, speech without the wake word is passed to the agent
 # as context but never acted on. Off means every utterance is an instruction.
@@ -39,6 +48,7 @@ whisper_device = "auto"        # auto | cuda | cpu
 whisper_compute_type = "default"
 whisper_beam_size = 1          # 1 is greedy and fastest, raise for accuracy
 whisper_vad = true             # skip silence before transcribing
+hotwords = "JARVIS"            # bias decoding, so the name survives an accent
 
 [tts]
 # auto means sapi, the offline Windows voice. edge sounds far better but sends

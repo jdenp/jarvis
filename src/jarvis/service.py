@@ -23,7 +23,7 @@ from .microphone import Microphone
 from .stt import Transcriber, build_transcriber
 from .transcript import Transcript
 from .tts import SpeechEngine, build_speaker
-from .wake import split_wake_word, wake_pattern
+from .wake import WakeMatcher
 
 logger = logging.getLogger("jarvis.service")
 
@@ -44,7 +44,7 @@ class VoiceService:
         self.transcriber = transcriber
         self.speech = speech
         self.transcript = transcript or Transcript(config.log_dir / config.service.transcript_file)
-        self._wake_pattern = wake_pattern(config.wake.words)
+        self._wake = WakeMatcher(config.wake.words, config.wake.fuzzy, config.wake.fuzzy_threshold)
         self._echo = EchoGuard()
         self._running = threading.Event()
         self._listener: threading.Thread | None = None
@@ -91,7 +91,7 @@ class VoiceService:
         second half of any sentence that got split - say "jarvis", hesitate, and
         the phrase detector ends the phrase before the actual request arrives.
         """
-        addressed, remainder = split_wake_word(self._wake_pattern, heard)
+        addressed, remainder = self._wake.split(heard)
         if not addressed:
             # Not required means every utterance counts as addressed to us.
             return (not self.config.wake.required), heard
@@ -179,12 +179,16 @@ class _Handler(BaseHTTPRequestHandler):
         if items and settle:
             time.sleep(settle)
 
-        everything = transcript.since(since) if items else []
+        delivered = transcript.since(since) if items else []
+        # Only advance past what actually went out. Reporting the transcript's
+        # own cursor on a timeout silently swallows everything unaddressed that
+        # arrived during the wait - which is exactly the context the caller
+        # needs to make sense of the next instruction.
         self._json(
             200,
             {
-                "heard": [item.as_dict() for item in everything],
-                "cursor": transcript.cursor,
+                "heard": [item.as_dict() for item in delivered],
+                "cursor": delivered[-1].id if delivered else since,
             },
         )
 

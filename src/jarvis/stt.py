@@ -105,6 +105,7 @@ class WhisperSTT:
                 beam_size=self.config.whisper_beam_size,
                 vad_filter=self.config.whisper_vad,
                 condition_on_previous_text=False,
+                hotwords=self.config.hotwords or None,
             )
             text = " ".join(segment.text.strip() for segment in segments).strip()
         except Exception as exc:
