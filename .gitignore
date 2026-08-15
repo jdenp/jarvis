@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+logs/
+jarvis.toml
+.pytest_cache/
+.ruff_cache/

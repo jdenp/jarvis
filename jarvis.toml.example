@@ -1,0 +1,73 @@
+# Copy to jarvis.toml and edit. Every option here is optional - the values shown
+# are the defaults. Anything can also be set with an environment variable, e.g.
+# JARVIS_STT_BACKEND or JARVIS_TTS_ENGINE, and command line flags beat both.
+
+log_level = "INFO"
+
+[audio]
+# device_index = 1    # leave unset for the system default, or use `jarvis --list-devices`
+phrase_time_limit = 10.0
+calibration_seconds = 1.5
+dynamic_energy_threshold = true
+# energy_threshold = 300  # set this to skip calibration entirely
+# A silent room calibrates down to single digits, which is sensitive enough for
+# the mic to hear your speakers. Raise this if JARVIS still picks itself up.
+min_energy_threshold = 80.0
+pause_threshold = 0.8
+# How long after JARVIS stops talking the microphone stays ignored. Covers the
+# output buffer draining and the room's echo tail. Raise it in a live room, but
+# note that a reply starting inside this window is dropped.
+echo_guard_seconds = 0.5
+
+[wake]
+words = ["jarvis", "hey jarvis", "jervis", "travis"]
+required = true
+
+[stt]
+# whisper runs on this machine. google is free and needs no model download, but
+# it uploads every captured phrase to Google - it is opt in for that reason.
+backend = "whisper"
+language = "en-GB"
+whisper_model = "base.en"      # tiny.en, base.en, small.en, medium.en, large-v3
+# auto tries CUDA and falls back to CPU if it is not actually usable. Pin to
+# "cpu" if you would rather not share VRAM with the model server - base.en
+# transcribes a short phrase in well under half a second on CPU.
+whisper_device = "auto"        # auto | cuda | cpu
+whisper_compute_type = "default"
+whisper_beam_size = 1          # 1 is greedy and fastest, raise for accuracy
+whisper_vad = true             # skip silence before transcribing
+
+[tts]
+# auto means sapi, the offline Windows voice. edge sounds far better but sends
+# every reply to Microsoft, so it has to be named explicitly.
+engine = "auto"                # auto | sapi | edge | none
+# Preference order, first installed wins. George is British male but ships as a
+# OneCore voice; run scripts/expose-onecore-voices.ps1 (elevated) to let SAPI
+# see it, otherwise this falls through to Hazel. `-List` shows what you have.
+sapi_voice = "George, Hazel"
+voice = "en-GB-RyanNeural"     # edge only, `edge-tts --list-voices` for more
+rate = 210                     # words per minute. SAPI steps coarsely: ~205+ is
+                               # one notch faster than default, ~265+ is two.
+volume = 1.0
+
+[service]
+# The voice service an agent connects to (`jarvis serve`). Loopback only - there
+# is no auth, so do not bind this to anything routable.
+host = "127.0.0.1"
+port = 8770
+# Longest a single wait_for_speech may block. Keep it under the agent's own tool
+# timeout (Cline's is around 60s) so the agent re-calls rather than erroring.
+max_wait_seconds = 55.0
+transcript_file = "heard.jsonl"
+# If the agent has not spoken an answer within this long, JARVIS says a holding
+# line so the wait does not sound like a crash. It is cancelled the moment the
+# real answer arrives, so quick replies never get "one moment" in front of them.
+# Set to 0 to turn it off.
+acknowledge_after = 2.5
+acknowledgements = [
+    "Let me have a look.",
+    "One moment.",
+    "Looking into that now.",
+    "Give me a second.",
+    "Checking that for you.",
+]
