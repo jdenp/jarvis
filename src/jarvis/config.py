@@ -86,6 +86,10 @@ class ServiceConfig:
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
+    # After speech aimed at JARVIS arrives, hold on briefly for the rest of the
+    # thought. Saying the wake word then hesitating splits one request into two
+    # phrases, and answering the first half is worse than waiting a beat.
+    settle_seconds: float = 1.2
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 2.5

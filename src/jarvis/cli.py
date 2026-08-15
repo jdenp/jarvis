@@ -68,6 +68,11 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--since", type=int, help="only utterances after this id")
     nxt.add_argument("--json", action="store_true", help="print the raw record")
     nxt.add_argument("--follow", action="store_true", help="keep printing as more arrives")
+    nxt.add_argument(
+        "--all",
+        action="store_true",
+        help="wake on any speech, not just speech addressed to jarvis",
+    )
 
     sub.add_parser("mcp", help="run as an MCP server over stdio, for Cline and friends")
     sub.add_parser("status", help="report on the running voice service")
@@ -203,10 +208,16 @@ def run_next(config: Config, args: argparse.Namespace) -> int:
             cursor = args.since if args.since is not None else voice.status()["cursor"]
             while True:
                 wait = slice_seconds if remaining is None else min(remaining, slice_seconds)
-                result = voice.heard(since=cursor, wait=wait)
+                result = voice.heard(since=cursor, wait=wait, addressed_only=not args.all)
                 cursor = result["cursor"]
                 for item in result["heard"]:
-                    print(json.dumps(item) if args.json else item["text"], flush=True)
+                    if args.json:
+                        print(json.dumps(item), flush=True)
+                    else:
+                        # Mark context lines so a script can tell them apart from
+                        # an actual instruction without parsing JSON.
+                        prefix = "" if item.get("addressed", True) else "# "
+                        print(prefix + item["text"], flush=True)
 
                 if result["heard"] and not args.follow:
                     return 0

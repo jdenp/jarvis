@@ -76,23 +76,24 @@ def make_service(**config_overrides) -> tuple[VoiceService, FakeMicrophone, Fake
 
 def test_wake_word_is_stripped_before_the_agent_sees_it():
     service, _, _ = make_service()
-    assert service._apply_wake_word("Jarvis, open the config file") == "open the config file"
+    assert service._classify("Jarvis, open the config file") == (True, "open the config file")
 
 
-def test_utterance_without_the_wake_word_is_dropped():
+def test_unaddressed_speech_is_kept_as_context_not_as_an_instruction():
+    """It used to be dropped. Losing it loses the second half of any request
+    split by a hesitation after the wake word."""
     service, _, _ = make_service()
-    assert service._apply_wake_word("just muttering to myself") is None
+    assert service._classify("just muttering to myself") == (False, "just muttering to myself")
 
 
-def test_everything_gets_through_when_the_wake_word_is_not_required():
-    config_wake = replace(Config().wake, required=False)
-    service, _, _ = make_service(wake=config_wake)
-    assert service._apply_wake_word("just muttering to myself") == "just muttering to myself"
+def test_everything_counts_as_addressed_when_the_wake_word_is_not_required():
+    service, _, _ = make_service(wake=replace(Config().wake, required=False))
+    assert service._classify("just muttering to myself") == (True, "just muttering to myself")
 
 
 def test_bare_wake_word_is_kept_rather_than_sent_as_an_empty_command():
     service, _, _ = make_service()
-    assert service._apply_wake_word("jarvis") == "jarvis"
+    assert service._classify("jarvis") == (True, "jarvis")
 
 
 # ---------------------------------------------------------------------- speak
@@ -185,6 +186,49 @@ def test_say_over_http_reaches_the_speaker(running):
     _, client, speech = running
     assert client.say("Understood.")["spoken"] == "Understood."
     assert speech.said == ["Understood."]
+
+
+def test_overheard_chatter_does_not_wake_a_waiting_agent(running):
+    service, client, _ = running
+    service.transcript.add("something about the weather", addressed=False)
+    assert client.heard(since=0, wait=0.3, addressed_only=True)["heard"] == []
+
+
+def test_being_addressed_wakes_it_and_brings_the_chatter_along(running):
+    """The split-request case: unaddressed speech is context, not an instruction."""
+    service, client, _ = running
+    service.transcript.add("open the config file", addressed=False)
+    service.transcript.add("jarvis", addressed=True, command="jarvis")
+
+    result = client.heard(since=0, wait=5, addressed_only=True, settle=0)
+    texts = [item["text"] for item in result["heard"]]
+    assert texts == ["open the config file", "jarvis"], "both, in order"
+    assert [item["addressed"] for item in result["heard"]] == [False, True]
+
+
+def test_the_settle_window_catches_a_hesitation_after_the_wake_word(running):
+    """Say "jarvis", pause, then the request. Returning on the first phrase
+    alone would hand the agent nothing to act on."""
+    service, client, _ = running
+    service.transcript.add("jarvis", addressed=True, command="jarvis")
+    threading.Timer(
+        0.2, lambda: service.transcript.add("what is the weather", addressed=False)
+    ).start()
+
+    result = client.heard(since=0, wait=5, addressed_only=True, settle=1.0)
+    assert [item["text"] for item in result["heard"]] == ["jarvis", "what is the weather"]
+
+
+def test_speech_during_a_long_task_is_waiting_at_the_next_checkpoint(running):
+    """Nothing is missed while the agent is busy - it is queued behind the cursor."""
+    service, client, _ = running
+    cursor = client.status()["cursor"]
+    for text in ("and check the tests too", "actually never mind that"):
+        service.transcript.add(text, addressed=False)
+    service.transcript.add("jarvis are you there", addressed=True, command="are you there")
+
+    result = client.heard(since=cursor, wait=5, addressed_only=True, settle=0)
+    assert len(result["heard"]) == 3, "everything said while busy is still there"
 
 
 def test_client_says_how_to_fix_it_when_nothing_is_listening():

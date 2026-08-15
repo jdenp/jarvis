@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -76,23 +77,25 @@ class VoiceService:
             if self._echo.is_echo(heard):
                 logger.debug("Ignored JARVIS hearing itself: %s", heard)
                 continue
-            command = self._apply_wake_word(heard)
-            if command is None:
-                logger.info("(ignored - say '%s' first) %s", self.config.wake.words[0], heard)
-                continue
-            utterance = self.transcript.add(command)
-            logger.info("[%d] %s", utterance.id, command)
+            addressed, command = self._classify(heard)
+            utterance = self.transcript.add(heard, addressed=addressed, command=command)
+            if addressed:
+                logger.info("[%d] %s", utterance.id, command)
+            else:
+                logger.info("[%d] (not addressed) %s", utterance.id, heard)
 
-    def _apply_wake_word(self, heard: str) -> str | None:
-        """Strip the wake word, or drop the utterance when it is required.
+    def _classify(self, heard: str) -> tuple[bool, str]:
+        """Whether this was aimed at JARVIS, and the instruction with its name removed.
 
-        There is no follow up window - the agent decides when it is listening,
-        so every utterance has to stand on its own.
+        Everything is recorded either way. Dropping unaddressed speech loses the
+        second half of any sentence that got split - say "jarvis", hesitate, and
+        the phrase detector ends the phrase before the actual request arrives.
         """
         addressed, remainder = split_wake_word(self._wake_pattern, heard)
         if not addressed:
-            return None if self.config.wake.required else heard
-        return remainder or heard
+            # Not required means every utterance counts as addressed to us.
+            return (not self.config.wake.required), heard
+        return True, remainder or heard
 
     # ------------------------------------------------------------------ speak
 
@@ -153,18 +156,37 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
 
     def _heard(self, query: dict) -> None:
+        settings = self.service.config.service
         try:
             since = int(query.get("since", ["0"])[0])
             wait = float(query.get("wait", ["0"])[0])
+            addressed_only = query.get("addressed", ["0"])[0] not in {"0", "false", ""}
+            settle = float(query.get("settle", [str(settings.settle_seconds)])[0])
         except ValueError:
-            self._json(400, {"error": "since and wait must be numbers"})
+            self._json(400, {"error": "since, wait and settle must be numbers"})
             return
-        wait = max(0.0, min(wait, self.service.config.service.max_wait_seconds))
+
+        wait = max(0.0, min(wait, settings.max_wait_seconds))
+        settle = max(0.0, min(settle, 10.0))
         transcript = self.service.transcript
-        items = transcript.since(since)
+
+        items = [i for i in transcript.since(since) if i.addressed or not addressed_only]
         if not items and wait:
-            items = transcript.wait_for(since, timeout=wait)
-        self._json(200, {"heard": [item.as_dict() for item in items], "cursor": transcript.cursor})
+            items = transcript.wait_for(since, timeout=wait, addressed_only=addressed_only)
+
+        # Give a hesitating speaker a moment to finish. "Jarvis" then a pause is
+        # two phrases, and returning after the first one acts on nothing.
+        if items and settle:
+            time.sleep(settle)
+
+        everything = transcript.since(since) if items else []
+        self._json(
+            200,
+            {
+                "heard": [item.as_dict() for item in everything],
+                "cursor": transcript.cursor,
+            },
+        )
 
     def do_POST(self) -> None:
         if urlparse(self.path).path != "/say":
