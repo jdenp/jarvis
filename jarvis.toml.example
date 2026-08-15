@@ -70,7 +70,7 @@ settle_seconds = 1.2
 # line so the wait does not sound like a crash. It is cancelled the moment the
 # real answer arrives, so quick replies never get "one moment" in front of them.
 # Set to 0 to turn it off.
-acknowledge_after = 2.5
+acknowledge_after = 4.0
 acknowledgements = [
     "Let me have a look.",
     "One moment.",

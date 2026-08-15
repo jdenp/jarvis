@@ -92,7 +92,7 @@ class ServiceConfig:
     settle_seconds: float = 1.2
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
-    acknowledge_after: float = 2.5
+    acknowledge_after: float = 4.0
     acknowledgements: tuple[str, ...] = (
         "Let me have a look.",
         "One moment.",
