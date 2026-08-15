@@ -32,14 +32,22 @@ class AudioConfig:
     # A very quiet room calibrates down to single digits, which is sensitive
     # enough to hear the speakers. Refuse to go below this.
     min_energy_threshold: float = 80.0
-    pause_threshold: float = 0.8
+    # How long a silence ends a phrase. Generous on purpose: hesitating mid
+    # sentence should not split one request into two.
+    pause_threshold: float = 1.2
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
 
 
 @dataclass(frozen=True)
 class WakeConfig:
-    """Wake word gating."""
+    """Wake word handling.
+
+    The name is stripped when it is there, but it is not required. Everything
+    heard goes to the agent, which judges whether it was being spoken to -
+    having to say "jarvis" before every reply in a conversation is worse than
+    an agent that occasionally has to decide something was not for it.
+    """
 
     # Includes the mis-hearings that actually come back from the recogniser.
     # Anything not listed is still caught by the fuzzy match below.
@@ -55,11 +63,14 @@ class WakeConfig:
         "travis",
         "javas",
     )
+    # Off by default: everything heard is passed to the agent, which decides
+    # for itself whether it was being spoken to. Turn it on to go back to
+    # needing the name every time.
+    required: bool = False
     # Proper nouns come back mangled, and differently per accent. Without this
     # the assistant just ignores you and gives no clue why.
     fuzzy: bool = True
     fuzzy_threshold: float = 0.78
-    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -108,7 +119,7 @@ class ServiceConfig:
     # After speech aimed at JARVIS arrives, hold on briefly for the rest of the
     # thought. Saying the wake word then hesitating splits one request into two
     # phrases, and answering the first half is worse than waiting a beat.
-    settle_seconds: float = 1.2
+    settle_seconds: float = 1.5
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0

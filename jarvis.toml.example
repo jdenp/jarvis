@@ -13,7 +13,7 @@ dynamic_energy_threshold = true
 # A silent room calibrates down to single digits, which is sensitive enough for
 # the mic to hear your speakers. Raise this if JARVIS still picks itself up.
 min_energy_threshold = 80.0
-pause_threshold = 0.8
+pause_threshold = 1.2         # silence that ends a phrase; higher tolerates hesitation
 # How long after JARVIS stops talking the microphone stays ignored. Covers the
 # output buffer draining and the room's echo tail. Raise it in a live room, but
 # note that a reply starting inside this window is dropped.
@@ -30,10 +30,11 @@ words = ["jarvis", "hey jarvis", "jervis", "javis", "jovis", "jarvus",
 # "jars in the cupboard" does not.
 fuzzy = true
 fuzzy_threshold = 0.78
-# Everything heard is recorded either way. This only decides what counts as an
-# instruction: with it on, speech without the wake word is passed to the agent
-# as context but never acted on. Off means every utterance is an instruction.
-required = true
+# Off by default: everything heard goes to the agent and it decides whether it
+# was being spoken to. Having to say "jarvis" before every reply in a back and
+# forth is worse than an agent that occasionally judges wrong. Turn it on to
+# require the name again.
+required = false
 
 [stt]
 # whisper runs on this machine. google is free and needs no model download, but
@@ -75,7 +76,7 @@ transcript_file = "heard.jsonl"
 # Once speech aimed at JARVIS arrives, hold on this long for the rest of the
 # thought before handing it over. Saying the wake word then hesitating splits one
 # request across two phrases; without this the agent acts on the first half.
-settle_seconds = 1.2
+settle_seconds = 1.5
 # If the agent has not spoken an answer within this long, JARVIS says a holding
 # line so the wait does not sound like a crash. It is cancelled the moment the
 # real answer arrives, so quick replies never get "one moment" in front of them.

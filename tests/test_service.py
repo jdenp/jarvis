@@ -79,16 +79,16 @@ def test_wake_word_is_stripped_before_the_agent_sees_it():
     assert service._classify("Jarvis, open the config file") == (True, "open the config file")
 
 
-def test_unaddressed_speech_is_kept_as_context_not_as_an_instruction():
-    """It used to be dropped. Losing it loses the second half of any request
-    split by a hesitation after the wake word."""
+def test_speech_without_the_name_is_still_passed_on():
+    """No wake word by default - the agent judges what was meant for it."""
     service, _, _ = make_service()
-    assert service._classify("just muttering to myself") == (False, "just muttering to myself")
-
-
-def test_everything_counts_as_addressed_when_the_wake_word_is_not_required():
-    service, _, _ = make_service(wake=replace(Config().wake, required=False))
     assert service._classify("just muttering to myself") == (True, "just muttering to myself")
+
+
+def test_the_name_can_be_made_mandatory_again():
+    service, _, _ = make_service(wake=replace(Config().wake, required=True))
+    assert service._classify("just muttering to myself") == (False, "just muttering to myself")
+    assert service._classify("jarvis open it") == (True, "open it")
 
 
 def test_bare_wake_word_is_kept_rather_than_sent_as_an_empty_command():
@@ -118,7 +118,7 @@ def test_status_reports_the_backends_in_use():
     service, _, _ = make_service()
     status = service.status()
     assert status["stt"] == "whisper"
-    assert status["wake_word_required"] is True
+    assert status["wake_word_required"] is False
     assert status["cursor"] == 0
 
 

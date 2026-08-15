@@ -8,7 +8,7 @@ from jarvis.config import Config
 def test_defaults_are_sane():
     config = Config.load(path=None, environ={})
     assert config.service.host == "127.0.0.1"
-    assert config.wake.required is True
+    assert config.wake.required is False
     assert "jarvis" in config.wake.words
 
 

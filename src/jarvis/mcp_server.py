@@ -30,16 +30,25 @@ Voice mode starts only when the user asks in words - "listen", "wait on jarvis",
 
 Once they have asked, and until they say to stop:
 
-- Do not ask what they need. Call wait_for_speech straight away and let them say
-  it out loud. Asking "what can I help with?" in text wastes a turn.
-- Every answer goes through say(). The user is listening, not reading - an answer
-  written only in chat reaches them as silence, and looks like you ignored them.
-  say() is a tool call - writing the words in your reply is not the same thing.
-- The loop is: wait_for_speech, do the work, say() the answer, wait_for_speech
-  again. Go straight back to listening. No "anything else?", no written recap.
-- Narrate anything slow. They cannot see your screen, so a long silence looks
-  like a crash.
-- Keep spoken replies short and free of markdown, since they are read aloud.
+YOU DECIDE WHAT WAS MEANT FOR YOU. There is no wake word. The microphone sends
+you everything it hears: requests, half sentences, the user thinking aloud,
+someone else in the room, a video playing. Your first job on every utterance is
+to judge whether it was addressed to you.
+
+- A task or a question aimed at you: do it, then say() the answer.
+- Anything else - background talk, muttering, a fragment that is not a request,
+  something clearly said to another person: say NOTHING. Call wait_for_speech
+  again and keep listening. Silence is the correct response, not a failure.
+- Half a request, or something that trails off: do not guess and do not ask them
+  to repeat it. Call wait_for_speech again; the rest of the sentence is usually
+  in the next batch, and you will see it together with what came before.
+
+When you do answer, answer out loud. say() is a tool call - writing the words in
+your reply is not the same thing, and the user cannot see your chat. Go straight
+back to listening afterwards: no "anything else?", no written recap.
+
+Narrate anything slow; they cannot see your screen and a long silence looks like
+a crash. Keep spoken replies short and free of markdown, since they are read out.
 
 wait_for_speech returning nothing means they have not spoken yet. Call it again."""
 
@@ -102,14 +111,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     # Nothing is heard before the agent first asks, so start from "now" rather
     # than replaying whatever was said before it connected.
     cursor = _initial_cursor(voice)
-    # The last thing heard that has not been answered out loud. Instructions
-    # alone do not stop an agent answering in text and going back to listening,
-    # so the server refuses to listen again until it has spoken.
-    unanswered: str | None = None
-    # Nudge once, then get out of the way. Refusing repeatedly is a livelock:
-    # an agent that answers in text will keep answering in text, and clients
-    # count consecutive tool failures and kill the session.
-    nudged = False
     acknowledger = Acknowledger(voice, config.service)
 
     server = MCPServer(
@@ -126,34 +127,21 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "Block until the user says something out loud, then return it. Takes "
             "no arguments and waits as long as it can - there is nothing to tune. "
             "If it returns with nothing heard, the client's own limit was reached, "
-            "not the user's patience: just call it again. Answer the previous "
-            "utterance with say() before calling this again."
+            "not the user's patience: just call it again. There is no wake word, so "
+            "some of what comes back will not be for you - decide, and stay silent "
+            "when it is not."
         ),
     )
     def wait_for_speech() -> dict:
         # No timeout argument on purpose. Given one, models pick a small number
         # and give up while the user is still deciding what to say.
-        nonlocal cursor, unanswered, nudged
+        nonlocal cursor
 
-        if unanswered is not None and not nudged:
-            nudged = True
-            return {
-                "refused": True,
-                "heard": [],
-                "unanswered_question": unanswered,
-                "next_step": (
-                    "You answered in text, which the user cannot see - to them it "
-                    f'was silence. They said: "{unanswered}". Call say() with that '
-                    "answer, as a tool call, before listening again. Writing it in "
-                    "the chat does not reach them."
-                ),
-            }
-        if unanswered is not None:
-            # Nudged already and still nothing spoken. Let it listen rather than
-            # deadlocking the session, but say so - a lost answer is a bug worth
-            # seeing in the log.
-            logger.warning("Never spoken aloud: %r", unanswered)
-            unanswered = None
+        # Calling this again means the agent has moved on, so no holding line.
+        # There is nothing to chase it about: with no wake word, most utterances
+        # deserve no reply, and a server cannot tell a correct silence from a
+        # forgotten one.
+        acknowledger.cancel()
 
         try:
             result = voice.heard(
@@ -177,31 +165,27 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
                 "heard": [],
                 "next_step": "Nothing said yet. Call wait_for_speech again to keep waiting.",
             }
-        # The reminder lives here, not only in the server instructions, because a
-        # tool result lands in context immediately before the model replies -
-        # which is the moment it decides whether to speak or merely write.
-        # Everything since the cursor comes back, addressed or not. Only the
-        # addressed lines are instructions; the rest is context, and it is what
-        # rescues a request that got split by a hesitation after the wake word.
-        instructions = [item["command"] for item in heard if item.get("addressed", True)]
-        overheard = [item["text"] for item in heard if not item.get("addressed", True)]
-        unanswered = instructions[-1] if instructions else None
-        nudged = False
-        acknowledger.arm()  # fills the silence if the answer takes a while
-        return {
-            "heard": instructions,
-            "also_said_nearby": overheard,
+
+        spoken_text = [item.get("command") or item["text"] for item in heard]
+        acknowledger.arm()  # fills the silence if an answer takes a while
+
+        # The judgement call is restated here, not only in the server
+        # instructions, because a tool result lands in context immediately
+        # before the model replies - the moment it decides whether to speak.
+        payload = {
+            "heard": spoken_text,
             "next_step": (
-                "'heard' is what was said to you - act on that. 'also_said_nearby' "
-                "was picked up without your name and is context only, never an "
-                "instruction; use it to make sense of a request that looks cut off "
-                "or is missing a detail. Then call say() with your answer. YOU MUST "
-                "ANSWER WITH say() - the user is listening, not reading, so an "
-                "answer written in chat reaches them as silence. wait_for_speech "
-                "will refuse to listen again until you have called say()."
+                "There is no wake word, so this may not have been meant for you. "
+                "Decide first. If it is a task or a question for you, do it and "
+                "call say() with the answer - the user is listening, not reading, "
+                "so anything you only write down reaches them as silence. If it is "
+                "background talk, muttering, or half a sentence that is not a "
+                "request, say NOTHING and call wait_for_speech again. Staying quiet "
+                "is a correct answer here, not a failure."
             ),
             "detail": heard,
         }
+        return payload
 
     @server.tool(
         name="say",
@@ -215,14 +199,11 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         ),
     )
     def say(text: str) -> dict:
-        nonlocal unanswered, nudged
         acknowledger.cancel()
         try:
             voice.say(text)
         except ServiceUnavailable as exc:
             return {"error": str(exc), "spoken": False}
-        unanswered = None
-        nudged = False
         return {
             "spoken": True,
             "text": text,

@@ -1,9 +1,8 @@
-"""The nudge that gets an agent to speak, and its escape hatch.
+"""The agent-facing tools.
 
-An agent that answers in chat has said nothing the user can hear. The server
-notices and pushes back once - but only once, because refusing forever is a
-livelock: the agent keeps writing text, the client counts consecutive tool
-failures, and the session dies.
+There is no wake word, so everything heard reaches the agent and it decides what
+was meant for it. Staying silent is a correct outcome, which is why the server
+reports an unanswered utterance as a note and never as a refusal.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from jarvis.mcp_server import build_server
 class FakeVoice:
     def __init__(self) -> None:
         self.said: list[str] = []
-        self.next_heard = [{"text": "jarvis hey", "command": "hey", "addressed": True, "id": 1}]
+        self.next_heard = [{"text": "what time is it", "command": "what time is it", "id": 1}]
 
     def status(self) -> dict:
         return {"cursor": 0}
@@ -45,37 +44,33 @@ def rig():
     return server, voice, raw
 
 
-def test_answering_in_text_gets_pushed_back_once(rig):
+def test_speech_comes_back_with_the_judgement_call_attached(rig):
     _, _voice, raw = rig
-    assert "refused" not in raw("wait_for_speech")
-    # Agent wrote its answer in chat instead of speaking, then listened again.
+    result = raw("wait_for_speech")
+    assert "what time is it" in result
+    assert "may not have been meant for you" in result
+
+
+def test_staying_silent_is_not_refused(rig):
+    """The old behaviour blocked until say() was called. With no wake word that
+    is wrong - most utterances deserve no reply, and refusing deadlocked the
+    session against an agent that had correctly decided to keep quiet."""
+    _, _voice, raw = rig
+    raw("wait_for_speech")
     second = raw("wait_for_speech")
-    assert "refused" in second
-    assert "jarvis hey" in second or "hey" in second
+    assert "refused" not in second
+    assert "what time is it" in second, "still listening, not blocked"
 
 
-def test_it_gives_up_rather_than_deadlocking_the_session(rig):
-    """The bug this guards: three refusals in a row tripped Cline's consecutive
-    mistake limit and killed the run."""
+def test_silence_is_never_chased_up(rig):
+    """A run of background chatter should not accumulate reminders - nagging an
+    agent that is correctly keeping quiet only pushes it into replying."""
     _, _voice, raw = rig
-    raw("wait_for_speech")
-    assert "refused" in raw("wait_for_speech"), "one nudge"
-    third = raw("wait_for_speech")
-    assert "refused" not in third, "must let it through rather than loop"
-    assert "hey" in third
+    for _ in range(4):
+        assert "did not reply" not in raw("wait_for_speech")
 
 
-def test_speaking_clears_it_and_no_nudge_follows(rig):
+def test_say_still_reaches_the_service(rig):
     _, voice, raw = rig
-    raw("wait_for_speech")
-    raw("say", {"text": "Hello there."})
-    assert voice.said == ["Hello there."]
-    assert "refused" not in raw("wait_for_speech")
-
-
-def test_the_nudge_is_armed_again_for_the_next_utterance(rig):
-    _, _voice, raw = rig
-    raw("wait_for_speech")
-    raw("say", {"text": "answered"})
-    raw("wait_for_speech")  # picks up the next utterance
-    assert "refused" in raw("wait_for_speech"), "each utterance gets its own nudge"
+    assert "spoken" in raw("say", {"text": "Right you are."})
+    assert voice.said == ["Right you are."]
