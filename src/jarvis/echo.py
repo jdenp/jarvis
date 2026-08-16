@@ -1,11 +1,8 @@
 """Second line of defence against JARVIS transcribing its own voice.
 
-`Microphone` drops audio recorded while JARVIS was speaking, which handles the
-common case. This catches what slips past - a long reverb tail, or a phrase the
-listener split across the guard window.
-
-Hearing yourself through a microphone is lossy and usually clips the start, so
-matching is on containment or similarity rather than equality.
+`Microphone` drops audio recorded while speaking; this catches what slips past.
+Hearing yourself is lossy and clips the start, so matching is on containment or
+similarity rather than equality.
 """
 
 from __future__ import annotations

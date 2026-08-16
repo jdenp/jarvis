@@ -1,8 +1,7 @@
 """The agent-facing tools.
 
-There is no wake word, so everything heard reaches the agent and it decides what
-was meant for it. Staying silent is a correct outcome, which is why the server
-reports an unanswered utterance as a note and never as a refusal.
+Staying silent is a correct outcome, so an unanswered utterance is reported as a
+note and never as a refusal.
 """
 
 from __future__ import annotations
@@ -49,7 +48,7 @@ def test_speech_comes_back_with_the_judgement_call_attached(rig):
     _, _voice, raw = rig
     result = raw("wait_for_speech")
     assert "what time is it" in result
-    assert "Meant for you?" in result
+    assert "MEANT FOR YOU?" in result
     assert "must be say()" in result, "the action, not just the nuance"
 
 
@@ -144,10 +143,8 @@ def test_the_idle_counter_resets_once_something_is_said(rig):
 
 
 def test_backlog_from_before_the_first_listen_is_skipped():
-    """The MCP server is spawned when the client launches, which can be long
-    before anyone asks for voice. Whatever was said in between was said to
-    nobody, and replaying it makes "jarvis" answer a conversation that is over.
-    """
+    """Spawned at client launch, long before anyone asks for voice - replaying
+    what was said in between makes "jarvis" answer a finished conversation."""
     asked_from: list[int] = []
 
     class DriftingVoice(FakeVoice):
@@ -199,9 +196,8 @@ def test_something_just_said_is_not_flagged(rig):
 
 
 def test_speaking_does_not_end_the_conversation(rig):
-    """Ending the turn after say() looks, from the other side, like walking off
-    mid sentence."""
+    """Ending the turn after say() looks like walking off mid sentence."""
     _, _voice, raw = rig
     result = raw("say", {"text": "Half past two, sir."})
     assert "wait_for_speech" in result
-    assert "do not finish the task" in result
+    assert "do NOT finish the task" in result

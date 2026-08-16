@@ -1,8 +1,4 @@
-"""Logging.
-
-The console stays readable - bare messages, no timestamps - while the rotating
-file keeps the detail worth having after the fact.
-"""
+"""Logging: bare messages on the console, full detail in a rotating file."""
 
 from __future__ import annotations
 

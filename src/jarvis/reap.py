@@ -1,13 +1,8 @@
 """Cleaning up MCP servers that outlived their client.
 
-An MCP server exits by itself when the client closes the pipe, which is the
-normal case. It does not when the client is *killed*: the launch chain is
-cmd -> uv -> jarvis -> python, and killing the top leaves the rest holding the
-pipe open, so the bottom never sees EOF. Do that a few times and a dozen idle
-copies are sitting there holding the virtualenv open.
-
-Two defences. Each server watches whether its own parent is still alive, and
-the service sweeps up anything already stranded when it starts.
+A killed client never closes the pipe: the chain is cmd -> uv -> jarvis ->
+python, so the bottom never sees EOF and idle copies pile up. Each server
+watches its own parent, and the service sweeps up strays when it starts.
 """
 
 from __future__ import annotations
@@ -35,8 +30,7 @@ def _processes():
 def looks_like_mcp_server(command_line: list[str] | None) -> bool:
     """Whether a command line is one of our MCP servers.
 
-    Both markers, in order, so `jarvis serve` and unrelated MCP servers are
-    left alone.
+    Both markers in order, so `jarvis serve` and other MCP servers are spared.
     """
     if not command_line:
         return False
@@ -81,9 +75,7 @@ def reap_orphans(exclude_pid: int | None = None) -> int:
 def exit_when_orphaned(interval: float = WATCH_INTERVAL) -> None:
     """Exit this process once whoever launched it has gone.
 
-    Started by `jarvis mcp`. os._exit rather than sys.exit because this runs on
-    a daemon thread while the server blocks on stdio, where an exception would
-    go nowhere.
+    os._exit because this runs on a daemon thread, where sys.exit goes nowhere.
     """
     psutil = _processes()
     if psutil is None:

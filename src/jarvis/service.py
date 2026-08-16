@@ -1,11 +1,7 @@
 """The voice service.
 
-One process owns the microphone, Whisper and the speakers, and exposes them
-over loopback HTTP. The CLI and the MCP server are thin clients, so `jarvis say`
-from an agent's terminal mutes the same microphone that is doing the listening -
-which is the whole reason this is a daemon and not three separate programs.
-
-No LLM is involved. The agent on the other end is the brain.
+One process owns the microphone, Whisper and the speakers, and exposes them over
+loopback HTTP. The CLI and the MCP server are thin clients of it.
 """
 
 from __future__ import annotations
@@ -88,12 +84,7 @@ class VoiceService:
     # ------------------------------------------------------------------ speak
 
     def say(self, text: str) -> None:
-        """Queue speech and return - the caller is not held for the playback.
-
-        Speaking is handled on the TTS worker thread, so a forty word reply does
-        not block the agent for eight seconds. Muting is released by whoever
-        started it, once the queue actually drains.
-        """
+        """Queue speech and return, so a long reply does not block the agent."""
         text = text.strip()
         if not text or self.speech is None:
             return
@@ -113,9 +104,8 @@ class VoiceService:
     def _unmute_when_done(self) -> None:
         """Release the microphone once everything queued has been spoken.
 
-        On its own thread because say() returns immediately now. Counted rather
-        than flagged: two replies can overlap, and the first one finishing must
-        not unmute while the second is still playing.
+        Counted rather than flagged - two replies can overlap, and the first to
+        finish must not unmute while the second is still playing.
         """
         assert self.speech is not None
         self.speech.wait(timeout=180)
@@ -182,16 +172,14 @@ class _Handler(BaseHTTPRequestHandler):
         if not items and wait:
             items = transcript.wait_for(since, timeout=wait)
 
-        # Give a hesitating speaker a moment to finish. "Jarvis" then a pause is
-        # two phrases, and returning after the first one acts on nothing.
+        # Give a hesitating speaker a moment to finish, so a pause part way
+        # through a request does not return half of it.
         if items and settle:
             time.sleep(settle)
 
         delivered = transcript.since(since) if items else []
-        # Only advance past what actually went out. Reporting the transcript's
-        # own cursor on a timeout silently swallows everything unaddressed that
-        # arrived during the wait - which is exactly the context the caller
-        # needs to make sense of the next instruction.
+        # Only advance past what actually went out - reporting the
+        # transcript's own cursor swallows anything that arrived during the wait.
         self._json(
             200,
             {
@@ -223,8 +211,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except GONE_AWAY:
-            # Long polls are held open for a minute at a time, so a client that
-            # gets killed while waiting is routine, not an error.
+            # Routine: /heard is held open for a minute at a time.
             logger.debug("Client hung up before the reply was written.")
 
 
@@ -234,11 +221,7 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
     def handle_error(self, request, client_address) -> None:
-        """Swallow disconnects instead of printing a traceback for each one.
-
-        The default prints the whole stack to stderr, which in the service's
-        own window looks alarming and means nothing.
-        """
+        """Swallow disconnects rather than printing a stack trace for each."""
         error = sys.exc_info()[1]
         if isinstance(error, GONE_AWAY):
             logger.debug("Client %s went away mid request.", client_address)

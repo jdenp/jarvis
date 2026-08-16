@@ -21,11 +21,12 @@ Voice mode ends when they say so, or when they go back to typing.
 wait_for_speech()  ->  do the work  ->  say(answer)  ->  wait_for_speech()
 ```
 
-Straight back to listening after speaking. No "anything else?", no written recap.
+**ALWAYS straight back to `wait_for_speech` after speaking.** No "anything else?", no
+written recap.
 
-**Voice is one long conversation, not a task per sentence.** Do not finish or complete
-the task after a reply - that hangs up on someone still sitting at the microphone, and
-they get no warning it happened. The loop ends when they end it.
+**Voice is ONE LONG CONVERSATION, not a task per sentence.** NEVER finish or complete the
+task after a reply - that hangs up on someone still sitting at the microphone, with no
+warning it happened. The loop ends when THEY end it.
 
 An utterance may come back with `said_seconds_ago`, and one carrying a `stale` note was
 spoken while nobody was listening - a leftover from before, not a live request. Unless it
@@ -33,11 +34,18 @@ plainly still needs doing, stay quiet and listen again.
 
 ## The three rules
 
-**1. Answering is calling `say()`.** Working out the answer is not answering. Writing it
-in your reply is not answering - they cannot see your chat. Handing it back as a
-completion result is not answering - completing is not speaking. The moment you know what
-to tell them, the next tool call is `say()`: not `wait_for_speech`, not one more search,
-not finishing the task. From the other side, all three are identical to being ignored.
+**1. ANSWERING IS CALLING `say()`. NOTHING ELSE REACHES THEM!!**
+
+They are LISTENING, NOT READING. They cannot see your chat, your thinking or your task
+result. Text you write goes NOWHERE.
+
+**DECIDING TO SAY IT IS NOT SAYING IT!** If you catch yourself thinking "I should reply
+via `say()`" - STOP. Do not then write the reply out. EMIT THE TOOL CALL. Writing the
+words instead of calling `say()` is the single most common failure with these tools, and
+from the other side it is IDENTICAL TO BEING IGNORED.
+
+The moment you know what to tell them, your very next tool call is `say()`: not prose,
+not `wait_for_speech`, not one more search, NOT COMPLETION.
 
 **2. Silence is a valid reply.** There is no wake word, so you hear everything: other
 people, videos, thinking aloud. Act only on what was aimed at you. For anything else say

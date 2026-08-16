@@ -1,9 +1,7 @@
 """Speech to text.
 
-``whisper`` is the default and runs faster-whisper on this machine - nothing
-leaves it. ``google`` is the free web endpoint that ships with
-speech_recognition, which needs no model download but uploads your raw
-microphone audio to Google. It is opt in, and says so loudly when selected.
+``whisper`` is the default and runs on this machine. ``google`` uploads your raw
+microphone audio, so it is opt in and warns loudly when selected.
 """
 
 from __future__ import annotations
@@ -37,10 +35,7 @@ def add_bundled_cuda_to_path() -> list[str]:
     """Let ctranslate2 find CUDA libraries installed as pip packages.
 
     `nvidia-cublas-cu12` and friends drop their DLLs in site-packages, which
-    Windows does not search. Without this ctranslate2 reports CUDA as missing
-    even though it is sitting right there, and everything falls back to CPU.
-
-    Returns the directories added, for logging. Safe and pointless elsewhere.
+    Windows does not search, so CUDA reads as missing. Windows only.
     """
     if not hasattr(os, "add_dll_directory"):  # not Windows
         return []
@@ -55,20 +50,17 @@ def add_bundled_cuda_to_path() -> list[str]:
                 added.append(str(path))
 
     if added:
-        # PATH as well as add_dll_directory. ctranslate2 loads cublas itself,
-        # with a plain LoadLibrary that does not consult the directories added
-        # above, so without this it still reports CUDA as missing.
+        # PATH too - ctranslate2 loads cublas with a plain LoadLibrary, which
+        # does not consult the directories added above.
         os.environ["PATH"] = os.pathsep.join([*added, os.environ.get("PATH", "")])
         logger.debug("Added %d bundled CUDA directories to the DLL path.", len(added))
     return added
 
 
 class WhisperSTT:
-    """Local transcription with faster-whisper.
+    """Local transcription with faster-whisper, loading the model once.
 
-    The model is loaded once and reused. speech_recognition's own
-    ``recognize_faster_whisper`` builds a fresh ``WhisperModel`` on every call,
-    which means reloading weights from disk for each utterance.
+    speech_recognition's ``recognize_faster_whisper`` rebuilds it per call.
     """
 
     is_local = True
@@ -94,10 +86,8 @@ class WhisperSTT:
     def _load(self, whisper_model_cls):
         """Load the model, proving each device works before accepting it.
 
-        Constructing a WhisperModel on a broken CUDA install succeeds - the
-        failure only appears on the first inference, because transcribe()
-        returns a generator and does no work until it is consumed. So warm up
-        for real here rather than discovering it one utterance at a time.
+        Constructing a WhisperModel on a broken CUDA install succeeds; the
+        failure only lands on the first inference.
         """
         failures = []
         for device, compute in self._candidates():

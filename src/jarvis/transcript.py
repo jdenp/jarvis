@@ -1,9 +1,7 @@
 """The record of what JARVIS has heard.
 
-Append only, with monotonic ids so a client can say "everything after 7" and
-never miss or repeat an utterance across reconnects. ``wait_for`` blocks until
-something arrives, which is what makes an agent integration an interrupt rather
-than a polling loop.
+Append only, with monotonic ids so a client holding a cursor never misses or
+repeats an utterance across a reconnect. ``wait_for`` blocks until one arrives.
 """
 
 from __future__ import annotations
@@ -20,9 +18,7 @@ from pathlib import Path
 class Utterance:
     """One thing the user said, verbatim.
 
-    Everything heard is recorded and passed on. There is no wake word and no
-    filtering - the agent decides what was meant for it, which it is better
-    placed to judge than a string match.
+    No wake word and no filtering - the agent decides what was meant for it.
     """
 
     id: int

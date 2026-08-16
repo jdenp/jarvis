@@ -1,12 +1,8 @@
 """Runtime configuration.
 
 Precedence, lowest to highest: dataclass defaults, the config file, ``JARVIS_*``
-environment variables, command line flags.
-
-The defaults here are the single source of truth. ``config/defaults.json`` is
-generated from them by ``jarvis config --defaults``, and a test fails if the two
-drift - a hand-maintained example file goes stale the first time anyone changes
-a default, which it repeatedly did.
+environment variables, command line flags. The defaults here are the source of
+truth; ``config/defaults.json`` is generated from them and a test catches drift.
 """
 
 from __future__ import annotations
@@ -31,33 +27,22 @@ class AudioConfig:
     """Microphone capture settings."""
 
     device_index: int | None = None
-    # Hard cap on one phrase, set high enough not to be a factor. This does not
-    # add any delay - a phrase still ends on silence - it only stops a stuck
-    # stream recording forever. Hitting it truncates you mid sentence, so there
-    # is no reason to keep it tight.
+    # Hard cap on one phrase, only to stop a stuck stream recording forever.
+    # It adds no delay - a phrase still ends on silence - and hitting it cuts you off.
     phrase_time_limit: float = 60.0
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
-    # Floor under the calibrated threshold, because a silent room calibrates to
-    # single digits and then hears its own speakers. Kept low: the echo guard in
-    # microphone.py does the real work of not transcribing ourselves, so this
-    # only has to catch the pathological case. Raise it if JARVIS starts hearing
-    # itself, lower it if you have to speak up to be heard.
+    # Floor under calibration - a silent room calibrates low enough to hear its
+    # own speakers. Raise it if JARVIS hears itself, lower it if you must shout.
     min_energy_threshold: float = 55.0
-    # How long a silence ends a phrase. Deliberately generous: pausing to think
-    # mid sentence should not split one request into two. This is the main cost
-    # in the delay before an agent sees what you said, and the main thing to
-    # change if you keep getting cut off.
+    # Silence that ends a phrase. Generous on purpose, and the main cost in the
+    # delay before an agent sees you spoke. Raise it if you keep getting cut off.
     pause_threshold: float = 1.7
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
-    # Half duplex by default: the microphone is muted while JARVIS speaks, so it
-    # does not transcribe its own voice. Turning this on keeps listening through
-    # a reply, which allows barging in - but with one microphone and no echo
-    # cancellation the only thing standing between you and JARVIS answering
-    # itself is the text comparison in echo.py. Speakers rather than headphones
-    # will almost certainly need it left off.
+    # Half duplex by default. On, it allows barging in, but without echo
+    # cancellation only echo.py stops JARVIS answering itself. Headphones only.
     listen_while_speaking: bool = False
 
 
@@ -68,11 +53,8 @@ class SttConfig:
     backend: str = "whisper"  # whisper (local) | google (uploads your audio)
     language: str = "en-GB"
     whisper_model: str = "base.en"
-    # cpu by default. CUDA is about 0.2s quicker per utterance and costs ~340MB
-    # of VRAM, nearly all of it the CUDA context rather than the model. On a
-    # machine also running a local LLM that is a bad trade: the delay is
-    # dominated by audio.pause_threshold, not by transcription. Set "auto" or
-    # "cuda" if the GPU is free, and install the extra: uv sync --extra cuda
+    # CUDA is far quicker on long utterances but costs ~340MB of VRAM. Set
+    # "auto" if the GPU is free, and install it: uv sync --extra cuda
     whisper_device: str = "cpu"  # cpu | cuda | auto
     whisper_compute_type: str = "default"
     whisper_beam_size: int = 1
@@ -85,9 +67,8 @@ class TtsConfig:
 
     engine: str = "auto"  # auto (local first) | sapi | edge | none
     voice: str = "en-GB-RyanNeural"  # edge only
-    # Preference order, first installed wins. George is British male but ships
-    # as a OneCore voice, which SAPI only sees once it is registered - see
-    # scripts/expose-onecore-voices.ps1.
+    # Preference order, first installed wins. George needs registering first -
+    # see scripts/expose-onecore-voices.ps1.
     sapi_voice: str = "George, Hazel"
     rate: int = 210
     volume: float = 1.0
@@ -95,11 +76,7 @@ class TtsConfig:
 
 @dataclass(frozen=True)
 class ServiceConfig:
-    """The voice service an agent connects to.
-
-    One process owns the microphone, Whisper and the speakers; the CLI and the
-    MCP server are thin clients over loopback HTTP.
-    """
+    """The voice service an agent connects to."""
 
     host: str = "127.0.0.1"
     port: int = 8770
@@ -107,21 +84,17 @@ class ServiceConfig:
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
-    # Held after a phrase arrives, in case another follows it. Small, because
-    # audio.pause_threshold already absorbs hesitation inside a phrase - this
-    # only catches a speaker who stopped completely and then carried on.
+    # Held after a phrase arrives, in case another follows. Small, because
+    # audio.pause_threshold already absorbs hesitation inside a phrase.
     settle_seconds: float = 0.8
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0
-    # An utterance older than this is flagged as backlog rather than a live
-    # request - an MCP server outlives a single conversation, so what is queued
-    # when a new one starts may be minutes old. 0 disables the flag.
+    # Past this, an utterance is flagged as backlog rather than a live
+    # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
-    # Some carry the "sir" and some do not, so rotating through them lands the
-    # inflection as a habit rather than a tic. The order is shuffled per process
-    # - a fixed list always opened with the same line, and a new MCP server is
-    # started often enough that it became the only one you ever heard.
+    # Some carry the "sir" and some do not, so rotating lands the inflection
+    # as a habit rather than a tic. Shuffled per process, see Acknowledger.
     acknowledgements: tuple[str, ...] = (
         "Let me have a look.",
         "One moment, sir.",
@@ -164,8 +137,7 @@ class Config:
     def load(cls, path: Path | None = None, environ: dict[str, str] | None = None) -> Config:
         """Build a Config from a config file and the environment.
 
-        With no path, the first of ``CONFIG_FILES`` that exists is used. JSON is
-        the documented format; TOML still works for anyone who had one.
+        With no path, the first of ``CONFIG_FILES`` that exists is used.
         """
         environ = os.environ if environ is None else environ
         found = path if path is not None else find_config_file()
@@ -178,8 +150,7 @@ class Config:
         return _apply(config, _env_overrides(environ))
 
 
-# Searched in order. config/ first so everything to do with configuration lives
-# in one place; the root files are what earlier versions used.
+# Searched in order; the root files are what earlier versions used.
 CONFIG_FILES = (
     "config/jarvis.json",
     "config/jarvis.toml",
@@ -243,9 +214,7 @@ def _apply(config: Any, data: dict[str, Any]) -> Any:
     known = {f.name: f for f in fields(config)}
     updates: dict[str, Any] = {}
     for key, value in data.items():
-        # JSON has no comments, so anything underscore-prefixed is treated as a
-        # note. Without this the only way to explain a setting is out of band,
-        # and settings whose reasoning is not written down get changed back.
+        # JSON has no comments, so an underscore-prefixed key is a note.
         if key.startswith("_"):
             continue
         spec = known.get(key)

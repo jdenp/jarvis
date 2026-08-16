@@ -1,8 +1,6 @@
 """Command line entry point.
 
-JARVIS is ears and a mouth. Whatever agent is on the other end is the brain, so
-`jarvis` with no arguments runs the voice service and everything else is a thin
-client of it.
+`jarvis` with no arguments runs the voice service; everything else is a client.
 """
 
 from __future__ import annotations
@@ -200,11 +198,10 @@ def run_say(config: Config, args: argparse.Namespace) -> int:
 
 
 def run_next(config: Config, args: argparse.Namespace) -> int:
-    """Block until something is said. This is the interrupt an agent waits on.
+    """Block until something is said.
 
-    The service caps a single long poll so its threads cannot be held forever,
-    so waiting indefinitely means re-issuing the poll rather than asking for an
-    unbounded one. Still no busy looping - each poll sleeps until spoken to.
+    The service caps a single poll, so waiting indefinitely means re-issuing
+    it. Still no busy looping - each poll sleeps until spoken to.
     """
     slice_seconds = config.service.max_wait_seconds
     remaining = args.wait  # None means wait indefinitely

@@ -1,10 +1,8 @@
 """Microphone capture.
 
-Capture runs on a background thread and drops into a queue, so speech is not
-lost while the brain is thinking or the speaker is talking. A single Recognizer
-and a single Microphone are held open for the whole session - reopening the
-device per utterance costs a few hundred milliseconds and loses the calibrated
-energy threshold.
+Capture runs on a background thread into a queue, so nothing is lost while the
+agent is thinking. One Recognizer and one Microphone stay open for the session -
+reopening per utterance is slow and throws away the calibration.
 """
 
 from __future__ import annotations
@@ -103,10 +101,8 @@ class Microphone:
         """Background thread callback. Drops audio while muted or backed up."""
         if self._muted.is_set():
             return
-        # A phrase is only delivered once it ends, so a flag checked here says
-        # nothing about when the audio was recorded. Work back to the start of
-        # the phrase and drop anything that overlapped JARVIS speaking -
-        # otherwise its own voice arrives just after unmute and is transcribed.
+        # A phrase only arrives once it ends, so the mute flag says nothing
+        # about when it was recorded. Work back and drop anything that overlaps.
         started_at = time.monotonic() - phrase_duration(audio)
         if started_at < self._deaf_until:
             logger.debug("Dropped a phrase that overlapped JARVIS speaking.")
@@ -124,15 +120,13 @@ class Microphone:
             return None
 
     def mute(self) -> None:
-        """Stop queueing audio. Used while JARVIS is speaking, so it does not
-        transcribe its own voice."""
+        """Stop queueing audio, so JARVIS does not transcribe its own voice."""
         self._muted.set()
 
     def unmute(self) -> None:
         """Resume queueing, discarding anything captured while JARVIS spoke.
 
-        The guard runs a little past the moment speech stopped, to cover the
-        output buffer draining and the room's echo tail.
+        The guard runs past the moment speech stopped, for the echo tail.
         """
         self._deaf_until = time.monotonic() + self.config.echo_guard_seconds
         self.drain()
@@ -171,8 +165,7 @@ class Microphone:
     def list_devices() -> list[tuple[int, str]]:
         """Return (index, name) for every device that can actually record.
 
-        speech_recognition lists outputs alongside inputs, so filter on the
-        input channel count - picking a speaker here fails at open time.
+        speech_recognition lists outputs too, and picking one fails at open.
         """
         import pyaudio
 

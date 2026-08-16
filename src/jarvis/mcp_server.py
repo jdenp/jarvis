@@ -1,13 +1,7 @@
 """MCP server, so an agent knows it has ears and a voice.
 
-``wait_for_speech`` blocks until the user says something, which is what makes
-this an interrupt rather than a polling loop - the agent asks once and the call
-returns the instant a sentence lands. ``check_for_speech`` is its non-blocking
-twin, for looking up mid task: nothing can preempt an agent, so being steered
-part way through only works if it chooses to look. ``say`` speaks a reply.
-
-This is a client of a running `jarvis serve`, not a second copy of it. Only one
-process may own the microphone, and the agent may start and stop this one freely.
+A client of a running `jarvis serve`, not a second copy - only one process may
+own the microphone. DESIGN.md has the reasoning behind the blocking read.
 """
 
 from __future__ import annotations
@@ -30,21 +24,28 @@ tools or start the service until asked. "jarvis" on its own means start listenin
 now - call wait_for_speech immediately, no text reply, nothing else first. So do
 "listen", "use voice", "talk to me". It ends when they say so or go back to typing.
 
-THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech.
-Straight back to listening after speaking. No "anything else?", no written recap.
-The loop ends when they end it. Do not finish or complete the task after a
-reply - voice is one long conversation, not a task per sentence, and completing
-it hangs up on someone still sitting at the microphone.
+THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech
+                                                          ^^^^^^^^^^^^^^^
+ALWAYS STRAIGHT BACK TO wait_for_speech! No "anything else?", no written recap.
+NEVER finish or complete the task after a reply - voice is ONE LONG CONVERSATION,
+not a task per sentence, and completing hangs up on someone still sitting at the
+microphone. The loop ends when THEY end it.
 
 THREE RULES:
 
-1. Answering is calling say(). Working out the answer is not answering; writing
-   it in your reply is not answering, they cannot see your chat. Finishing the
-   task with the answer as your result is not answering either - completing is
-   not speaking, and it hangs up the microphone on someone who is still there.
-   The moment you know what to tell them the next tool call is say() - not
-   wait_for_speech, not one more search, not completion. Say it when a tool
-   fails too: four failed searches then silence reads as a crash.
+1. ANSWERING IS CALLING say(). NOTHING ELSE REACHES THEM!!
+
+   They are LISTENING, NOT READING. They cannot see your chat, your thinking or
+   your task result. Text you write goes NOWHERE.
+
+   *** DECIDING TO SAY IT IS NOT SAYING IT! *** If you catch yourself thinking
+   "I should reply via say()" - STOP. Do not then write the reply out. EMIT THE
+   TOOL CALL. Writing the words instead of calling say() is the single most
+   common failure with these tools and is IDENTICAL TO IGNORING THEM.
+
+   The moment you know what to tell them, your very next tool call is say().
+   Not prose. Not wait_for_speech. Not one more search. NOT COMPLETION. Say it
+   when a tool fails too: four failed searches then silence reads as a crash.
 
 2. Silence is a valid reply. No wake word, so you hear everything - other people,
    videos, thinking aloud. Act only on what was aimed at you; for anything else
@@ -74,17 +75,15 @@ wait_for_speech returning nothing means they have not spoken yet. Call it again.
 class Acknowledger:
     """Speaks a holding line when an answer is taking a while.
 
-    Anything that needs a search or a slow model leaves several seconds of dead
-    air, which from the user's side is indistinguishable from a crash. This fills
-    it, and cancels itself the moment the real answer arrives - so a quick reply
-    never gets a redundant "one moment" in front of it.
+    Cancels itself the moment the real answer arrives, so a quick reply never
+    gets a redundant "one moment" in front of it.
     """
 
     def __init__(self, voice: VoiceClient, config: ServiceConfig) -> None:
         self._voice = voice
         self._after = config.acknowledge_after
-        # Shuffled, not in order: a new server process is spawned often enough
-        # that always starting at the first phrase made it the only one heard.
+        # Shuffled - a new process spawns often enough that a fixed order
+        # only ever played the first phrase.
         self._phrases = list(config.acknowledgements)
         random.shuffle(self._phrases)
         self._lock = threading.Lock()
@@ -131,9 +130,8 @@ QUESTION_OPENERS = (
 def probably_needs_work(text: str) -> bool:
     """Whether an utterance is likely to send the agent off doing something.
 
-    Used to decide whether to arm the holding line. "Okay", "thanks" and "yeah"
-    need no reply, and speaking "Working on it, sir" at them is worse than
-    saying nothing - it answers something that was not a request.
+    Gates the holding line: "Working on it, sir" at someone who only said
+    "thanks" answers something that was never a request.
     """
     words = text.strip().split()
     return len(words) >= 3 or text.strip().endswith("?")
@@ -153,10 +151,8 @@ def age_seconds(item: dict, now: datetime | None = None) -> float | None:
 def looks_like_a_question(text: str) -> bool:
     """Whether an utterance was plainly asking for an answer.
 
-    Used to decide whether going quiet was a mistake worth mentioning. Most
-    silence is correct - background talk, a fragment - but a question that got
-    no spoken reply is almost always the agent forgetting to say() it, so only
-    questions are worth chasing.
+    Only questions are chased up when no reply follows - most silence is
+    correct, so anything less clear-cut is left alone.
     """
     stripped = text.strip().lower()
     if not stripped:
@@ -175,16 +171,10 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
 
     config = config or Config.load()
     voice = client or VoiceClient(config.service)
-    # Nothing is heard before the agent first asks, so start from "now" rather
-    # than replaying whatever was said before it connected.
     cursor = _initial_cursor(voice)
-    # A question that got no spoken reply, so it can be raised once. Only
-    # questions: most silence is correct, and nagging an agent that is rightly
-    # keeping quiet just pushes it into answering things nobody asked.
+    # A question that got no spoken reply, raised once on the next call.
     unanswered_question: str | None = None
     quiet_calls = 0
-    # This process is spawned when the client starts, which can be a long time
-    # before anyone asks it to listen. See wait_for_speech.
     first_listen = True
     acknowledger = Acknowledger(voice, config.service)
 
@@ -213,16 +203,11 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         nonlocal cursor, unanswered_question, quiet_calls, first_listen
 
         # Calling this again means the agent has moved on, so no holding line.
-        # There is nothing to chase it about: with no wake word, most utterances
-        # deserve no reply, and a server cannot tell a correct silence from a
-        # forgotten one.
         acknowledger.cancel()
 
         # "Start listening" means from now, not from whenever the client
-        # happened to launch this process. Anything said in between was said to
-        # nobody. Only on the first call: after that a queued utterance is one
-        # spoken while the agent was busy, which is exactly what it must not
-        # miss.
+        # launched this process. First call only, or speech queued while the
+        # agent was busy would be skipped too.
         if first_listen:
             first_listen = False
             cursor = max(cursor, _initial_cursor(voice))
@@ -241,9 +226,8 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         heard = result.get("heard", [])
         cursor = result.get("cursor", cursor)
         if not heard:
-            # Identical empty results in a row look like a stuck loop to a client
-            # counting consecutive failures, so say how long has been spent and
-            # be explicit that this is the normal idle case rather than an error.
+            # Identical empty results in a row read as a stuck loop to a
+            # client counting consecutive failures, so make each one differ.
             quiet_calls += 1
             waited = int(quiet_calls * config.service.max_wait_seconds)
             return {
@@ -257,10 +241,8 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             }
         quiet_calls = 0
 
-        # Age travels with each utterance. Nothing is dropped for being old -
-        # the agent judges, as it does with everything else here - but "said
-        # twenty minutes ago" is the difference between a live request and a
-        # leftover, and it cannot be inferred from the text.
+        # Nothing is dropped for being old, but "said twenty minutes ago" is
+        # the difference between a request and a leftover, and is not in the text.
         now = datetime.now(UTC)
         newest_age = None
         for item in heard:
@@ -274,26 +256,26 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         last = spoken_text[-1]
         if looks_like_a_question(last):
             unanswered_question = last
-        # Only when there is plausibly work to do. Arming on "okay" or "thanks"
-        # produces a holding line for a reply that was never coming.
+        # Arming on "okay" produces a holding line for a reply never coming.
         if probably_needs_work(last):
             acknowledger.arm()
 
-        # The judgement call is restated here, not only in the server
-        # instructions, because a tool result lands in context immediately
-        # before the model replies - the moment it decides whether to speak.
+        # Restated here as well as in the instructions: a tool result lands
+        # in context at the moment the model decides whether to speak.
         payload = {
             "heard": spoken_text,
             "next_step": (
-                "Meant for you? Do the work, then say() the answer. Answering IS "
-                "calling say() - there is no other way to reach them, and the next "
-                "tool you call must be say(), not wait_for_speech. Do not finish "
-                "the task instead: putting the answer in a completion result "
-                "leaves it unspoken and ends the conversation while they are still "
-                "listening. The task is not over until they end it. "
-                "Not meant for you (background talk, a fragment that is not a "
+                "MEANT FOR YOU? Do the work, then CALL say() WITH THE ANSWER. "
+                "say() IS THE ONLY THING THEY CAN HEAR. They are listening, not "
+                "reading - text you write reaches NOBODY, and neither does a task "
+                "result. Your very next tool call must be say(): NOT "
+                "wait_for_speech, NOT completion, NOT prose. DECIDING to reply is "
+                "not replying - if you are about to write the words out, CALL "
+                "say() WITH THEM INSTEAD! Then call wait_for_speech again; never "
+                "end the task. "
+                "NOT MEANT FOR YOU (background talk, a fragment that is not a "
                 "request)? Stay silent and call wait_for_speech again. "
-                "Cut off mid sentence? Call wait_for_speech again; the rest is "
+                "CUT OFF MID SENTENCE? Call wait_for_speech again; the rest is "
                 "already queued."
             ),
             "detail": heard,
@@ -324,8 +306,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         ),
     )
     def check_for_speech() -> dict:
-        # The non-blocking twin of wait_for_speech. Nothing can preempt an agent
-        # mid-turn, so steering only works if the agent chooses to look.
         nonlocal cursor
         try:
             result = voice.heard(since=cursor, wait=0, settle=0)
@@ -371,7 +351,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "spoken": True,
             "text": text,
             "next_step": (
-                "Spoken. Call wait_for_speech now - do not finish the task. They "
+                "Spoken. NOW CALL wait_for_speech - do NOT finish the task! They "
                 "are still listening, and their reply reaches you no other way."
             ),
         }
@@ -402,9 +382,8 @@ def main(config: Config | None = None) -> int:
     """Run over stdio, which is how Cline and friends launch an MCP server."""
     from .reap import exit_when_orphaned
 
-    # Closing the pipe is the normal way this ends, and it is handled for us.
-    # This covers the client being killed instead, where the launch chain keeps
-    # the pipe open and we would otherwise sit here forever.
+    # Covers the client being killed rather than closing the pipe, where the
+    # launch chain holds the pipe open and we would sit here forever.
     exit_when_orphaned()
     build_server(config).run(transport="stdio")
     return 0

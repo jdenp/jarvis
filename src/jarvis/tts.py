@@ -1,12 +1,8 @@
 """Text to speech.
 
-Backends are constructed on the worker thread that uses them - both SAPI and
-pygame hold thread affine resources, so building them on the main thread and
-calling them from the worker is a reliable way to get silence or a hang.
-
-``sapi`` is the offline Windows voice and is what ``auto`` picks. ``edge`` has a
-far better neural British voice, but it is Microsoft's cloud service - every
-reply is sent to them - so it has to be asked for by name.
+Backends are built on the worker thread that uses them - both SAPI and pygame
+hold thread affine resources. ``auto`` picks ``sapi``, the offline Windows
+voice; ``edge`` sounds better but sends every reply to Microsoft.
 """
 
 from __future__ import annotations
@@ -56,11 +52,8 @@ class NullSpeaker:
 class SapiSpeaker:
     """Offline Windows speech, driving SAPI directly.
 
-    Deliberately not pyttsx3. Its SAPI driver calls Speak asynchronously and
-    waits on COM events delivered through a message pump. Opening the microphone
-    initialises COM elsewhere in the process, after which those events never
-    arrive: Speak returns instantly, nothing is heard, and no error is raised.
-    A synchronous Speak needs no event sink and no pump, so it is unaffected.
+    Not pyttsx3: it waits on COM events through a message pump, and those stop
+    arriving once the microphone initialises COM. Speak then returns silently.
     """
 
     is_local = True
@@ -80,9 +73,8 @@ class SapiSpeaker:
     def _find_voice(self, wanted: str):
         """First installed voice from a comma separated preference list.
 
-        A list rather than one name because the voice you want is often not
-        installed, and falling through to the system default can land you on
-        the wrong accent entirely.
+        A list, because falling through to the system default lands on the
+        wrong accent entirely.
         """
         preferences = [part.strip().lower() for part in wanted.split(",") if part.strip()]
         if not preferences:
@@ -198,8 +190,7 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
     if engine == "none":
         return NullSpeaker()
     if engine == "auto":
-        # Local first. edge is never reached by auto - it is opt in, because it
-        # ships every reply to Microsoft.
+        # edge is never reached by auto - it ships every reply to Microsoft.
         try:
             speaker = SapiSpeaker(config)
         except Exception as exc:
@@ -221,8 +212,7 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
 class SpeechEngine:
     """Serialises utterances onto one worker thread and allows barge-in.
 
-    The backend is built inside the worker so its thread affine resources live
-    where they are used.
+    The backend is built inside the worker, where its resources are used.
     """
 
     _STOP = object()
@@ -232,10 +222,8 @@ class SpeechEngine:
         self._queue: queue.Queue[object] = queue.Queue()
         self._speaker: Speaker | None = None
         self._ready = threading.Event()
-        # A pending count under a condition, rather than an idle flag. A flag
-        # races: the worker can see an empty queue and mark itself idle in the
-        # window between say() incrementing and say() enqueueing, so wait()
-        # returns while an utterance is still to come.
+        # A count rather than an idle flag: a flag races with say() between
+        # incrementing and enqueueing, and wait() returns too early.
         self._drained = threading.Condition()
         self._pending = 0
         self._closed = False
@@ -320,11 +308,7 @@ class SpeechEngine:
 
 
 def iter_sentences(chunks: Iterable[str], min_chars: int = 12) -> Iterator[str]:
-    """Regroup streamed tokens into speakable sentences.
-
-    Speaking each sentence as it lands rather than waiting for the full reply is
-    what makes a local model feel responsive.
-    """
+    """Regroup streamed tokens into speakable sentences."""
     buffer = ""
     for chunk in chunks:
         buffer += chunk
@@ -340,8 +324,7 @@ def iter_sentences(chunks: Iterable[str], min_chars: int = 12) -> Iterator[str]:
 def _split_sentence(buffer: str, min_chars: int) -> tuple[str | None, str]:
     """First sentence boundary that leaves something worth speaking behind it.
 
-    Short fragments ("Certainly, sir.") get merged into the sentence that
-    follows rather than sent off as their own utterance.
+    Short fragments are merged into the sentence that follows.
     """
     for match in _SENTENCE_END.finditer(buffer):
         # Keep any closing quote or bracket with the sentence it belongs to.
