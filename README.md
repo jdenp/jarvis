@@ -2,8 +2,9 @@
 
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 
-A local voice service. It listens on your microphone, waits for its name, and hands what
-you said to whatever agent is connected. That agent speaks back through your speakers.
+A local voice service. It listens on your microphone and hands everything it hears to
+whatever agent is connected. That agent decides what was meant for it, and speaks back
+through your speakers.
 
 JARVIS has no model of its own - it is ears and a mouth, and the agent is the brain.
 
@@ -15,7 +16,9 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
   sentence, so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
 - A plain CLI for everything else
-- Wake word gating, so ambient conversation is not forwarded
+- **No wake word.** Everything heard is passed on and the agent judges what was addressed
+  to it, so you do not have to say "jarvis" before every reply in a conversation
+- `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
 
@@ -59,8 +62,10 @@ audio hardware, which is why `say` from a separate terminal can still mute the s
 microphone that is listening. It runs as `uv`/`python`, so `Get-Process jarvis` finds
 nothing; use `jarvis.ps1 status`.
 
-Say "jarvis" followed by whatever you want. The wake word is stripped before the agent sees
-it. Logs rotate in `logs/jarvis.log`; everything heard is appended to `logs/heard.jsonl`.
+Just talk. The name is stripped when you use it but is not required - everything heard is
+passed to the agent, which decides what was aimed at it. Set `wake.required = true` to
+require the name again. Logs rotate in `logs/jarvis.log`; everything heard is appended to
+`logs/heard.jsonl`.
 
 ## Connecting an agent
 
@@ -80,7 +85,8 @@ For Cline, add to your MCP settings:
 }
 ```
 
-Three tools appear: `wait_for_speech(timeout_seconds)`, `say(text)` and `voice_status()`.
+Four tools appear: `wait_for_speech()`, `check_for_speech()`, `say(text)` and
+`voice_status()`.
 Anything else drives the same service through the CLI:
 
 ```powershell
@@ -96,10 +102,11 @@ Two things worth knowing before you build on it:
 - **Nothing preempts an agent mid-turn.** If it is thirty seconds into a build, your speech
   waits until it next calls `wait_for_speech`. Cooperative, not preemptive, and no transport
   changes that.
-- **The latency floor is about 1.1s**, nearly all of it `audio.pause_threshold` (0.8s of
-  silence before JARVIS decides your sentence ended) plus ~0.3s of Whisper. Measured
-  transport cost from transcription to the agent is ~0.0s, so lower `pause_threshold` before
-  optimising anything else.
+- **The latency floor is `audio.pause_threshold`**, 2.0s by default: that much silence
+  before JARVIS decides your sentence ended, plus ~0.3s of Whisper and a 0.8s settle
+  window. Measured transport cost from transcription to the agent is ~0.0s, so that is
+  the only knob worth touching. It is set high deliberately - being cut off mid sentence
+  is worse than waiting.
 
 ## What leaves this machine
 
@@ -133,7 +140,7 @@ Everything is configurable three ways, each beating the last:
 ## Architecture
 
 ```
- mic thread ──▶ queue ──▶ STT ──▶ wake word ──▶ transcript ──▶ GET /heard (blocks)
+ mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ GET /heard (blocks)
       ▲                                                              │
       └──── muted while speaking ◀── speech thread ◀── POST /say ◀───┘ agent
 ```
@@ -148,7 +155,8 @@ Everything is configurable three ways, each beating the last:
 | `microphone.py` | Background capture, calibration, mute |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
-| `wake.py` | Wake word matching |
+| `wake.py` | Wake word matching, exact and approximate |
+| `reap.py` | Clearing MCP servers that outlived their client |
 | `echo.py` | Recognising JARVIS's own voice coming back |
 | `config.py` | Defaults, TOML, environment |
 
@@ -163,7 +171,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 89 tests, no hardware, model or network needed
+uv run pytest        # 147 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

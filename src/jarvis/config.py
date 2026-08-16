@@ -133,13 +133,22 @@ class ServiceConfig:
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0
     # Some carry the "sir" and some do not, so rotating through them lands the
-    # inflection as a habit rather than a tic.
+    # inflection as a habit rather than a tic. The order is shuffled per process
+    # - a fixed list always opened with the same line, and a new MCP server is
+    # started often enough that it became the only one you ever heard.
     acknowledgements: tuple[str, ...] = (
         "Let me have a look.",
         "One moment, sir.",
         "Looking into that now.",
         "Give me a second.",
         "Checking that for you, sir.",
+        "Right, on it.",
+        "Just a moment.",
+        "Working on it, sir.",
+        "Let me check.",
+        "Bear with me.",
+        "On it now.",
+        "Give me a moment, sir.",
     )
 
 

@@ -1,8 +1,10 @@
 """MCP server, so an agent knows it has ears and a voice.
 
-Two tools. ``wait_for_speech`` blocks until the user says something, which is
-what makes this an interrupt rather than a polling loop - the agent asks once
-and the call returns the instant a sentence lands. ``say`` speaks a reply.
+``wait_for_speech`` blocks until the user says something, which is what makes
+this an interrupt rather than a polling loop - the agent asks once and the call
+returns the instant a sentence lands. ``check_for_speech`` is its non-blocking
+twin, for looking up mid task: nothing can preempt an agent, so being steered
+part way through only works if it chooses to look. ``say`` speaks a reply.
 
 This is a client of a running `jarvis serve`, not a second copy of it. Only one
 process may own the microphone, and the agent may start and stop this one freely.
@@ -11,6 +13,7 @@ process may own the microphone, and the agent may start and stop this one freely
 from __future__ import annotations
 
 import logging
+import random
 import threading
 
 from .client import ServiceUnavailable, VoiceClient
@@ -47,6 +50,13 @@ When you do answer, answer out loud. say() is a tool call - writing the words in
 your reply is not the same thing, and the user cannot see your chat. Go straight
 back to listening afterwards: no "anything else?", no written recap.
 
+CHECK IN WHILE YOU WORK. Nothing can interrupt you mid task - speech queues up
+until you look. So on anything longer than a few steps, call check_for_speech
+between them: after a search, after a file edit, before starting something
+expensive, whenever a build or test run finishes. It returns immediately and
+costs nothing when they have been quiet. It is the only way "actually, do it the
+other way" reaches you before you have finished doing it the first way.
+
 Narrate anything slow; they cannot see your screen and a long silence looks like
 a crash. Keep spoken replies short and free of markdown, since they are read out.
 
@@ -71,7 +81,10 @@ class Acknowledger:
     def __init__(self, voice: VoiceClient, config: ServiceConfig) -> None:
         self._voice = voice
         self._after = config.acknowledge_after
-        self._phrases = tuple(config.acknowledgements)
+        # Shuffled, not in order: a new server process is spawned often enough
+        # that always starting at the first phrase made it the only one heard.
+        self._phrases = list(config.acknowledgements)
+        random.shuffle(self._phrases)
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
         self._index = 0
@@ -192,6 +205,42 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "detail": heard,
         }
         return payload
+
+    @server.tool(
+        name="check_for_speech",
+        title="Check for anything said while you were working",
+        description=(
+            "Returns immediately with anything the user has said since you last "
+            "looked, or nothing if they have been quiet. Does NOT block. Call it "
+            "between the steps of any long task - they cannot interrupt you, so "
+            "this is the only way a change of mind reaches you before you finish "
+            "doing the wrong thing."
+        ),
+    )
+    def check_for_speech() -> dict:
+        # The non-blocking twin of wait_for_speech. Nothing can preempt an agent
+        # mid-turn, so steering only works if the agent chooses to look.
+        nonlocal cursor
+        try:
+            result = voice.heard(since=cursor, wait=0, addressed_only=True, settle=0)
+        except ServiceUnavailable as exc:
+            return {"error": str(exc), "heard": []}
+
+        heard = result.get("heard", [])
+        cursor = result.get("cursor", cursor)
+        if not heard:
+            return {"heard": [], "next_step": "Nothing new. Carry on with what you were doing."}
+        return {
+            "heard": [item.get("command") or item["text"] for item in heard],
+            "next_step": (
+                "The user spoke while you were working. Read it before continuing: "
+                "they may be redirecting you, correcting a detail, or telling you to "
+                "stop. Acknowledge it with say() and act on it - carrying on with the "
+                "old plan after they have changed it wastes both your time. If it was "
+                "not meant for you, ignore it and carry on."
+            ),
+            "detail": heard,
+        }
 
     @server.tool(
         name="say",

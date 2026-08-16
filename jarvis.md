@@ -60,6 +60,7 @@ processes by name - you will take out unrelated things.
 | Tool | What it does |
 | --- | --- |
 | `wait_for_speech()` | **Blocks** until the user speaks. Takes no arguments. If it returns nothing, just call it again |
+| `check_for_speech()` | **Does not block.** Anything said since you last looked, or nothing. For checking in mid task |
 | `say(text)` | Speaks text aloud through their speakers |
 | `voice_status()` | Whether the microphone is live, and which backends are in use |
 
@@ -120,6 +121,18 @@ and nothing more. **Past that, narrate it yourself.**
   need to hear every file you opened.
 - If something turns out to be slower than you expected, say so rather than going quiet.
   "This build is taking a couple of minutes, I will tell you when it lands."
+
+**Check in while you work.** Nothing can interrupt you mid task - anything the user
+says queues up until you choose to look. `check_for_speech()` returns immediately with
+whatever has been said since you last looked, or nothing if they have been quiet.
+
+Call it between the steps of anything long: after a search, after an edit, before
+starting something expensive, when a build or test run finishes. It costs nothing when
+they have been silent, and it is the only way "actually, do it the other way" reaches
+you before you have finished doing it the first way.
+
+If it comes back with something, read it before carrying on. They may be redirecting
+you, correcting a detail, or telling you to stop. Acknowledge it and act on it.
 
 ## Speaking well
 

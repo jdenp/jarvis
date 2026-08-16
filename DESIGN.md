@@ -38,7 +38,9 @@ Two limits, neither fixable by changing the transport:
 
 - **Nothing preempts an agent mid-turn.** There is no external interrupt for an agent loop
   already running tools. Speech waits until the agent next chooses to listen. Cooperative
-  by nature.
+  by nature, which is what `check_for_speech` is for: a non-blocking peek the agent is
+  told to make between the steps of a long task, so a change of mind reaches it before it
+  has finished doing the wrong thing.
 - **The latency floor is whatever `pause_threshold` is set to**, currently 2.0s, plus
   ~0.3s of Whisper and a 0.8s settle window. Measured cost from transcript to agent is
   ~0.0s, so optimising the transport is pointless. It is set high deliberately: being

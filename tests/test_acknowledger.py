@@ -28,7 +28,8 @@ def test_a_slow_answer_gets_a_holding_line():
     ack, voice = make()
     ack.arm()
     time.sleep(0.4)
-    assert voice.said == ["Let me have a look."]
+    assert len(voice.said) == 1
+    assert voice.said[0] in ServiceConfig().acknowledgements
 
 
 def test_a_quick_answer_gets_no_holding_line():
@@ -73,6 +74,18 @@ def test_no_phrases_disables_it():
     ack.arm()
     time.sleep(0.3)
     assert voice.said == []
+
+
+def test_different_processes_do_not_all_open_with_the_same_line():
+    """A new MCP server is spawned often, and each builds a fresh Acknowledger.
+    In a fixed order that meant the first phrase was the only one ever heard."""
+    firsts = set()
+    for _ in range(20):
+        ack, voice = make()
+        ack.arm()
+        time.sleep(0.25)
+        firsts.update(voice.said)
+    assert len(firsts) > 1, "the opening line should vary between processes"
 
 
 def test_cancel_is_safe_when_nothing_is_armed():
