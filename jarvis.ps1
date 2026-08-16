@@ -20,8 +20,20 @@ $root = $PSScriptRoot
 function Get-JarvisCommand {
     # --directory rather than Set-Location: this script runs in the caller's
     # session, so changing directory here would move their shell as a side effect.
+    #
+    # --no-sync because `uv run` otherwise reinstalls the project whenever its
+    # metadata changes, and reinstalling means replacing .venv\Scripts\jarvis.exe.
+    # An MCP server started by an agent is running from that exe, and Windows
+    # locks a running image - so bumping the version made every start fail with
+    # "The process cannot access the file". The project is installed editable, so
+    # source changes need no sync anyway; only changed dependencies do.
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        return @{ File = "uv"; Prefix = @("run", "--directory", $root, "jarvis") }
+        if (-not (Test-Path (Join-Path $root ".venv\Scripts\python.exe"))) {
+            Write-Host "No virtual environment yet, running uv sync..."
+            & uv sync --directory $root
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        return @{ File = "uv"; Prefix = @("run", "--no-sync", "--directory", $root, "jarvis") }
     }
     $python = Join-Path $root ".venv\Scripts\python.exe"
     if (-not (Test-Path $python)) {

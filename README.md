@@ -80,11 +80,18 @@ For Cline, add to your MCP settings:
   "mcpServers": {
     "jarvis": {
       "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/jarvis", "jarvis", "mcp"]
+      "args": ["run", "--no-sync", "--directory", "/absolute/path/to/jarvis", "jarvis", "mcp"]
     }
   }
 }
 ```
+
+`--no-sync` matters on Windows. Without it `uv run` reinstalls the project whenever its
+metadata changes, which means replacing `.venv\Scripts\jarvis.exe` - and that exe is the
+running MCP server, which Windows will not let anything overwrite. Bumping the version
+then makes every start fail with "The process cannot access the file". The project is
+installed editable, so code changes need no sync; run `uv sync` by hand when dependencies
+change.
 
 Four tools appear: `wait_for_speech()`, `check_for_speech()`, `say(text)` and
 `voice_status()`.
