@@ -98,6 +98,14 @@ throws. A machine with a GPU but no CUDA runtime DLLs (`cublas64_12.dll` and fri
 exactly this, and the fallback is what makes it work there at all. `base.en` on CPU
 transcribes a short phrase in under 0.3s.
 
+**Transcription cost is non-linear in utterance length, and that is a CPU problem.**
+Measured with `small.en`: 5.5s of speech takes 0.99s on CPU and 0.16s on CUDA, but 22s of
+speech takes 12.06s on CPU against 3.12s on CUDA. A short sentence is fine either way; a
+long one is not. The penalty lands exactly when someone has explained something at length
+and is most expecting an answer, so on CPU it reads as the assistant being erratic rather
+than slow. If the delay ever needs chasing, measure against utterance length before
+touching anything else.
+
 **Build TTS backends on the thread that uses them.** Both SAPI (COM apartment affinity) and
 pygame hold thread-affine resources. `SpeechEngine` takes a factory and calls it inside the
 worker. Building on the main thread and calling from the worker gets you silence or a hang.

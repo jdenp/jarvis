@@ -12,6 +12,9 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 
 - **Fully local.** Whisper transcribes on this machine and the voice is the offline Windows
   one. Nothing leaves the machine, and JARVIS prints a line at startup saying so.
+- Runs on CPU with no setup, or on the GPU for four to six times quicker transcription -
+  which matters more than it sounds, because CPU transcription time grows sharply with
+  how long you spoke. See [Transcription speed](#transcription-speed-accuracy-and-vram).
 - **Blocking reads, not polling.** `wait_for_speech` returns the instant you finish a
   sentence, so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
@@ -108,40 +111,54 @@ Two things worth knowing before you build on it:
   the only knob worth touching. It is set high deliberately - being cut off mid sentence
   is worse than waiting.
 
-## Transcription accuracy, speed and VRAM
+## Transcription speed, accuracy and VRAM
 
-The three trade against each other, so the defaults are conservative and this is the
-knob most worth touching. Measured on this machine (RTX 4070 Ti) with five seconds of
-speech, each in a fresh process so the CUDA context is not shared:
+**On CPU, transcription time is badly non-linear in how long you spoke.** This is the
+single most surprising thing about running it, and the reason the GPU is worth more than
+the headline numbers suggest. Measured on an RTX 4070 Ti and an 8-core CPU with
+`small.en`:
 
-| `whisper_model` | `whisper_device` | warm transcribe | VRAM |
+| you spoke for | CPU | CUDA |
+| --- | --- | --- |
+| 5.5s | 0.99s | 0.16s |
+| 11.0s | 1.00s | 0.15s |
+| 22.1s | **12.06s** | 3.12s |
+| 44.1s | **23.08s** | 4.72s |
+
+A short sentence costs about a second on CPU, which is fine. Ask something that takes
+twenty seconds to say and you wait twelve seconds for it to be transcribed - and the
+penalty lands hardest exactly when you have just explained something at length and are
+most expecting an answer. The GPU is four to six times quicker at every length, and
+barely notices a long utterance.
+
+If you are on CPU and the delay feels inconsistent, this is almost certainly why: it
+tracks utterance length, not luck. `audio.pause_threshold` also lets you ramble without
+being cut off, which makes long utterances more likely.
+
+Note that CPU transcription competes with anything else using the CPU - a local LLM
+offloading layers with `--n-cpu-moe`, for instance - so the delay grows again while the
+agent is thinking.
+
+### The other two
+
+**Accuracy comes from the model, not the device.** `small.en` is markedly better than
+`base.en` at proper nouns and at accents the model was not weighted towards - which is
+what turns "jarvis" into Jovis, Darvus or Java's. CUDA does not transcribe more
+accurately, it makes the larger model affordable in time.
+
+**Most of the VRAM is the CUDA context, not the weights.** `base.en` in int8 is about
+75 MiB of weights against a 339 MiB total, so choosing a smaller model to save VRAM
+barely helps - roughly 265 MiB is the price of touching the GPU at all.
+
+| `whisper_model` | `whisper_device` | short utterance | VRAM |
 | --- | --- | --- | --- |
 | `base.en` | `cpu` | 0.32s | none |
 | `base.en` | `cuda` | 0.07s | 339 MiB |
 | `small.en` | `cpu` | 0.98s | none |
 | `small.en` | `cuda` | 0.18s | 563 MiB |
 
-Two things fall out of that.
-
-**Accuracy comes from the model, not the device.** `small.en` is markedly better than
-`base.en` at proper nouns and at accents the model was not weighted towards - which is
-what turns "jarvis" into Jovis, Darvus or Java's. CUDA does not make it more accurate,
-it makes the larger model affordable in time.
-
-**Most of the VRAM is the CUDA context, not the weights.** `base.en` in int8 is about
-75 MiB of weights against a 339 MiB total, so choosing a smaller model to save VRAM
-barely helps - roughly 265 MiB is the cost of using the GPU at all.
-
-Whether it is worth it depends on what else the GPU is doing. On a machine also running
-a local LLM, 0.2s off a pipeline whose delay is dominated by `audio.pause_threshold`
-(1.7s) is a poor trade for several hundred megabytes. On an idle GPU it is free.
-
-**The shipped default is `base.en` on `cpu`** - no VRAM, no CUDA install, 0.32s. If
-accuracy matters more than latency and the GPU is spoken for, `small.en` on `cpu` is the
-middle ground: the better model for nothing but about 0.66s more per utterance, which
-against a 1.7s `pause_threshold` takes the round trip from roughly 2.8s to 3.5s.
-
-To use the GPU instead:
+**The shipped default is `base.en` on `cpu`** - no VRAM, no CUDA install, and the
+mildest version of the scaling problem above. To use the GPU:
 
 ```powershell
 uv sync --extra cuda    # CUDA runtime as pip packages, no system install needed
@@ -157,7 +174,8 @@ whisper_compute_type = "int8_float16"
 ```
 
 `auto` proves the device works with a real inference before accepting it, so a broken
-CUDA install falls back to CPU rather than silently returning nothing.
+CUDA install or a GPU with no room falls back to CPU rather than silently returning
+nothing.
 
 ## What leaves this machine
 
