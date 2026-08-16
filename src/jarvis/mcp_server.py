@@ -22,58 +22,46 @@ from .config import Config, ServiceConfig
 logger = logging.getLogger("jarvis.mcp")
 
 INSTRUCTIONS = """\
-JARVIS gives you a microphone and a voice on the user's desktop.
+A microphone and a voice on the user's desktop.
 
-THESE TOOLS ARE OFF BY DEFAULT. Being connected does not mean voice is wanted.
-Unless the user has asked for it, work normally in text and do not touch them:
-do not call wait_for_speech, do not call say, and do not start the service.
+OFF BY DEFAULT. Being connected does not mean voice is wanted. Do not call these
+tools or start the service until asked. "jarvis" on its own means start listening
+now - call wait_for_speech immediately, no text reply, nothing else first. So do
+"listen", "use voice", "talk to me". It ends when they say so or go back to typing.
 
-Voice mode starts only when the user asks in words - "listen", "wait on jarvis",
-"use voice", "talk to me" or similar. Until they do, ignore all of this.
+THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech.
+Straight back to listening after speaking. No "anything else?", no written recap.
 
-A message that is just "jarvis" on its own means start listening now. It is not
-a greeting or a question - it is them saying they are about to speak rather than
-type. Call wait_for_speech immediately, with no text reply and nothing else
-first beyond starting the service if it is down.
+THREE RULES:
 
-Once they have asked, and until they say to stop:
+1. Answering is calling say(). Working out the answer is not answering; writing
+   it in your reply is not answering, they cannot see your chat. The moment you
+   know what to tell them the next tool call is say() - not wait_for_speech, not
+   one more search. Deciding to speak and then listening instead is the commonest
+   failure here, and it is identical to being ignored. Say it when a tool fails
+   too: four failed searches then silence reads as a crash.
 
-YOU DECIDE WHAT WAS MEANT FOR YOU. There is no wake word. The microphone sends
-you everything it hears: requests, half sentences, the user thinking aloud,
-someone else in the room, a video playing. Your first job on every utterance is
-to judge whether it was addressed to you.
+2. Silence is a valid reply. No wake word, so you hear everything - other people,
+   videos, thinking aloud. Act only on what was aimed at you; for anything else
+   say nothing and listen again. Answering what nobody asked is worse than
+   missing one.
 
-- A task or a question aimed at you: do it, then say() the answer.
-- Anything else - background talk, muttering, a fragment that is not a request,
-  something clearly said to another person: say NOTHING. Call wait_for_speech
-  again and keep listening. Silence is the correct response, not a failure.
-- Something that sounds cut off: call wait_for_speech again straight away. A
-  phrase ends after a fixed silence, not when the speaker is done, so pausing
-  mid sentence splits it and the rest is already queued behind what you are
-  holding. Ending mid clause, a verb with nothing to act on, or a reference to
-  something never mentioned all mean the other half is a moment away. Do not act
-  on the half you have, and do not ask them to repeat it - they already said it.
-  Only ask if it is still incomplete after listening again.
+3. If it sounds cut off, listen again - do not ask them to repeat it. A phrase
+   ends after a fixed silence, not when the speaker finishes, so a mid sentence
+   pause splits one request in two and the rest is already queued. Ending mid
+   clause, a verb with nothing to act on, or a reference to something never
+   mentioned all mean the other half is a moment away. Only ask if it is still
+   incomplete the second time.
 
-When you do answer, answer out loud. say() is a tool call - writing the words in
-your reply is not the same thing, and the user cannot see your chat. Go straight
-back to listening afterwards: no "anything else?", no written recap.
+WHILE YOU WORK: they cannot see your screen, so silence looks like a crash. Say
+what you are about to do before anything slow, and call check_for_speech between
+steps of a long task - it returns instantly and is the only way "actually, do it
+the other way" reaches you before you have finished doing it the first way.
 
-CHECK IN WHILE YOU WORK. Nothing can interrupt you mid task - speech queues up
-until you look. So on anything longer than a few steps, call check_for_speech
-between them: after a search, after a file edit, before starting something
-expensive, whenever a build or test run finishes. It returns immediately and
-costs nothing when they have been quiet. It is the only way "actually, do it the
-other way" reaches you before you have finished doing it the first way.
-
-Narrate anything slow; they cannot see your screen and a long silence looks like
-a crash. Keep spoken replies short and free of markdown, since they are read out.
-
-Address them as "sir". Not every line - that turns into a tic - but often enough
-that it is plainly the register. It sits best on an acknowledgement ("Yes, sir."),
-at the end of a short answer, and on a greeting. Once per reply at most, and never
-mid sentence. Underdo it rather than overdo it. Beyond that stay plain: dry and
-unhurried, no theatrics, no "certainly!".
+SPOKEN REPLIES are read aloud: under forty words, no markdown, never read code or
+long paths. Say "sir" as a tendency not a rule - an acknowledgement, the end of a
+short answer, a greeting; once per reply at most, underdo it. Otherwise plain and
+unhurried, no theatrics.
 
 wait_for_speech returning nothing means they have not spoken yet. Call it again."""
 
@@ -128,6 +116,30 @@ class Acknowledger:
             logger.debug("Could not speak the holding line.", exc_info=True)
 
 
+QUESTION_OPENERS = (
+    "what", "when", "where", "who", "why", "how", "which", "whose",
+    "is", "are", "was", "were", "do", "does", "did", "can", "could",
+    "will", "would", "should", "shall", "have", "has", "am",
+)  # fmt: skip
+
+
+def looks_like_a_question(text: str) -> bool:
+    """Whether an utterance was plainly asking for an answer.
+
+    Used to decide whether going quiet was a mistake worth mentioning. Most
+    silence is correct - background talk, a fragment - but a question that got
+    no spoken reply is almost always the agent forgetting to say() it, so only
+    questions are worth chasing.
+    """
+    stripped = text.strip().lower()
+    if not stripped:
+        return False
+    if stripped.endswith("?"):
+        return True
+    first = stripped.split()[0].strip(",.!'\"") if stripped.split() else ""
+    return first in QUESTION_OPENERS
+
+
 def build_server(config: Config | None = None, client: VoiceClient | None = None):
     """Construct the MCP server. Import is deferred so the CLI stays fast."""
     from mcp.server.mcpserver import MCPServer
@@ -139,6 +151,10 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     # Nothing is heard before the agent first asks, so start from "now" rather
     # than replaying whatever was said before it connected.
     cursor = _initial_cursor(voice)
+    # A question that got no spoken reply, so it can be raised once. Only
+    # questions: most silence is correct, and nagging an agent that is rightly
+    # keeping quiet just pushes it into answering things nobody asked.
+    unanswered_question: str | None = None
     acknowledger = Acknowledger(voice, config.service)
 
     server = MCPServer(
@@ -163,7 +179,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     def wait_for_speech() -> dict:
         # No timeout argument on purpose. Given one, models pick a small number
         # and give up while the user is still deciding what to say.
-        nonlocal cursor
+        nonlocal cursor, unanswered_question
 
         # Calling this again means the agent has moved on, so no holding line.
         # There is nothing to chase it about: with no wake word, most utterances
@@ -195,6 +211,10 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             }
 
         spoken_text = [item.get("command") or item["text"] for item in heard]
+        missed, unanswered_question = unanswered_question, None
+        last = spoken_text[-1]
+        if looks_like_a_question(last):
+            unanswered_question = last
         acknowledger.arm()  # fills the silence if an answer takes a while
 
         # The judgement call is restated here, not only in the server
@@ -203,16 +223,21 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         payload = {
             "heard": spoken_text,
             "next_step": (
-                "There is no wake word, so this may not have been meant for you. "
-                "Decide first. If it is a task or a question for you, do it and "
-                "call say() with the answer - the user is listening, not reading, "
-                "so anything you only write down reaches them as silence. If it is "
-                "background talk, muttering, or half a sentence that is not a "
-                "request, say NOTHING and call wait_for_speech again. Staying quiet "
-                "is a correct answer here, not a failure."
+                "Meant for you? Do the work, then say() the answer. Answering IS "
+                "calling say() - there is no other way to reach them, and the next "
+                "tool you call must be say(), not wait_for_speech. "
+                "Not meant for you (background talk, a fragment that is not a "
+                "request)? Stay silent and call wait_for_speech again. "
+                "Cut off mid sentence? Call wait_for_speech again; the rest is "
+                "already queued."
             ),
             "detail": heard,
         }
+        if missed:
+            payload["unanswered"] = (
+                f'You never spoke an answer to "{missed}". If you worked one out, '
+                "say() it now along with anything new."
+            )
         return payload
 
     @server.tool(
@@ -263,11 +288,13 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         ),
     )
     def say(text: str) -> dict:
+        nonlocal unanswered_question
         acknowledger.cancel()
         try:
             voice.say(text)
         except ServiceUnavailable as exc:
             return {"error": str(exc), "spoken": False}
+        unanswered_question = None
         return {
             "spoken": True,
             "text": text,

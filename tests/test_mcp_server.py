@@ -48,7 +48,8 @@ def test_speech_comes_back_with_the_judgement_call_attached(rig):
     _, _voice, raw = rig
     result = raw("wait_for_speech")
     assert "what time is it" in result
-    assert "may not have been meant for you" in result
+    assert "Meant for you?" in result
+    assert "must be say()" in result, "the action, not just the nuance"
 
 
 def test_staying_silent_is_not_refused(rig):
@@ -68,6 +69,33 @@ def test_silence_is_never_chased_up(rig):
     _, _voice, raw = rig
     for _ in range(4):
         assert "did not reply" not in raw("wait_for_speech")
+
+
+def test_an_unanswered_question_is_raised_once(rig):
+    """The failure this guards: the agent works out an answer, then calls
+    wait_for_speech instead of say, and the user hears nothing."""
+    _, _voice, raw = rig
+    raw("wait_for_speech")  # "what time is it" - a question
+    second = raw("wait_for_speech")
+    assert "never spoke an answer" in second
+    third = raw("wait_for_speech")
+    assert "never spoke an answer" in third, "still outstanding, still raised"
+
+
+def test_answering_clears_it(rig):
+    _, _voice, raw = rig
+    raw("wait_for_speech")
+    raw("say", {"text": "Half past two, sir."})
+    assert "never spoke an answer" not in raw("wait_for_speech")
+
+
+def test_silence_after_a_non_question_is_never_raised(rig):
+    """Most silence is correct. Chasing it pushes the agent into answering
+    things nobody asked."""
+    _, voice, raw = rig
+    voice.next_heard = [{"text": "and the other thing", "command": "and the other thing"}]
+    raw("wait_for_speech")
+    assert "never spoke an answer" not in raw("wait_for_speech")
 
 
 def test_say_still_reaches_the_service(rig):
