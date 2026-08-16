@@ -6,7 +6,9 @@ log_level = "INFO"
 
 [audio]
 # device_index = 1    # leave unset for the system default, or use `jarvis --list-devices`
-phrase_time_limit = 25.0       # hard cap on one phrase
+# Hard cap on one phrase. Costs nothing to leave high: a phrase still ends on
+# silence, this only stops a stuck stream recording forever.
+phrase_time_limit = 60.0
 calibration_seconds = 1.5
 dynamic_energy_threshold = true
 # energy_threshold = 300  # set this to skip calibration entirely

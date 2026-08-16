@@ -25,10 +25,11 @@ class AudioConfig:
     """Microphone capture settings."""
 
     device_index: int | None = None
-    # Hard cap on one phrase. Generous, because with a long pause_threshold a
-    # rambling request can legitimately run past ten seconds, and hitting this
-    # truncates you mid sentence.
-    phrase_time_limit: float = 25.0
+    # Hard cap on one phrase, set high enough not to be a factor. This does not
+    # add any delay - a phrase still ends on silence - it only stops a stuck
+    # stream recording forever. Hitting it truncates you mid sentence, so there
+    # is no reason to keep it tight.
+    phrase_time_limit: float = 60.0
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
