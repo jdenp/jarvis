@@ -12,9 +12,8 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 
 - **Fully local.** Whisper transcribes on this machine and the voice is the offline Windows
   one. Nothing leaves the machine, and JARVIS prints a line at startup saying so.
-- Runs on CPU with no setup, or on the GPU for four to six times quicker transcription -
-  which matters more than it sounds, because CPU transcription time grows sharply with
-  how long you spoke. See [Transcription speed](#transcription-speed-accuracy-and-vram).
+- Runs on CPU with no setup, or on the GPU for much quicker transcription. See
+  [Speech recognition](#speech-recognition).
 - **Blocking reads, not polling.** `wait_for_speech` returns the instant you finish a
   sentence, so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
@@ -35,7 +34,7 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 
 ```powershell
 uv sync
-copy jarvis.toml.example jarvis.toml   # optional, all values have defaults
+copy config\jarvis.toml.example config\jarvis.toml   # optional, all values have defaults
 ```
 
 The first run downloads the Whisper model (`base.en`, about 150 MB) and caches it. After
@@ -110,71 +109,42 @@ Two things worth knowing before you build on it:
   the only knob worth touching. It is set high deliberately - being cut off mid sentence
   is worse than waiting.
 
-## Transcription speed, accuracy and VRAM
+## Speech recognition
 
-**On CPU, transcription time is badly non-linear in how long you spoke.** This is the
-single most surprising thing about running it, and the reason the GPU is worth more than
-the headline numbers suggest. Measured on an RTX 4070 Ti and an 8-core CPU with
-`small.en`:
+Whisper runs on this machine. On startup you may see:
 
-| you spoke for | CPU | CUDA |
-| --- | --- | --- |
-| 5.5s | 0.99s | 0.16s |
-| 11.0s | 1.00s | 0.15s |
-| 22.1s | **12.06s** | 3.12s |
-| 44.1s | **23.08s** | 4.72s |
+```
+Whisper is not usable on cuda (Library cublas64_12.dll is not found or cannot be loaded).
+Whisper model base.en ready on cpu (int8).
+```
 
-A short sentence costs about a second on CPU, which is fine. Ask something that takes
-twenty seconds to say and you wait twelve seconds for it to be transcribed - and the
-penalty lands hardest exactly when you have just explained something at length and are
-most expecting an answer. The GPU is four to six times quicker at every length, and
-barely notices a long utterance.
+That is the fallback working - it proves the device with a real inference before trusting
+it, and drops to CPU if CUDA will not load. Nothing is broken, but **CPU transcription is
+slow**, and gets sharply slower the longer you speak: a short sentence takes about a
+second, twenty seconds of speech takes twelve.
 
-If you are on CPU and the delay feels inconsistent, this is almost certainly why: it
-tracks utterance length, not luck. `audio.pause_threshold` also lets you ramble without
-being cut off, which makes long utterances more likely.
-
-Note that CPU transcription competes with anything else using the CPU - a local LLM
-offloading layers with `--n-cpu-moe`, for instance - so the delay grows again while the
-agent is thinking.
-
-### The other two
-
-**Accuracy comes from the model, not the device.** `small.en` is markedly better than
-`base.en` at proper nouns and at accents the model was not weighted towards - which is
-what turns "jarvis" into Jovis, Darvus or Java's. CUDA does not transcribe more
-accurately, it makes the larger model affordable in time.
-
-**Most of the VRAM is the CUDA context, not the weights.** `base.en` in int8 is about
-75 MiB of weights against a 339 MiB total, so choosing a smaller model to save VRAM
-barely helps - roughly 265 MiB is the price of touching the GPU at all.
-
-| `whisper_model` | `whisper_device` | short utterance | VRAM |
-| --- | --- | --- | --- |
-| `base.en` | `cpu` | 0.32s | none |
-| `base.en` | `cuda` | 0.07s | 339 MiB |
-| `small.en` | `cpu` | 0.98s | none |
-| `small.en` | `cuda` | 0.18s | 563 MiB |
-
-**The shipped default is `base.en` on `cpu`** - no VRAM, no CUDA install, and the
-mildest version of the scaling problem above. To use the GPU:
+To use the GPU, install the CUDA runtime as pip packages - no system CUDA install needed:
 
 ```powershell
-uv sync --extra cuda    # CUDA runtime as pip packages, no system install needed
+uv sync --extra cuda
 ```
 
-then in `jarvis.toml`:
+then in `config/jarvis.json`:
 
-```toml
-[stt]
-whisper_model = "small.en"      # or base.en for half the VRAM
-whisper_device = "auto"         # falls back to cpu if CUDA will not load
-whisper_compute_type = "int8_float16"
+```json
+{
+  "stt": {
+    "whisper_model": "small.en",
+    "whisper_device": "auto",
+    "whisper_compute_type": "int8_float16"
+  }
+}
 ```
 
-`auto` proves the device works with a real inference before accepting it, so a broken
-CUDA install or a GPU with no room falls back to CPU rather than silently returning
-nothing.
+`auto` falls back to CPU if CUDA still will not load. Budget about 340 MB of VRAM for
+`base.en` and 560 MB for `small.en` - most of that is the CUDA context rather than the
+model, so a smaller model saves less than you would think. `small.en` is the more accurate
+of the two, particularly on names and accents.
 
 ## What leaves this machine
 
@@ -273,52 +243,27 @@ uv run ruff format .
 
 ## Example configuration
 
-One machine this runs on, as a starting point rather than a recommendation. The
-interesting constraint is that a 35B model and a speech model are sharing 12 GB.
+- **GPU** - RTX 4070 Ti, 12 GB
+- **CPU** - Ryzen 7 7700X, 8 cores
+- **RAM** - 32 GB DDR5-6000
+- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context, `--n-cpu-moe 25`
+- **Agent** - Cline CLI over MCP, `openai-compatible` provider at `127.0.0.1:8081`
+- **STT** - `small.en` on CUDA, `int8_float16`
+- **TTS** - SAPI, Microsoft George
 
-| | |
-| --- | --- |
-| GPU | RTX 4070 Ti, 12 GB |
-| CPU | Ryzen 7 7700X, 8 cores |
-| RAM | 32 GB DDR5-6000 |
-| Agent | Cline CLI, talking to JARVIS over MCP |
-| LLM | Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context |
-
-**VRAM is the binding constraint, and Whisper loses.** The LLM takes almost all of the
-12 GB, leaving roughly 900 MB. `small.en` on the GPU wants 563 MB of that, so it fits
-only because the LLM offloads 25 MoE layers to CPU (`--n-cpu-moe 25`) to make room. The
-alternative - `small.en` on CPU - is free in VRAM but costs 0.66s on a short utterance
-and far more on a long one, which is why the GPU won.
-
-`config/jarvis.json`:
-
-```json
-{
-  "stt": {
-    "whisper_model": "small.en",
-    "whisper_device": "auto",
-    "whisper_compute_type": "int8_float16"
-  }
-}
-```
-
-**Sampling matters as much as the prompt.** llama.cpp defaults, and Qwen3's own
-recommended `--temp 0.6`, are tuned for chat. Choosing a tool is a one-right-answer
-decision with no creative upside, and at 0.6 a plausible-but-wrong tool gets sampled
-often enough to notice - the agent deciding to speak and then calling the listen tool
-instead. Tightening it fixed more than several rounds of rewording the instructions did:
+llama.cpp sampling, tuned for tool calling rather than chat:
 
 ```
 --temp 0.2 --top-k 20 --top-p 0.8 --min-p 0.05 --jinja
 ```
 
-`--jinja` uses the model's own chat template, which is what parses tool calls on the
-OpenAI-compatible endpoint.
+Cline needs to be told the context size, since it cannot discover it from a custom
+endpoint. In `providers.json`, `contextWindow` must match llama.cpp's `-c` or compaction
+fires too late:
 
-**What it feels like.** About 1.7s of silence before a phrase is considered finished,
-~0.2s to transcribe, 0.8s settle, then however long the agent takes to think - so
-roughly three seconds from finishing a sentence to the agent having it, and the model's
-own latency on top of that.
+```json
+{ "contextWindow": 131072, "maxTokens": 32000 }
+```
 
 ## License
 
