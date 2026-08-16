@@ -204,4 +204,4 @@ def test_speaking_does_not_end_the_conversation(rig):
     _, _voice, raw = rig
     result = raw("say", {"text": "Half past two, sir."})
     assert "wait_for_speech" in result
-    assert "Do not stop here" in result
+    assert "do not finish the task" in result

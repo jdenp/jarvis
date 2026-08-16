@@ -32,18 +32,19 @@ now - call wait_for_speech immediately, no text reply, nothing else first. So do
 
 THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech.
 Straight back to listening after speaking. No "anything else?", no written recap.
-Never end your turn on a say() - they are still there, still listening, and it
-drops the conversation mid air. The loop ends when they end it, not when you
-have finished a sentence.
+The loop ends when they end it. Do not finish or complete the task after a
+reply - voice is one long conversation, not a task per sentence, and completing
+it hangs up on someone still sitting at the microphone.
 
 THREE RULES:
 
 1. Answering is calling say(). Working out the answer is not answering; writing
-   it in your reply is not answering, they cannot see your chat. The moment you
-   know what to tell them the next tool call is say() - not wait_for_speech, not
-   one more search. Deciding to speak and then listening instead is the commonest
-   failure here, and it is identical to being ignored. Say it when a tool fails
-   too: four failed searches then silence reads as a crash.
+   it in your reply is not answering, they cannot see your chat. Finishing the
+   task with the answer as your result is not answering either - completing is
+   not speaking, and it hangs up the microphone on someone who is still there.
+   The moment you know what to tell them the next tool call is say() - not
+   wait_for_speech, not one more search, not completion. Say it when a tool
+   fails too: four failed searches then silence reads as a crash.
 
 2. Silence is a valid reply. No wake word, so you hear everything - other people,
    videos, thinking aloud. Act only on what was aimed at you; for anything else
@@ -286,7 +287,10 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "next_step": (
                 "Meant for you? Do the work, then say() the answer. Answering IS "
                 "calling say() - there is no other way to reach them, and the next "
-                "tool you call must be say(), not wait_for_speech. "
+                "tool you call must be say(), not wait_for_speech. Do not finish "
+                "the task instead: putting the answer in a completion result "
+                "leaves it unspoken and ends the conversation while they are still "
+                "listening. The task is not over until they end it. "
                 "Not meant for you (background talk, a fragment that is not a "
                 "request)? Stay silent and call wait_for_speech again. "
                 "Cut off mid sentence? Call wait_for_speech again; the rest is "
@@ -367,10 +371,8 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "spoken": True,
             "text": text,
             "next_step": (
-                "Spoken. Do not stop here - they are still listening, and a turn "
-                "that ends after say() looks to them like you walked off mid "
-                "conversation. Call wait_for_speech now. It is the only way their "
-                "reply reaches you, and it is how the loop stays open."
+                "Spoken. Call wait_for_speech now - do not finish the task. They "
+                "are still listening, and their reply reaches you no other way."
             ),
         }
 
