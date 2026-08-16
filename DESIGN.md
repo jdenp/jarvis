@@ -39,9 +39,11 @@ Two limits, neither fixable by changing the transport:
 - **Nothing preempts an agent mid-turn.** There is no external interrupt for an agent loop
   already running tools. Speech waits until the agent next chooses to listen. Cooperative
   by nature.
-- **The latency floor is ~1.1s** - `pause_threshold` (0.8s of silence before the phrase is
-  considered over) plus ~0.3s of Whisper. Measured cost from transcript to agent is ~0.0s.
-  Optimising the transport is pointless; lower `pause_threshold` instead.
+- **The latency floor is whatever `pause_threshold` is set to**, currently 2.0s, plus
+  ~0.3s of Whisper and a 0.8s settle window. Measured cost from transcript to agent is
+  ~0.0s, so optimising the transport is pointless. It is set high deliberately: being
+  cut off mid sentence is a worse experience than waiting, and the two trade directly
+  against each other.
 
 `max_wait_seconds` defaults to 55 because agent clients time out tool calls (Cline's is
 around 60s). The tool takes a timeout, returns empty on expiry, and the agent calls again -

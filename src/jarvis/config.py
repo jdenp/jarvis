@@ -25,16 +25,21 @@ class AudioConfig:
     """Microphone capture settings."""
 
     device_index: int | None = None
-    phrase_time_limit: float = 10.0
+    # Hard cap on one phrase. Generous, because with a long pause_threshold a
+    # rambling request can legitimately run past ten seconds, and hitting this
+    # truncates you mid sentence.
+    phrase_time_limit: float = 25.0
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
     # A very quiet room calibrates down to single digits, which is sensitive
     # enough to hear the speakers. Refuse to go below this.
     min_energy_threshold: float = 80.0
-    # How long a silence ends a phrase. Generous on purpose: hesitating mid
-    # sentence should not split one request into two.
-    pause_threshold: float = 1.2
+    # How long a silence ends a phrase. Deliberately generous: pausing to think
+    # mid sentence should not split one request into two. This is the main cost
+    # in the delay before an agent sees what you said, and the main thing to
+    # change if you keep getting cut off.
+    pause_threshold: float = 2.0
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
 
@@ -116,10 +121,10 @@ class ServiceConfig:
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
-    # After speech aimed at JARVIS arrives, hold on briefly for the rest of the
-    # thought. Saying the wake word then hesitating splits one request into two
-    # phrases, and answering the first half is worse than waiting a beat.
-    settle_seconds: float = 1.5
+    # Held after a phrase arrives, in case another follows it. Small, because
+    # audio.pause_threshold already absorbs hesitation inside a phrase - this
+    # only catches a speaker who stopped completely and then carried on.
+    settle_seconds: float = 0.8
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0

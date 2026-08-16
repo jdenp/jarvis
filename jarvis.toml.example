@@ -6,14 +6,16 @@ log_level = "INFO"
 
 [audio]
 # device_index = 1    # leave unset for the system default, or use `jarvis --list-devices`
-phrase_time_limit = 10.0
+phrase_time_limit = 25.0       # hard cap on one phrase
 calibration_seconds = 1.5
 dynamic_energy_threshold = true
 # energy_threshold = 300  # set this to skip calibration entirely
 # A silent room calibrates down to single digits, which is sensitive enough for
 # the mic to hear your speakers. Raise this if JARVIS still picks itself up.
 min_energy_threshold = 80.0
-pause_threshold = 1.2         # silence that ends a phrase; higher tolerates hesitation
+# Silence that ends a phrase. The main thing to change if you keep getting cut
+# off mid sentence, and the main cost in how long before the agent sees you.
+pause_threshold = 2.0
 # How long after JARVIS stops talking the microphone stays ignored. Covers the
 # output buffer draining and the room's echo tail. Raise it in a live room, but
 # note that a reply starting inside this window is dropped.
@@ -76,7 +78,7 @@ transcript_file = "heard.jsonl"
 # Once speech aimed at JARVIS arrives, hold on this long for the rest of the
 # thought before handing it over. Saying the wake word then hesitating splits one
 # request across two phrases; without this the agent acts on the first half.
-settle_seconds = 1.5
+settle_seconds = 0.8
 # If the agent has not spoken an answer within this long, JARVIS says a holding
 # line so the wait does not sound like a crash. It is cancelled the moment the
 # real answer arrives, so quick replies never get "one moment" in front of them.
