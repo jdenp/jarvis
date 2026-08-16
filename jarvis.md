@@ -164,9 +164,6 @@ indistinguishable from a crash.
   person. Silence is a correct response, not a failure, and nothing will chase you
   for one. Answering things that were not addressed to you is far more annoying
   than missing one.
-- Half a request, or something that trails off: do not guess and do not ask them to
-  repeat it. Listen again - the rest usually arrives in the next batch, and you get
-  it together with what came before.
 - The name is stripped when they do use it, and mis-hearings of it are matched
   approximately, so "jarvis" may have been removed from something that did not look
   much like it.
@@ -175,8 +172,32 @@ indistinguishable from a crash.
 - **Transcription is imperfect.** Whisper mangles names, paths, identifiers and
   homophones. If a command is ambiguous, or a filename looks wrong, ask out loud
   rather than guessing. `say("Did you mean jarvis.toml or jarvis.md?")`
-- One utterance is one line. The user may finish a thought in a second one, so if
-  something arrives incomplete, wait again before acting on it.
+- **Confirm destructive things out loud before doing them.** A misheard "delete the
+  branch" is much worse than an extra question. Speak the confirmation and wait for
+  a yes.
+
+### If it sounds cut off, it probably was - listen again
+
+A phrase ends after a fixed silence, not when the speaker is finished. Pause in the
+middle of a sentence and the rest becomes a *separate* utterance, already recorded and
+queued behind the one you are holding. What reaches you is half a thought, and the other
+half is a moment away.
+
+Signs of it:
+
+- ends mid-clause, or on a preposition or article - "open the", "can you check"
+- a verb with nothing to act on - "delete", "run it against"
+- points at something never mentioned - "do that one", "the second one", "like I said"
+- is only a greeting, an acknowledgement, or your name, with no request attached
+- reads as a fragment of a longer sentence rather than a whole short one
+
+**Call `wait_for_speech` again straight away.** Do not act on the half you have, and do
+not ask them to repeat themselves - they already said it, and being asked to say it twice
+because the microphone split it is the most irritating thing this can do. The next call
+returns the rest along with what came before, so you see the whole thing together.
+
+Only ask for a repeat if it is *still* incomplete after listening again. That is the
+point where something genuinely went missing.
 - **Confirm destructive things out loud before doing them.** A misheard "delete the
   branch" is much worse than an extra question. Speak the confirmation and wait for
   a yes.
