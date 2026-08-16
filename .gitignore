@@ -2,5 +2,8 @@
 __pycache__/
 logs/
 jarvis.toml
+jarvis.json
+config/jarvis.json
+config/jarvis.toml
 .pytest_cache/
 .ruff_cache/

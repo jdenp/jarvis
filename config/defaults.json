@@ -1,0 +1,69 @@
+{
+  "audio": {
+    "device_index": null,
+    "phrase_time_limit": 60.0,
+    "calibration_seconds": 1.5,
+    "dynamic_energy_threshold": true,
+    "energy_threshold": null,
+    "min_energy_threshold": 55.0,
+    "pause_threshold": 1.7,
+    "echo_guard_seconds": 0.5
+  },
+  "wake": {
+    "words": [
+      "jarvis",
+      "hey jarvis",
+      "jervis",
+      "javis",
+      "jovis",
+      "jarvus",
+      "darvis",
+      "darvus",
+      "travis",
+      "javas"
+    ],
+    "required": false,
+    "fuzzy": true,
+    "fuzzy_threshold": 0.78
+  },
+  "stt": {
+    "backend": "whisper",
+    "language": "en-GB",
+    "whisper_model": "base.en",
+    "whisper_device": "cpu",
+    "whisper_compute_type": "default",
+    "whisper_beam_size": 1,
+    "whisper_vad": true,
+    "hotwords": "JARVIS"
+  },
+  "tts": {
+    "engine": "auto",
+    "voice": "en-GB-RyanNeural",
+    "sapi_voice": "George, Hazel",
+    "rate": 210,
+    "volume": 1.0
+  },
+  "service": {
+    "host": "127.0.0.1",
+    "port": 8770,
+    "max_wait_seconds": 55.0,
+    "transcript_file": "heard.jsonl",
+    "settle_seconds": 0.8,
+    "acknowledge_after": 4.0,
+    "acknowledgements": [
+      "Let me have a look.",
+      "One moment, sir.",
+      "Looking into that now.",
+      "Give me a second.",
+      "Checking that for you, sir.",
+      "Right, on it.",
+      "Just a moment.",
+      "Working on it, sir.",
+      "Let me check.",
+      "Bear with me.",
+      "On it now.",
+      "Give me a moment, sir."
+    ]
+  },
+  "log_level": "INFO"
+}

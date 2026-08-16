@@ -202,9 +202,37 @@ uv sync --extra edge     # better voice, but sends every reply to Microsoft
 
 Everything is configurable three ways, each beating the last:
 
-1. `jarvis.toml` in the project root - see `jarvis.toml.example` for the full list
+1. a config file - `config/jarvis.json`
 2. environment variables, e.g. `JARVIS_STT_BACKEND`, `JARVIS_TTS_ENGINE`
 3. command line flags
+
+```powershell
+jarvis config              # everything in effect, and where it came from
+jarvis config --defaults   # just the built-in defaults
+```
+
+`config/defaults.json` lists every option with its default value. It is generated from
+the code by `jarvis config --defaults --write`, and a test fails if the two drift - a
+hand-written example goes stale the first time someone changes a default.
+
+Copy the bits you want into `config/jarvis.json`; anything absent keeps its default.
+JSON has no comments, so any key beginning with `_` is ignored and can be used to write
+down why a setting is what it is:
+
+```json
+{
+  "stt": {
+    "_why": "GPU is free on this machine, and CPU is slow on long utterances",
+    "whisper_model": "small.en",
+    "whisper_device": "auto"
+  }
+}
+```
+
+`config/jarvis.toml.example` is the annotated version of the same settings, kept because
+comments explain trade-offs better than a schema can. TOML is still accepted - the search
+order is `config/jarvis.json`, `config/jarvis.toml`, `jarvis.json`, `jarvis.toml`, or
+whatever `JARVIS_CONFIG` points at.
 
 ## Architecture
 

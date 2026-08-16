@@ -1,11 +1,17 @@
 """Runtime configuration.
 
-Precedence, lowest to highest: dataclass defaults, ``jarvis.toml``, ``JARVIS_*``
+Precedence, lowest to highest: dataclass defaults, the config file, ``JARVIS_*``
 environment variables, command line flags.
+
+The defaults here are the single source of truth. ``config/defaults.json`` is
+generated from them by ``jarvis config --defaults``, and a test fails if the two
+drift - a hand-maintained example file goes stale the first time anyone changes
+a default, which it repeatedly did.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass, field, fields, is_dataclass, replace
@@ -172,21 +178,73 @@ class Config:
     def log_dir(self) -> Path:
         return project_root() / "logs"
 
+    @property
+    def config_dir(self) -> Path:
+        return project_root() / "config"
+
+    def as_dict(self) -> dict[str, Any]:
+        """Plain JSON-friendly mapping. Tuples become lists, paths are not included."""
+        return _unwrap(self)
+
     @classmethod
     def load(cls, path: Path | None = None, environ: dict[str, str] | None = None) -> Config:
-        """Build a Config from the TOML file and environment."""
+        """Build a Config from a config file and the environment.
+
+        With no path, the first of ``CONFIG_FILES`` that exists is used. JSON is
+        the documented format; TOML still works for anyone who had one.
+        """
         environ = os.environ if environ is None else environ
-        path = path or project_root() / "jarvis.toml"
+        found = path if path is not None else find_config_file()
 
         data: dict[str, Any] = {}
-        if path.is_file():
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        if found is not None and found.is_file():
+            data = read_config_file(found)
 
         config = _apply(cls(), data)
         return _apply(config, _env_overrides(environ))
 
 
+# Searched in order. config/ first so everything to do with configuration lives
+# in one place; the root files are what earlier versions used.
+CONFIG_FILES = (
+    "config/jarvis.json",
+    "config/jarvis.toml",
+    "jarvis.json",
+    "jarvis.toml",
+)
+
 _SECTIONS = frozenset({"audio", "wake", "stt", "tts", "service"})
+
+
+def find_config_file(root: Path | None = None) -> Path | None:
+    """First config file that exists, or None. JARVIS_CONFIG overrides the search."""
+    if explicit := os.environ.get("JARVIS_CONFIG"):
+        candidate = Path(explicit).expanduser()
+        return candidate if candidate.is_file() else None
+
+    root = root or project_root()
+    for relative in CONFIG_FILES:
+        candidate = root / relative
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def read_config_file(path: Path) -> dict[str, Any]:
+    """Parse a config file by extension."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        return json.loads(text) if text.strip() else {}
+    return tomllib.loads(text)
+
+
+def _unwrap(value: Any) -> Any:
+    """Dataclasses to dicts, tuples to lists, everything else as it is."""
+    if is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _unwrap(getattr(value, f.name)) for f in fields(value)}
+    if isinstance(value, tuple | list):
+        return [_unwrap(item) for item in value]
+    return value
 
 
 def _env_overrides(environ: dict[str, str]) -> dict[str, Any]:
@@ -211,6 +269,11 @@ def _apply(config: Any, data: dict[str, Any]) -> Any:
     known = {f.name: f for f in fields(config)}
     updates: dict[str, Any] = {}
     for key, value in data.items():
+        # JSON has no comments, so anything underscore-prefixed is treated as a
+        # note. Without this the only way to explain a setting is out of band,
+        # and settings whose reasoning is not written down get changed back.
+        if key.startswith("_"):
+            continue
         spec = known.get(key)
         if spec is None:
             raise ValueError(f"Unknown config option: {key}")

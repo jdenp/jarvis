@@ -17,6 +17,12 @@ Voice mode starts when they ask in words - "listen", "wait on jarvis", "use voic
 "talk to me", or anything else that plainly means it. It ends when they say so, or when
 they go back to typing.
 
+**A message that is just "jarvis", on its own, means start listening now.** It is not a
+greeting and it is not a question - it is them telling you they are about to speak rather
+than type. Call `wait_for_speech` immediately. Do not reply in text, do not ask what they
+need, do not check anything first beyond starting the service if it is not running. They
+are already at the microphone waiting for you.
+
 The rest of this file applies only once they have asked.
 
 ## Starting it

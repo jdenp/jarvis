@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from . import __version__
 from .client import ServiceUnavailable, VoiceClient
-from .config import Config
+from .config import Config, find_config_file
 from .logging_setup import configure
 from .microphone import Microphone, MicrophoneError
 
@@ -76,6 +76,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("mcp", help="run as an MCP server over stdio, for Cline and friends")
     sub.add_parser("status", help="report on the running voice service")
+
+    cfg = sub.add_parser("config", help="show the settings in effect, as JSON")
+    cfg.add_argument(
+        "--defaults",
+        action="store_true",
+        help="show the built-in defaults rather than what is in effect",
+    )
+    cfg.add_argument(
+        "--write",
+        action="store_true",
+        help="write to config/defaults.json instead of printing",
+    )
     return parser
 
 
@@ -236,6 +248,28 @@ def run_next(config: Config, args: argparse.Namespace) -> int:
             return 130
 
 
+DEFAULTS_FILE = "defaults.json"
+
+
+def run_config(config: Config, args: argparse.Namespace) -> int:
+    """Show the settings, or regenerate the defaults file from the dataclasses."""
+    shown = Config() if args.defaults else config
+    body = json.dumps(shown.as_dict(), indent=2) + "\n"
+
+    if not args.write:
+        print(body, end="")
+        if not args.defaults:
+            source = find_config_file()
+            print(f"\n// from {source}" if source else "\n// no config file, all defaults")
+        return 0
+
+    target = config.config_dir / DEFAULTS_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    print(f"Wrote {target}")
+    return 0
+
+
 def run_status(config: Config) -> int:
     with VoiceClient(config.service) as voice:
         try:
@@ -259,12 +293,14 @@ def main(argv: list[str] | None = None) -> int:
 
     # Clients print results for something else to read, and MCP in particular
     # must keep stdout clean - anything there is parsed as JSON-RPC.
-    if args.command in {"say", "next", "status"}:
+    if args.command in {"say", "next", "status", "config"}:
         configure(config.log_dir, "WARNING")
         if args.command == "say":
             return run_say(config, args)
         if args.command == "next":
             return run_next(config, args)
+        if args.command == "config":
+            return run_config(config, args)
         return run_status(config)
 
     if args.command == "mcp":

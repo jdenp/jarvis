@@ -31,6 +31,11 @@ do not call wait_for_speech, do not call say, and do not start the service.
 Voice mode starts only when the user asks in words - "listen", "wait on jarvis",
 "use voice", "talk to me" or similar. Until they do, ignore all of this.
 
+A message that is just "jarvis" on its own means start listening now. It is not
+a greeting or a question - it is them saying they are about to speak rather than
+type. Call wait_for_speech immediately, with no text reply and nothing else
+first beyond starting the service if it is down.
+
 Once they have asked, and until they say to stop:
 
 YOU DECIDE WHAT WAS MEANT FOR YOU. There is no wake word. The microphone sends
