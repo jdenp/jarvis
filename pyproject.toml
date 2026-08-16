@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.3.2"
+version = "0.3.3"
 description = "Jarvis - An AI voice assistant inspired by Iron Man"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,6 +21,10 @@ dependencies = [
 # Opt in, and NOT local: sends every reply to Microsoft's Edge TTS service in
 # exchange for a much better neural voice.
 edge = ["edge-tts>=6.1", "pygame>=2.6"]
+# CUDA runtime for Whisper, without a system CUDA install. Buys about 0.2s per
+# utterance and costs ~340MB of VRAM, most of it the CUDA context rather than
+# the model - so it is worth it only if the GPU is otherwise idle.
+cuda = ["nvidia-cublas-cu12>=12.4", "nvidia-cudnn-cu12>=9,<10"]
 
 [project.scripts]
 jarvis = "jarvis.cli:main"

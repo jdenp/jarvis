@@ -89,7 +89,12 @@ class SttConfig:
     backend: str = "whisper"  # whisper (local) | google (uploads your audio)
     language: str = "en-GB"
     whisper_model: str = "base.en"
-    whisper_device: str = "auto"  # auto | cuda | cpu
+    # cpu by default. CUDA is about 0.2s quicker per utterance and costs ~340MB
+    # of VRAM, nearly all of it the CUDA context rather than the model. On a
+    # machine also running a local LLM that is a bad trade: the delay is
+    # dominated by audio.pause_threshold, not by transcription. Set "auto" or
+    # "cuda" if the GPU is free, and install the extra: uv sync --extra cuda
+    whisper_device: str = "cpu"  # cpu | cuda | auto
     whisper_compute_type: str = "default"
     whisper_beam_size: int = 1
     whisper_vad: bool = True

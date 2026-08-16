@@ -9,6 +9,10 @@ microphone audio to Google. It is opt in, and says so loudly when selected.
 from __future__ import annotations
 
 import logging
+import os
+import site
+from contextlib import suppress
+from pathlib import Path
 from typing import Protocol
 
 import speech_recognition as sr
@@ -29,6 +33,36 @@ class Transcriber(Protocol):
     def is_local(self) -> bool: ...
 
 
+def add_bundled_cuda_to_path() -> list[str]:
+    """Let ctranslate2 find CUDA libraries installed as pip packages.
+
+    `nvidia-cublas-cu12` and friends drop their DLLs in site-packages, which
+    Windows does not search. Without this ctranslate2 reports CUDA as missing
+    even though it is sitting right there, and everything falls back to CPU.
+
+    Returns the directories added, for logging. Safe and pointless elsewhere.
+    """
+    if not hasattr(os, "add_dll_directory"):  # not Windows
+        return []
+
+    added = []
+    for parent in site.getsitepackages():
+        for lib in ("cublas", "cudnn", "cuda_runtime", "cuda_nvrtc"):
+            path = Path(parent) / "nvidia" / lib / "bin"
+            if path.is_dir():
+                with suppress(OSError):
+                    os.add_dll_directory(str(path))
+                added.append(str(path))
+
+    if added:
+        # PATH as well as add_dll_directory. ctranslate2 loads cublas itself,
+        # with a plain LoadLibrary that does not consult the directories added
+        # above, so without this it still reports CUDA as missing.
+        os.environ["PATH"] = os.pathsep.join([*added, os.environ.get("PATH", "")])
+        logger.debug("Added %d bundled CUDA directories to the DLL path.", len(added))
+    return added
+
+
 class WhisperSTT:
     """Local transcription with faster-whisper.
 
@@ -41,6 +75,7 @@ class WhisperSTT:
 
     def __init__(self, config: SttConfig | None = None) -> None:
         self.config = config or SttConfig()
+        add_bundled_cuda_to_path()
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:  # pragma: no cover - dependency is declared

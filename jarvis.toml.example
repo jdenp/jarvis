@@ -47,10 +47,12 @@ required = false
 backend = "whisper"
 language = "en-GB"
 whisper_model = "base.en"      # tiny.en, base.en, small.en, medium.en, large-v3
-# auto tries CUDA and falls back to CPU if it is not actually usable. Pin to
-# "cpu" if you would rather not share VRAM with the model server - base.en
-# transcribes a short phrase in well under half a second on CPU.
-whisper_device = "auto"        # auto | cuda | cpu
+# Measured on base.en with 5s of speech: cpu 0.32s and no VRAM, cuda 0.09s and
+# 339MB. Most of that VRAM is the CUDA context, not the model, so a smaller
+# model saves little. The pipeline delay is dominated by pause_threshold, so
+# cpu is the default - switch to "auto" only if the GPU is otherwise idle, and
+# install the runtime with: uv sync --extra cuda
+whisper_device = "cpu"         # cpu | cuda | auto
 whisper_compute_type = "default"
 whisper_beam_size = 1          # 1 is greedy and fastest, raise for accuracy
 whisper_vad = true             # skip silence before transcribing
