@@ -273,6 +273,55 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+## Example configuration
+
+One machine this runs on, as a starting point rather than a recommendation. The
+interesting constraint is that a 35B model and a speech model are sharing 12 GB.
+
+| | |
+| --- | --- |
+| GPU | RTX 4070 Ti, 12 GB |
+| CPU | Ryzen 7 7700X, 8 cores |
+| RAM | 32 GB DDR5-4800 |
+| Agent | Cline CLI, talking to JARVIS over MCP |
+| LLM | Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context |
+
+**VRAM is the binding constraint, and Whisper loses.** The LLM takes almost all of the
+12 GB, leaving roughly 900 MB. `small.en` on the GPU wants 563 MB of that, so it fits
+only because the LLM offloads 25 MoE layers to CPU (`--n-cpu-moe 25`) to make room. The
+alternative - `small.en` on CPU - is free in VRAM but costs 0.66s on a short utterance
+and far more on a long one, which is why the GPU won.
+
+`config/jarvis.json`:
+
+```json
+{
+  "stt": {
+    "whisper_model": "small.en",
+    "whisper_device": "auto",
+    "whisper_compute_type": "int8_float16"
+  }
+}
+```
+
+**Sampling matters as much as the prompt.** llama.cpp defaults, and Qwen3's own
+recommended `--temp 0.6`, are tuned for chat. Choosing a tool is a one-right-answer
+decision with no creative upside, and at 0.6 a plausible-but-wrong tool gets sampled
+often enough to notice - the agent deciding to speak and then calling the listen tool
+instead. Tightening it fixed more than several rounds of rewording the instructions did:
+
+```
+--temp 0.2 --top-k 20 --top-p 0.8 --min-p 0.05 --jinja
+```
+
+`--jinja` uses the model's own chat template, which is what parses tool calls on the
+OpenAI-compatible endpoint.
+
+**What it feels like.** About 1.7s of silence before a phrase is considered finished,
+~0.2s to transcribe, 0.8s settle, then however long the agent takes to think - so
+roughly three seconds from finishing a sentence to the agent having it, and the model's
+own latency on top of that.
+
 ## License
 
 MIT
