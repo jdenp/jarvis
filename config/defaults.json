@@ -33,6 +33,7 @@
     "transcript_file": "heard.jsonl",
     "settle_seconds": 0.8,
     "acknowledge_after": 4.0,
+    "stale_after_seconds": 120.0,
     "acknowledgements": [
       "Let me have a look.",
       "One moment, sir.",

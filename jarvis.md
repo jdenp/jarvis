@@ -23,6 +23,14 @@ wait_for_speech()  ->  do the work  ->  say(answer)  ->  wait_for_speech()
 
 Straight back to listening after speaking. No "anything else?", no written recap.
 
+**Never end your turn on a `say()`.** They are still sitting there, still listening, and
+a turn that stops after speaking drops the conversation mid air - as far as they can tell
+you walked off. The loop ends when they end it.
+
+An utterance may come back with `said_seconds_ago`, and one carrying a `stale` note was
+spoken while nobody was listening - a leftover from before, not a live request. Unless it
+plainly still needs doing, stay quiet and listen again.
+
 ## The three rules
 
 **1. Answering is calling `say()`.** Working out the answer is not answering. Writing it

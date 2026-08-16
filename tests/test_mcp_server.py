@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -140,3 +141,67 @@ def test_the_idle_counter_resets_once_something_is_said(rig):
     voice.next_heard = []
     first_idle_again = raw("wait_for_speech")
     assert '"waited_seconds": 240' in first_idle_again or "waited_seconds" in first_idle_again
+
+
+def test_backlog_from_before_the_first_listen_is_skipped():
+    """The MCP server is spawned when the client launches, which can be long
+    before anyone asks for voice. Whatever was said in between was said to
+    nobody, and replaying it makes "jarvis" answer a conversation that is over.
+    """
+    asked_from: list[int] = []
+
+    class DriftingVoice(FakeVoice):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cursor = 0
+
+        def status(self) -> dict:
+            return {"cursor": self.cursor}
+
+        def heard(self, since=0, wait=0, settle=None) -> dict:
+            asked_from.append(since)
+            return {"heard": list(self.next_heard), "cursor": self.cursor}
+
+    voice = DriftingVoice()
+    server = build_server(Config(), client=voice)
+    voice.cursor = 7  # spoken between launch and the first wait_for_speech
+
+    asyncio.run(server.call_tool("wait_for_speech", {}))
+    assert asked_from == [7], "listening starts from now, not from launch"
+
+    # After that, nothing is skipped: a queued utterance is one spoken while the
+    # agent was busy, which is exactly what it must not miss.
+    voice.cursor = 12
+    asyncio.run(server.call_tool("wait_for_speech", {}))
+    assert asked_from[1] == 7
+
+
+def _heard_at(text: str, ago: float) -> dict:
+    at = datetime.now(UTC) - timedelta(seconds=ago)
+    return {"text": text, "id": 1, "at": at.isoformat(timespec="seconds")}
+
+
+def test_an_old_utterance_is_flagged_as_a_leftover(rig):
+    _, voice, raw = rig
+    voice.next_heard = [_heard_at("thank you", ago=1200)]
+    result = raw("wait_for_speech")
+    assert "stale" in result
+    assert "1200s ago" in result
+    assert "said_seconds_ago" in result
+
+
+def test_something_just_said_is_not_flagged(rig):
+    _, voice, raw = rig
+    voice.next_heard = [_heard_at("what time is it", ago=2)]
+    result = raw("wait_for_speech")
+    assert "stale" not in result
+    assert "said_seconds_ago" in result
+
+
+def test_speaking_does_not_end_the_conversation(rig):
+    """Ending the turn after say() looks, from the other side, like walking off
+    mid sentence."""
+    _, _voice, raw = rig
+    result = raw("say", {"text": "Half past two, sir."})
+    assert "wait_for_speech" in result
+    assert "Do not stop here" in result

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import random
 import threading
+from datetime import UTC, datetime
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config, ServiceConfig
@@ -31,6 +32,9 @@ now - call wait_for_speech immediately, no text reply, nothing else first. So do
 
 THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech.
 Straight back to listening after speaking. No "anything else?", no written recap.
+Never end your turn on a say() - they are still there, still listening, and it
+drops the conversation mid air. The loop ends when they end it, not when you
+have finished a sentence.
 
 THREE RULES:
 
@@ -134,6 +138,17 @@ def probably_needs_work(text: str) -> bool:
     return len(words) >= 3 or text.strip().endswith("?")
 
 
+def age_seconds(item: dict, now: datetime | None = None) -> float | None:
+    """How long ago an utterance was recorded, or None if it cannot be told."""
+    try:
+        at = datetime.fromisoformat(str(item["at"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return max(0.0, ((now or datetime.now(UTC)) - at).total_seconds())
+
+
 def looks_like_a_question(text: str) -> bool:
     """Whether an utterance was plainly asking for an answer.
 
@@ -167,6 +182,9 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     # keeping quiet just pushes it into answering things nobody asked.
     unanswered_question: str | None = None
     quiet_calls = 0
+    # This process is spawned when the client starts, which can be a long time
+    # before anyone asks it to listen. See wait_for_speech.
+    first_listen = True
     acknowledger = Acknowledger(voice, config.service)
 
     server = MCPServer(
@@ -191,13 +209,22 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     def wait_for_speech() -> dict:
         # No timeout argument on purpose. Given one, models pick a small number
         # and give up while the user is still deciding what to say.
-        nonlocal cursor, unanswered_question, quiet_calls
+        nonlocal cursor, unanswered_question, quiet_calls, first_listen
 
         # Calling this again means the agent has moved on, so no holding line.
         # There is nothing to chase it about: with no wake word, most utterances
         # deserve no reply, and a server cannot tell a correct silence from a
         # forgotten one.
         acknowledger.cancel()
+
+        # "Start listening" means from now, not from whenever the client
+        # happened to launch this process. Anything said in between was said to
+        # nobody. Only on the first call: after that a queued utterance is one
+        # spoken while the agent was busy, which is exactly what it must not
+        # miss.
+        if first_listen:
+            first_listen = False
+            cursor = max(cursor, _initial_cursor(voice))
 
         try:
             result = voice.heard(since=cursor, wait=config.service.max_wait_seconds)
@@ -229,6 +256,18 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             }
         quiet_calls = 0
 
+        # Age travels with each utterance. Nothing is dropped for being old -
+        # the agent judges, as it does with everything else here - but "said
+        # twenty minutes ago" is the difference between a live request and a
+        # leftover, and it cannot be inferred from the text.
+        now = datetime.now(UTC)
+        newest_age = None
+        for item in heard:
+            age = age_seconds(item, now)
+            if age is not None:
+                item["said_seconds_ago"] = int(age)
+                newest_age = age
+
         spoken_text = [item["text"] for item in heard]
         missed, unanswered_question = unanswered_question, None
         last = spoken_text[-1]
@@ -255,6 +294,13 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             ),
             "detail": heard,
         }
+        stale_after = config.service.stale_after_seconds
+        if stale_after > 0 and newest_age is not None and newest_age > stale_after:
+            payload["stale"] = (
+                f"This was said {int(newest_age)}s ago, while nobody was listening. "
+                "Treat it as a leftover rather than a live request: unless it plainly "
+                "still needs doing, stay silent and call wait_for_speech again."
+            )
         if missed:
             payload["unanswered"] = (
                 f'You never spoke an answer to "{missed}". If you worked one out, '
@@ -320,7 +366,12 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         return {
             "spoken": True,
             "text": text,
-            "next_step": "Call wait_for_speech again to keep listening.",
+            "next_step": (
+                "Spoken. Do not stop here - they are still listening, and a turn "
+                "that ends after say() looks to them like you walked off mid "
+                "conversation. Call wait_for_speech now. It is the only way their "
+                "reply reaches you, and it is how the loop stays open."
+            ),
         }
 
     @server.tool(

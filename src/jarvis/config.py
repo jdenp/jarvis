@@ -114,6 +114,10 @@ class ServiceConfig:
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0
+    # An utterance older than this is flagged as backlog rather than a live
+    # request - an MCP server outlives a single conversation, so what is queued
+    # when a new one starts may be minutes old. 0 disables the flag.
+    stale_after_seconds: float = 120.0
     # Some carry the "sir" and some do not, so rotating through them lands the
     # inflection as a habit rather than a tic. The order is shuffled per process
     # - a fixed list always opened with the same line, and a new MCP server is
