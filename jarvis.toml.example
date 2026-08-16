@@ -15,10 +15,10 @@ dynamic_energy_threshold = true
 # Floor under the calibrated threshold. Lower means more sensitive: if you have
 # to speak up to be heard, drop this. Raise it if JARVIS starts hearing itself,
 # though the echo guard should catch that first.
-min_energy_threshold = 45.0
+min_energy_threshold = 55.0
 # Silence that ends a phrase. The main thing to change if you keep getting cut
 # off mid sentence, and the main cost in how long before the agent sees you.
-pause_threshold = 2.0
+pause_threshold = 1.7
 # How long after JARVIS stops talking the microphone stays ignored. Covers the
 # output buffer draining and the room's echo tail. Raise it in a live room, but
 # note that a reply starting inside this window is dropped.

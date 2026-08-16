@@ -38,12 +38,12 @@ class AudioConfig:
     # microphone.py does the real work of not transcribing ourselves, so this
     # only has to catch the pathological case. Raise it if JARVIS starts hearing
     # itself, lower it if you have to speak up to be heard.
-    min_energy_threshold: float = 45.0
+    min_energy_threshold: float = 55.0
     # How long a silence ends a phrase. Deliberately generous: pausing to think
     # mid sentence should not split one request into two. This is the main cost
     # in the delay before an agent sees what you said, and the main thing to
     # change if you keep getting cut off.
-    pause_threshold: float = 2.0
+    pause_threshold: float = 1.7
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
 

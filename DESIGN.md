@@ -41,7 +41,7 @@ Two limits, neither fixable by changing the transport:
   by nature, which is what `check_for_speech` is for: a non-blocking peek the agent is
   told to make between the steps of a long task, so a change of mind reaches it before it
   has finished doing the wrong thing.
-- **The latency floor is whatever `pause_threshold` is set to**, currently 2.0s, plus
+- **The latency floor is whatever `pause_threshold` is set to**, currently 1.7s, plus
   ~0.3s of Whisper and a 0.8s settle window. Measured cost from transcript to agent is
   ~0.0s, so optimising the transport is pointless. It is set high deliberately: being
   cut off mid sentence is a worse experience than waiting, and the two trade directly

@@ -102,7 +102,7 @@ Two things worth knowing before you build on it:
 - **Nothing preempts an agent mid-turn.** If it is thirty seconds into a build, your speech
   waits until it next calls `wait_for_speech`. Cooperative, not preemptive, and no transport
   changes that.
-- **The latency floor is `audio.pause_threshold`**, 2.0s by default: that much silence
+- **The latency floor is `audio.pause_threshold`**, 1.7s by default: that much silence
   before JARVIS decides your sentence ended, plus ~0.3s of Whisper and a 0.8s settle
   window. Measured transport cost from transcription to the agent is ~0.0s, so that is
   the only knob worth touching. It is set high deliberately - being cut off mid sentence
@@ -134,12 +134,12 @@ barely helps - roughly 265 MiB is the cost of using the GPU at all.
 
 Whether it is worth it depends on what else the GPU is doing. On a machine also running
 a local LLM, 0.2s off a pipeline whose delay is dominated by `audio.pause_threshold`
-(2.0s) is a poor trade for several hundred megabytes. On an idle GPU it is free.
+(1.7s) is a poor trade for several hundred megabytes. On an idle GPU it is free.
 
 **The shipped default is `base.en` on `cpu`** - no VRAM, no CUDA install, 0.32s. If
 accuracy matters more than latency and the GPU is spoken for, `small.en` on `cpu` is the
 middle ground: the better model for nothing but about 0.66s more per utterance, which
-against a 2.0s `pause_threshold` takes the round trip from roughly 3.1s to 3.8s.
+against a 1.7s `pause_threshold` takes the round trip from roughly 2.8s to 3.5s.
 
 To use the GPU instead:
 
