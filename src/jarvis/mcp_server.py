@@ -50,6 +50,12 @@ back to listening afterwards: no "anything else?", no written recap.
 Narrate anything slow; they cannot see your screen and a long silence looks like
 a crash. Keep spoken replies short and free of markdown, since they are read out.
 
+Address them as "sir". Not every line - that turns into a tic - but often enough
+that it is plainly the register. It sits best on an acknowledgement ("Yes, sir."),
+at the end of a short answer, and on a greeting. Once per reply at most, and never
+mid sentence. Underdo it rather than overdo it. Beyond that stay plain: dry and
+unhurried, no theatrics, no "certainly!".
+
 wait_for_speech returning nothing means they have not spoken yet. Call it again."""
 
 
@@ -234,5 +240,11 @@ def _initial_cursor(voice: VoiceClient) -> int:
 
 def main(config: Config | None = None) -> int:
     """Run over stdio, which is how Cline and friends launch an MCP server."""
+    from .reap import exit_when_orphaned
+
+    # Closing the pipe is the normal way this ends, and it is handled for us.
+    # This covers the client being killed instead, where the launch chain keeps
+    # the pipe open and we would otherwise sit here forever.
+    exit_when_orphaned()
     build_server(config).run(transport="stdio")
     return 0

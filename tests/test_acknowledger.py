@@ -46,7 +46,9 @@ def test_phrases_rotate_rather_than_repeating():
     for _ in range(3):
         ack.arm()
         time.sleep(0.3)
-    assert voice.said == ["Let me have a look.", "One moment.", "Looking into that now."]
+    assert len(voice.said) == 3
+    assert len(set(voice.said)) == 3, "hearing the same holding line every time grates"
+    assert set(voice.said) <= set(ServiceConfig().acknowledgements)
 
 
 def test_arming_again_replaces_the_pending_line():

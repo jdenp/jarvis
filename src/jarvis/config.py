@@ -33,9 +33,12 @@ class AudioConfig:
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
-    # A very quiet room calibrates down to single digits, which is sensitive
-    # enough to hear the speakers. Refuse to go below this.
-    min_energy_threshold: float = 80.0
+    # Floor under the calibrated threshold, because a silent room calibrates to
+    # single digits and then hears its own speakers. Kept low: the echo guard in
+    # microphone.py does the real work of not transcribing ourselves, so this
+    # only has to catch the pathological case. Raise it if JARVIS starts hearing
+    # itself, lower it if you have to speak up to be heard.
+    min_energy_threshold: float = 45.0
     # How long a silence ends a phrase. Deliberately generous: pausing to think
     # mid sentence should not split one request into two. This is the main cost
     # in the delay before an agent sees what you said, and the main thing to
@@ -129,12 +132,14 @@ class ServiceConfig:
     # If the agent has not answered within this long, speak a holding line so
     # the wait does not sound like a crash. 0 disables it.
     acknowledge_after: float = 4.0
+    # Some carry the "sir" and some do not, so rotating through them lands the
+    # inflection as a habit rather than a tic.
     acknowledgements: tuple[str, ...] = (
         "Let me have a look.",
-        "One moment.",
+        "One moment, sir.",
         "Looking into that now.",
         "Give me a second.",
-        "Checking that for you.",
+        "Checking that for you, sir.",
     )
 
 

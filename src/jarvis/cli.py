@@ -124,7 +124,11 @@ def privacy_report(config: Config, stt_local: bool, tts_local: bool) -> str:
 
 def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     """Own the microphone and expose it. This is what an agent talks to."""
+    from .reap import reap_orphans
     from .service import VoiceService, build_server
+
+    if cleared := reap_orphans():
+        logger.info("Cleared %d stranded MCP server(s) from an earlier session.", cleared)
 
     service = VoiceService(config)
     try:
