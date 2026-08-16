@@ -103,6 +103,11 @@ Two things worth knowing before you build on it:
 - **Nothing preempts an agent mid-turn.** If it is thirty seconds into a build, your speech
   waits until it next calls `wait_for_speech`. Cooperative, not preemptive, and no transport
   changes that.
+- **A quiet session returns empty results.** `wait_for_speech` blocks for
+  `service.max_wait_seconds` (55s by default) and returns nothing if you have not spoken.
+  Some clients count repeated identical results as a stuck loop and end the session, so if
+  yours allows a long tool timeout, raise `max_wait_seconds` to match and it will return
+  empty far less often.
 - **The latency floor is `audio.pause_threshold`**, 1.7s by default: that much silence
   before JARVIS decides your sentence ended, plus ~0.3s of Whisper and a 0.8s settle
   window. Measured transport cost from transcription to the agent is ~0.0s, so that is

@@ -102,3 +102,41 @@ def test_say_still_reaches_the_service(rig):
     _, voice, raw = rig
     assert "spoken" in raw("say", {"text": "Right you are."})
     assert voice.said == ["Right you are."]
+
+
+def test_the_holding_line_is_not_armed_for_an_acknowledgement(rig):
+    """ "Okay." and "Thanks." need no reply. Speaking "Working on it, sir" at
+    them answers something that was never a request."""
+    from jarvis.mcp_server import probably_needs_work
+
+    assert probably_needs_work("Okay.") is False
+    assert probably_needs_work("Thanks.") is False
+    assert probably_needs_work("Hello.") is False
+    assert probably_needs_work("What's the weather in Melbourne?") is True
+    assert probably_needs_work("open the config file") is True
+
+
+def test_idle_returns_are_not_identical(rig):
+    """Four identical empty results in a row read as a stuck loop to a client
+    counting consecutive failures, which killed the session."""
+    _, voice, raw = rig
+    voice.next_heard = []
+
+    results = [raw("wait_for_speech") for _ in range(3)]
+    assert all("Not an error" in r for r in results)
+    assert len(set(results)) == 3, "each idle result differs from the last"
+    assert "waited_seconds" in results[0]
+
+
+def test_the_idle_counter_resets_once_something_is_said(rig):
+    _, voice, raw = rig
+    voice.next_heard = []
+    raw("wait_for_speech")
+    raw("wait_for_speech")
+
+    voice.next_heard = [{"text": "right, carry on", "id": 9}]
+    assert "waited_seconds" not in raw("wait_for_speech")
+
+    voice.next_heard = []
+    first_idle_again = raw("wait_for_speech")
+    assert '"waited_seconds": 240' in first_idle_again or "waited_seconds" in first_idle_again

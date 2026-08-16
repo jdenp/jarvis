@@ -123,6 +123,17 @@ QUESTION_OPENERS = (
 )  # fmt: skip
 
 
+def probably_needs_work(text: str) -> bool:
+    """Whether an utterance is likely to send the agent off doing something.
+
+    Used to decide whether to arm the holding line. "Okay", "thanks" and "yeah"
+    need no reply, and speaking "Working on it, sir" at them is worse than
+    saying nothing - it answers something that was not a request.
+    """
+    words = text.strip().split()
+    return len(words) >= 3 or text.strip().endswith("?")
+
+
 def looks_like_a_question(text: str) -> bool:
     """Whether an utterance was plainly asking for an answer.
 
@@ -155,6 +166,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     # questions: most silence is correct, and nagging an agent that is rightly
     # keeping quiet just pushes it into answering things nobody asked.
     unanswered_question: str | None = None
+    quiet_calls = 0
     acknowledger = Acknowledger(voice, config.service)
 
     server = MCPServer(
@@ -179,7 +191,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     def wait_for_speech() -> dict:
         # No timeout argument on purpose. Given one, models pick a small number
         # and give up while the user is still deciding what to say.
-        nonlocal cursor, unanswered_question
+        nonlocal cursor, unanswered_question, quiet_calls
 
         # Calling this again means the agent has moved on, so no holding line.
         # There is nothing to chase it about: with no wake word, most utterances
@@ -201,17 +213,31 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         heard = result.get("heard", [])
         cursor = result.get("cursor", cursor)
         if not heard:
+            # Identical empty results in a row look like a stuck loop to a client
+            # counting consecutive failures, so say how long has been spent and
+            # be explicit that this is the normal idle case rather than an error.
+            quiet_calls += 1
+            waited = int(quiet_calls * config.service.max_wait_seconds)
             return {
                 "heard": [],
-                "next_step": "Nothing said yet. Call wait_for_speech again to keep waiting.",
+                "waited_seconds": waited,
+                "next_step": (
+                    f"Not an error - the user has simply been quiet for {waited}s. "
+                    "This is the expected idle result. Call wait_for_speech again; "
+                    "it will return the moment they speak."
+                ),
             }
+        quiet_calls = 0
 
         spoken_text = [item["text"] for item in heard]
         missed, unanswered_question = unanswered_question, None
         last = spoken_text[-1]
         if looks_like_a_question(last):
             unanswered_question = last
-        acknowledger.arm()  # fills the silence if an answer takes a while
+        # Only when there is plausibly work to do. Arming on "okay" or "thanks"
+        # produces a holding line for a reply that was never coming.
+        if probably_needs_work(last):
+            acknowledger.arm()
 
         # The judgement call is restated here, not only in the server
         # instructions, because a tool result lands in context immediately
