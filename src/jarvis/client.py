@@ -28,23 +28,11 @@ class VoiceClient:
     def status(self) -> dict:
         return self._get("/status", {})
 
-    def heard(
-        self,
-        since: int = 0,
-        wait: float = 0.0,
-        addressed_only: bool = False,
-        settle: float | None = None,
-    ) -> dict:
-        """Utterances after ``since``. With ``wait``, blocks until there is one.
-
-        ``addressed_only`` holds out for speech aimed at JARVIS rather than
-        waking on overheard chatter. Everything after the cursor comes back
-        either way, so the caller still sees the context around an instruction.
-        """
+    def heard(self, since: int = 0, wait: float = 0.0, settle: float | None = None) -> dict:
+        """Utterances after ``since``. With ``wait``, blocks until there is one."""
         params: dict[str, object] = {
             "since": since,
             "wait": max(0.0, min(wait, self.config.max_wait_seconds)),
-            "addressed": "1" if addressed_only else "0",
         }
         if settle is not None:
             params["settle"] = max(0.0, settle)

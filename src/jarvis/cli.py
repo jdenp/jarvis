@@ -43,9 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--tts", choices=["auto", "edge", "sapi", "none"], help="text to speech engine"
     )
     parser.add_argument("--stt", choices=["whisper", "google"], help="speech to text backend")
-    parser.add_argument(
-        "--no-wake-word", action="store_true", help="pass on everything, not just 'jarvis ...'"
-    )
     parser.add_argument("--port", type=int, help="port for the voice service")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
@@ -68,11 +65,6 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--since", type=int, help="only utterances after this id")
     nxt.add_argument("--json", action="store_true", help="print the raw record")
     nxt.add_argument("--follow", action="store_true", help="keep printing as more arrives")
-    nxt.add_argument(
-        "--all",
-        action="store_true",
-        help="wake on any speech, not just speech addressed to jarvis",
-    )
 
     sub.add_parser("mcp", help="run as an MCP server over stdio, for Cline and friends")
     sub.add_parser("status", help="report on the running voice service")
@@ -97,7 +89,6 @@ def apply_args(config: Config, args: argparse.Namespace) -> Config:
     if args.device is not None:
         audio = replace(audio, device_index=args.device)
 
-    wake = replace(config.wake, required=False) if args.no_wake_word else config.wake
     stt = replace(config.stt, backend=args.stt) if args.stt else config.stt
     tts = replace(config.tts, engine=args.tts) if args.tts else config.tts
     service = replace(config.service, port=args.port) if args.port else config.service
@@ -105,7 +96,6 @@ def apply_args(config: Config, args: argparse.Namespace) -> Config:
     return replace(
         config,
         audio=audio,
-        wake=wake,
         stt=stt,
         tts=tts,
         service=service,
@@ -224,16 +214,10 @@ def run_next(config: Config, args: argparse.Namespace) -> int:
             cursor = args.since if args.since is not None else voice.status()["cursor"]
             while True:
                 wait = slice_seconds if remaining is None else min(remaining, slice_seconds)
-                result = voice.heard(since=cursor, wait=wait, addressed_only=not args.all)
+                result = voice.heard(since=cursor, wait=wait)
                 cursor = result["cursor"]
                 for item in result["heard"]:
-                    if args.json:
-                        print(json.dumps(item), flush=True)
-                    else:
-                        # Mark context lines so a script can tell them apart from
-                        # an actual instruction without parsing JSON.
-                        prefix = "" if item.get("addressed", True) else "# "
-                        print(prefix + item["text"], flush=True)
+                    print(json.dumps(item) if args.json else item["text"], flush=True)
 
                 if result["heard"] and not args.follow:
                     return 0

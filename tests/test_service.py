@@ -72,31 +72,6 @@ def make_service(**config_overrides) -> tuple[VoiceService, FakeMicrophone, Fake
     return service, microphone, speech
 
 
-# ------------------------------------------------------------------ wake word
-
-
-def test_wake_word_is_stripped_before_the_agent_sees_it():
-    service, _, _ = make_service()
-    assert service._classify("Jarvis, open the config file") == (True, "open the config file")
-
-
-def test_speech_without_the_name_is_still_passed_on():
-    """No wake word by default - the agent judges what was meant for it."""
-    service, _, _ = make_service()
-    assert service._classify("just muttering to myself") == (True, "just muttering to myself")
-
-
-def test_the_name_can_be_made_mandatory_again():
-    service, _, _ = make_service(wake=replace(Config().wake, required=True))
-    assert service._classify("just muttering to myself") == (False, "just muttering to myself")
-    assert service._classify("jarvis open it") == (True, "open it")
-
-
-def test_bare_wake_word_is_kept_rather_than_sent_as_an_empty_command():
-    service, _, _ = make_service()
-    assert service._classify("jarvis") == (True, "jarvis")
-
-
 # ---------------------------------------------------------------------- speak
 
 
@@ -119,7 +94,6 @@ def test_status_reports_the_backends_in_use():
     service, _, _ = make_service()
     status = service.status()
     assert status["stt"] == "whisper"
-    assert status["wake_word_required"] is False
     assert status["cursor"] == 0
 
 
@@ -189,74 +163,6 @@ def test_say_over_http_reaches_the_speaker(running):
     assert speech.said == ["Understood."]
 
 
-def test_overheard_chatter_does_not_wake_a_waiting_agent(running):
-    service, client, _ = running
-    service.transcript.add("something about the weather", addressed=False)
-    assert client.heard(since=0, wait=0.3, addressed_only=True)["heard"] == []
-
-
-def test_being_addressed_wakes_it_and_brings_the_chatter_along(running):
-    """The split-request case: unaddressed speech is context, not an instruction."""
-    service, client, _ = running
-    service.transcript.add("open the config file", addressed=False)
-    service.transcript.add("jarvis", addressed=True, command="jarvis")
-
-    result = client.heard(since=0, wait=5, addressed_only=True, settle=0)
-    texts = [item["text"] for item in result["heard"]]
-    assert texts == ["open the config file", "jarvis"], "both, in order"
-    assert [item["addressed"] for item in result["heard"]] == [False, True]
-
-
-def test_the_settle_window_catches_a_hesitation_after_the_wake_word(running):
-    """Say "jarvis", pause, then the request. Returning on the first phrase
-    alone would hand the agent nothing to act on."""
-    service, client, _ = running
-    service.transcript.add("jarvis", addressed=True, command="jarvis")
-    threading.Timer(
-        0.2, lambda: service.transcript.add("what is the weather", addressed=False)
-    ).start()
-
-    result = client.heard(since=0, wait=5, addressed_only=True, settle=1.0)
-    assert [item["text"] for item in result["heard"]] == ["jarvis", "what is the weather"]
-
-
-def test_a_timeout_does_not_swallow_the_chatter_it_waited_through(running):
-    """The bug: /heard reported the transcript's cursor even when it returned
-    nothing, so unaddressed speech that arrived during a wait was skipped and
-    never reached the agent as context."""
-    service, client, _ = running
-    start = client.status()["cursor"]
-
-    service.transcript.add("the one in the parser", addressed=False)
-    timed_out = client.heard(since=start, wait=0.3, addressed_only=True)
-    assert timed_out["heard"] == []
-    assert timed_out["cursor"] == start, "cursor must not move past undelivered context"
-
-    service.transcript.add("jarvis fix it", addressed=True, command="fix it")
-    result = client.heard(since=timed_out["cursor"], wait=5, addressed_only=True, settle=0)
-    assert [i["text"] for i in result["heard"]] == ["the one in the parser", "jarvis fix it"]
-
-
-def test_the_cursor_only_advances_past_what_was_delivered(running):
-    service, client, _ = running
-    start = client.status()["cursor"]
-    first = service.transcript.add("jarvis one", addressed=True, command="one")
-    result = client.heard(since=start, wait=2, addressed_only=True, settle=0)
-    assert result["cursor"] == first.id
-
-
-def test_speech_during_a_long_task_is_waiting_at_the_next_checkpoint(running):
-    """Nothing is missed while the agent is busy - it is queued behind the cursor."""
-    service, client, _ = running
-    cursor = client.status()["cursor"]
-    for text in ("and check the tests too", "actually never mind that"):
-        service.transcript.add(text, addressed=False)
-    service.transcript.add("jarvis are you there", addressed=True, command="are you there")
-
-    result = client.heard(since=cursor, wait=5, addressed_only=True, settle=0)
-    assert len(result["heard"]) == 3, "everything said while busy is still there"
-
-
 def test_a_client_hanging_up_does_not_print_a_traceback(running, caplog):
     """A long poll held open for a minute means clients disappear mid request
     all the time. socketserver prints the whole stack for each one, which in the
@@ -297,3 +203,65 @@ def test_client_says_how_to_fix_it_when_nothing_is_listening():
     client = VoiceClient(ServiceConfig(port=9))
     with pytest.raises(ServiceUnavailable, match="jarvis serve"):
         client.status()
+
+
+def test_say_returns_before_the_speech_finishes():
+    """say() used to block until playback ended, holding the agent for the
+    length of the reply. SpeechEngine.say only queues; the waiting is now done
+    on a background thread rather than in the caller."""
+    service, _microphone, speech = make_service()
+    playing = threading.Event()
+    speech.wait = lambda timeout=None: playing.wait(timeout=5)
+
+    began = time.monotonic()
+    service.say("A reply long enough to take a while to read out.")
+    assert time.monotonic() - began < 0.5, "returned without waiting for playback"
+    assert speech.said == ["A reply long enough to take a while to read out."]
+    playing.set()
+
+
+def test_the_microphone_is_muted_for_the_whole_of_a_reply():
+    service, microphone, speech = make_service()
+    playing = threading.Event()
+    speech.wait = lambda timeout=None: playing.wait(timeout=5)
+
+    service.say("First sentence.")
+    assert microphone.muted is True, "muted as soon as speaking starts"
+    time.sleep(0.2)
+    assert microphone.muted is True, "still muted while playing"
+
+    playing.set()
+    for _ in range(50):
+        if not microphone.muted:
+            break
+        time.sleep(0.05)
+    assert microphone.muted is False, "released once the queue drained"
+
+
+def test_overlapping_replies_do_not_unmute_early():
+    """Two replies in flight: the first finishing must not open the microphone
+    while the second is still playing."""
+    service, microphone, speech = make_service()
+    drained = threading.Event()
+    speech.wait = lambda timeout=None: drained.wait(timeout=5)
+
+    service.say("First.")
+    service.say("Second.")
+    assert microphone.muted is True
+    time.sleep(0.2)
+    assert microphone.muted is True, "still speaking"
+
+    drained.set()
+    for _ in range(50):
+        if not microphone.muted:
+            break
+        time.sleep(0.05)
+    assert microphone.muted is False
+
+
+def test_listen_while_speaking_leaves_the_microphone_open():
+    config_audio = replace(Config().audio, listen_while_speaking=True)
+    service, microphone, speech = make_service(audio=config_audio)
+    service.say("Talking over myself.")
+    assert microphone.muted is False, "full duplex: never muted"
+    assert speech.said == ["Talking over myself."]

@@ -47,43 +47,6 @@ def test_wait_for_returns_empty_on_timeout_rather_than_raising():
     assert Transcript().wait_for(0, timeout=0.2) == []
 
 
-def test_unaddressed_speech_is_recorded_but_does_not_satisfy_a_waiter():
-    transcript = Transcript()
-    transcript.add("chatting to someone else", addressed=False)
-    assert len(transcript.since(0)) == 1, "recorded either way"
-    assert transcript.wait_for(0, timeout=0.2, addressed_only=True) == []
-
-
-def test_an_addressed_utterance_returns_the_chatter_with_it():
-    transcript = Transcript()
-    transcript.add("the one in the parser", addressed=False)
-    transcript.add("jarvis fix that bug", addressed=True, command="fix that bug")
-
-    items = transcript.wait_for(0, timeout=2, addressed_only=True)
-    assert [i.text for i in items] == ["the one in the parser", "jarvis fix that bug"]
-    assert [i.addressed for i in items] == [False, True]
-
-
-def test_command_defaults_to_the_raw_text():
-    assert Transcript().add("no wake word here").command == "no wake word here"
-
-
-def test_command_holds_the_stripped_instruction():
-    utterance = Transcript().add("jarvis open it", addressed=True, command="open it")
-    assert (utterance.text, utterance.command) == ("jarvis open it", "open it")
-
-
-def test_the_addressed_flag_survives_a_round_trip_to_disk(tmp_path):
-    path = tmp_path / "heard.jsonl"
-    transcript = Transcript(path)
-    transcript.add("overheard", addressed=False)
-    transcript.add("jarvis do it", addressed=True, command="do it")
-
-    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert [line["addressed"] for line in lines] == [False, True]
-    assert [line["command"] for line in lines] == ["overheard", "do it"]
-
-
 def test_utterances_are_appended_to_the_file_as_jsonl(tmp_path):
     path = tmp_path / "heard.jsonl"
     transcript = Transcript(path)

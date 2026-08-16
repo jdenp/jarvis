@@ -188,11 +188,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         acknowledger.cancel()
 
         try:
-            result = voice.heard(
-                since=cursor,
-                wait=config.service.max_wait_seconds,
-                addressed_only=True,
-            )
+            result = voice.heard(since=cursor, wait=config.service.max_wait_seconds)
         except ServiceUnavailable as exc:
             return {
                 "error": str(exc),
@@ -210,7 +206,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
                 "next_step": "Nothing said yet. Call wait_for_speech again to keep waiting.",
             }
 
-        spoken_text = [item.get("command") or item["text"] for item in heard]
+        spoken_text = [item["text"] for item in heard]
         missed, unanswered_question = unanswered_question, None
         last = spoken_text[-1]
         if looks_like_a_question(last):
@@ -256,7 +252,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         # mid-turn, so steering only works if the agent chooses to look.
         nonlocal cursor
         try:
-            result = voice.heard(since=cursor, wait=0, addressed_only=True, settle=0)
+            result = voice.heard(since=cursor, wait=0, settle=0)
         except ServiceUnavailable as exc:
             return {"error": str(exc), "heard": []}
 
@@ -265,7 +261,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         if not heard:
             return {"heard": [], "next_step": "Nothing new. Carry on with what you were doing."}
         return {
-            "heard": [item.get("command") or item["text"] for item in heard],
+            "heard": [item["text"] for item in heard],
             "next_step": (
                 "The user spoke while you were working. Read it before continuing: "
                 "they may be redirecting you, correcting a detail, or telling you to "

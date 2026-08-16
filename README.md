@@ -19,8 +19,9 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
   sentence, so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
 - A plain CLI for everything else
-- **No wake word.** Everything heard is passed on and the agent judges what was addressed
-  to it, so you do not have to say "jarvis" before every reply in a conversation
+- **No wake word at all.** Everything heard is passed on verbatim and the agent judges
+  what was addressed to it - no name to say, and no string matching to produce phantom
+  detections
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
@@ -65,10 +66,8 @@ audio hardware, which is why `say` from a separate terminal can still mute the s
 microphone that is listening. It runs as `uv`/`python`, so `Get-Process jarvis` finds
 nothing; use `jarvis.ps1 status`.
 
-Just talk. The name is stripped when you use it but is not required - everything heard is
-passed to the agent, which decides what was aimed at it. Set `wake.required = true` to
-require the name again. Logs rotate in `logs/jarvis.log`; everything heard is appended to
-`logs/heard.jsonl`.
+Just talk. Everything heard goes to the agent verbatim and it decides what was aimed at
+it. Logs rotate in `logs/jarvis.log`; everything heard is appended to `logs/heard.jsonl`.
 
 ## Connecting an agent
 
@@ -252,7 +251,6 @@ whatever `JARVIS_CONFIG` points at.
 | `microphone.py` | Background capture, calibration, mute |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
-| `wake.py` | Wake word matching, exact and approximate |
 | `reap.py` | Clearing MCP servers that outlived their client |
 | `echo.py` | Recognising JARVIS's own voice coming back |
 | `config.py` | Defaults, TOML, environment |
@@ -282,7 +280,7 @@ interesting constraint is that a 35B model and a speech model are sharing 12 GB.
 | --- | --- |
 | GPU | RTX 4070 Ti, 12 GB |
 | CPU | Ryzen 7 7700X, 8 cores |
-| RAM | 32 GB DDR5-4800 |
+| RAM | 32 GB DDR5-6000 |
 | Agent | Cline CLI, talking to JARVIS over MCP |
 | LLM | Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context |
 

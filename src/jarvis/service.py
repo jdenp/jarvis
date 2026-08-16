@@ -24,7 +24,6 @@ from .microphone import Microphone
 from .stt import Transcriber, build_transcriber
 from .transcript import Transcript
 from .tts import SpeechEngine, build_speaker
-from .wake import WakeMatcher
 
 logger = logging.getLogger("jarvis.service")
 
@@ -49,8 +48,9 @@ class VoiceService:
         self.transcriber = transcriber
         self.speech = speech
         self.transcript = transcript or Transcript(config.log_dir / config.service.transcript_file)
-        self._wake = WakeMatcher(config.wake.words, config.wake.fuzzy, config.wake.fuzzy_threshold)
         self._echo = EchoGuard()
+        self._speaking = threading.Lock()
+        self._speaking_count = 0
         self._running = threading.Event()
         self._listener: threading.Thread | None = None
 
@@ -82,43 +82,49 @@ class VoiceService:
             if self._echo.is_echo(heard):
                 logger.debug("Ignored JARVIS hearing itself: %s", heard)
                 continue
-            addressed, command = self._classify(heard)
-            utterance = self.transcript.add(heard, addressed=addressed, command=command)
-            if addressed:
-                logger.info("[%d] %s", utterance.id, command)
-            else:
-                logger.info("[%d] (not addressed) %s", utterance.id, heard)
-
-    def _classify(self, heard: str) -> tuple[bool, str]:
-        """Whether this was aimed at JARVIS, and the instruction with its name removed.
-
-        Everything is recorded either way. Dropping unaddressed speech loses the
-        second half of any sentence that got split - say "jarvis", hesitate, and
-        the phrase detector ends the phrase before the actual request arrives.
-        """
-        addressed, remainder = self._wake.split(heard)
-        if not addressed:
-            # Not required means every utterance counts as addressed to us.
-            return (not self.config.wake.required), heard
-        return True, remainder or heard
+            utterance = self.transcript.add(heard)
+            logger.info("[%d] %s", utterance.id, heard)
 
     # ------------------------------------------------------------------ speak
 
     def say(self, text: str) -> None:
-        """Speak, with the microphone muted so it is not transcribed back."""
+        """Queue speech and return - the caller is not held for the playback.
+
+        Speaking is handled on the TTS worker thread, so a forty word reply does
+        not block the agent for eight seconds. Muting is released by whoever
+        started it, once the queue actually drains.
+        """
         text = text.strip()
         if not text or self.speech is None:
             return
         logger.info("say: %s", text)
         self._echo.remember(text)
-        if self.microphone is not None:
-            self.microphone.mute()
-        try:
+
+        if self.config.audio.listen_while_speaking or self.microphone is None:
             self.speech.say(text)
-            self.speech.wait(timeout=180)
-        finally:
-            if self.microphone is not None:
-                self.microphone.unmute()
+            return
+
+        with self._speaking:
+            self.microphone.mute()
+            self._speaking_count += 1
+        self.speech.say(text)
+        threading.Thread(target=self._unmute_when_done, name="jarvis-unmute", daemon=True).start()
+
+    def _unmute_when_done(self) -> None:
+        """Release the microphone once everything queued has been spoken.
+
+        On its own thread because say() returns immediately now. Counted rather
+        than flagged: two replies can overlap, and the first one finishing must
+        not unmute while the second is still playing.
+        """
+        assert self.speech is not None
+        self.speech.wait(timeout=180)
+        with self._speaking:
+            self._speaking_count -= 1
+            if self._speaking_count > 0:
+                return
+        if self.microphone is not None:
+            self.microphone.unmute()
 
     def status(self) -> dict:
         return {
@@ -126,8 +132,6 @@ class VoiceService:
             "cursor": self.transcript.cursor,
             "stt": self.config.stt.backend,
             "tts": self.config.tts.engine,
-            "wake_word_required": self.config.wake.required,
-            "wake_words": list(self.config.wake.words),
         }
 
     def stop(self) -> None:
@@ -165,7 +169,6 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             since = int(query.get("since", ["0"])[0])
             wait = float(query.get("wait", ["0"])[0])
-            addressed_only = query.get("addressed", ["0"])[0] not in {"0", "false", ""}
             settle = float(query.get("settle", [str(settings.settle_seconds)])[0])
         except ValueError:
             self._json(400, {"error": "since, wait and settle must be numbers"})
@@ -175,9 +178,9 @@ class _Handler(BaseHTTPRequestHandler):
         settle = max(0.0, min(settle, 10.0))
         transcript = self.service.transcript
 
-        items = [i for i in transcript.since(since) if i.addressed or not addressed_only]
+        items = transcript.since(since)
         if not items and wait:
-            items = transcript.wait_for(since, timeout=wait, addressed_only=addressed_only)
+            items = transcript.wait_for(since, timeout=wait)
 
         # Give a hesitating speaker a moment to finish. "Jarvis" then a pause is
         # two phrases, and returning after the first one acts on nothing.

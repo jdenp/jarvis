@@ -26,7 +26,8 @@ def test_shipped_defaults_match_the_code():
 def test_as_dict_is_json_serialisable():
     blob = json.dumps(Config().as_dict())
     assert json.loads(blob) == Config().as_dict()
-    assert isinstance(json.loads(blob)["wake"]["words"], list), "tuples become lists"
+    acknowledgements = json.loads(blob)["service"]["acknowledgements"]
+    assert isinstance(acknowledgements, list), "tuples become lists"
 
 
 def test_json_config_is_read(tmp_path):

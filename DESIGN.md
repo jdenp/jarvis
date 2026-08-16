@@ -8,7 +8,7 @@ separate, shorter file you hand to an agent that is *using* JARVIS rather than c
 Ears and a mouth, and nothing else. An agent on the other end is the brain.
 
 ```
-mic thread ──▶ queue ──▶ STT ──▶ wake word ──▶ transcript ──▶ GET /heard (blocks)
+mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ GET /heard (blocks)
      ▲                                                              │
      └──── muted while speaking ◀── speech thread ◀── POST /say ◀───┘ agent
 ```
@@ -67,6 +67,13 @@ startup line, so a new remote backend surfaces automatically rather than quietly
 **Calibrate on the recognizer that listens.** The original code built a throwaway
 `sr.Recognizer()` inside `calibrate()`, so the measured energy threshold was discarded and
 calibration did nothing. One `Recognizer` and one `Microphone` now live for the session.
+
+**No wake word, and no fuzzy matching of one.** It went in three stages: required, then
+optional, then removed. Once the agent was deciding for itself what was meant for it, the
+matching only ever produced false positives - and `hotwords="JARVIS"` biased Whisper's
+decoder towards producing the word, so it manufactured "JARVIS" out of room noise and put
+it in the transcript. Passing everything through verbatim is both simpler and more
+accurate; the agent is better placed to judge than a string match.
 
 **Silence must never be the whole response.** An utterance with no wake word used to be
 dropped at DEBUG, so it vanished without trace and looked identical to a hang. It logs at
@@ -130,5 +137,8 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   transcribes everything first, so every cough costs a Whisper inference. Local, so it is
   wasted CPU rather than a privacy problem, but still wasteful
 - Speaker identification, so a room with two people in it does not confuse the agent
+- Acoustic echo cancellation. `audio.listen_while_speaking` exists but is off by default,
+  because without AEC the microphone hears the speakers and the only defence is the text
+  comparison in `echo.py`. Real AEC would make barge-in workable
 - Nothing tells the agent that speech arrived while it was busy. It only finds out when it
   next calls `wait_for_speech`. An MCP notification could improve that, if clients honour it

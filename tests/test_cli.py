@@ -20,7 +20,6 @@ def test_flags_override_the_loaded_config():
             "--tts", "sapi",
             "--stt", "google",
             "--port", "9999",
-            "--no-wake-word",
             "--log-level", "DEBUG",
         ),
     )  # fmt: skip
@@ -28,7 +27,6 @@ def test_flags_override_the_loaded_config():
     assert config.tts.engine == "sapi"
     assert config.stt.backend == "google"
     assert config.service.port == 9999
-    assert config.wake.required is False
     assert config.log_level == "DEBUG"
 
 
@@ -61,6 +59,13 @@ def test_defaults_are_fully_local():
     assert config.stt.backend == "whisper"
     assert config.tts.engine == "auto"  # auto never reaches edge
     assert config.service.host == "127.0.0.1"
+
+
+def test_there_is_no_wake_word_machinery_left():
+    """Removed deliberately: with no wake word it only ever produced phantom
+    detections, and the Whisper hotword bias manufactured "JARVIS" from noise."""
+    assert not hasattr(Config(), "wake")
+    assert not hasattr(Config().stt, "hotwords")
 
 
 def test_privacy_report_says_so_when_nothing_leaves():

@@ -18,29 +18,20 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Utterance:
-    """One thing the user said.
+    """One thing the user said, verbatim.
 
-    Everything heard is recorded, addressed to JARVIS or not. Unaddressed speech
-    is not an instruction, but it is context: a sentence that got split because
-    the speaker hesitated after the wake word lands here, and losing it is how
-    you end up acting on half a request.
+    Everything heard is recorded and passed on. There is no wake word and no
+    filtering - the agent decides what was meant for it, which it is better
+    placed to judge than a string match.
     """
 
     id: int
     text: str
     at: str
-    addressed: bool = True
-    command: str = ""
 
     @classmethod
-    def new(cls, id: int, text: str, addressed: bool = True, command: str = "") -> Utterance:
-        return cls(
-            id=id,
-            text=text,
-            at=datetime.now(UTC).isoformat(timespec="seconds"),
-            addressed=addressed,
-            command=command or text,
-        )
+    def new(cls, id: int, text: str) -> Utterance:
+        return cls(id=id, text=text, at=datetime.now(UTC).isoformat(timespec="seconds"))
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -77,10 +68,10 @@ class Transcript:
         with self._condition:
             return self._next_id - 1
 
-    def add(self, text: str, addressed: bool = True, command: str = "") -> Utterance:
+    def add(self, text: str) -> Utterance:
         """Record an utterance and wake anything waiting."""
         with self._condition:
-            utterance = Utterance.new(self._next_id, text, addressed, command)
+            utterance = Utterance.new(self._next_id, text)
             self._next_id += 1
             self._items.append(utterance)
             self._condition.notify_all()
@@ -98,24 +89,15 @@ class Transcript:
         with self._condition:
             return [item for item in self._items if item.id > cursor]
 
-    def wait_for(
-        self, cursor: int, timeout: float, addressed_only: bool = False
-    ) -> list[Utterance]:
+    def wait_for(self, cursor: int, timeout: float) -> list[Utterance]:
         """Block until there is something after ``cursor``, or time out.
-
-        With ``addressed_only`` the wait is not satisfied by overheard chatter -
-        it holds out for speech actually aimed at JARVIS. Everything after the
-        cursor is still returned, addressed or not, so the caller gets the
-        surrounding context along with the instruction.
 
         Returns an empty list on timeout, which the caller should treat as
         "nothing said yet", not as an error.
         """
 
         def has_something() -> bool:
-            return any(
-                item.id > cursor and (item.addressed or not addressed_only) for item in self._items
-            )
+            return any(item.id > cursor for item in self._items)
 
         with self._condition:
             if not self._condition.wait_for(has_something, timeout=timeout):

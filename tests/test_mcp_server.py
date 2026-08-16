@@ -19,12 +19,12 @@ from jarvis.mcp_server import build_server
 class FakeVoice:
     def __init__(self) -> None:
         self.said: list[str] = []
-        self.next_heard = [{"text": "what time is it", "command": "what time is it", "id": 1}]
+        self.next_heard = [{"text": "what time is it", "id": 1}]
 
     def status(self) -> dict:
         return {"cursor": 0}
 
-    def heard(self, since=0, wait=0, addressed_only=False, settle=None) -> dict:
+    def heard(self, since=0, wait=0, settle=None) -> dict:
         return {"heard": list(self.next_heard), "cursor": 1}
 
     def say(self, text: str) -> None:
@@ -93,7 +93,7 @@ def test_silence_after_a_non_question_is_never_raised(rig):
     """Most silence is correct. Chasing it pushes the agent into answering
     things nobody asked."""
     _, voice, raw = rig
-    voice.next_heard = [{"text": "and the other thing", "command": "and the other thing"}]
+    voice.next_heard = [{"text": "and the other thing"}]
     raw("wait_for_speech")
     assert "never spoke an answer" not in raw("wait_for_speech")
 

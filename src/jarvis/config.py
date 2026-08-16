@@ -52,40 +52,13 @@ class AudioConfig:
     pause_threshold: float = 1.7
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
-
-
-@dataclass(frozen=True)
-class WakeConfig:
-    """Wake word handling.
-
-    The name is stripped when it is there, but it is not required. Everything
-    heard goes to the agent, which judges whether it was being spoken to -
-    having to say "jarvis" before every reply in a conversation is worse than
-    an agent that occasionally has to decide something was not for it.
-    """
-
-    # Includes the mis-hearings that actually come back from the recogniser.
-    # Anything not listed is still caught by the fuzzy match below.
-    words: tuple[str, ...] = (
-        "jarvis",
-        "hey jarvis",
-        "jervis",
-        "javis",
-        "jovis",
-        "jarvus",
-        "darvis",
-        "darvus",
-        "travis",
-        "javas",
-    )
-    # Off by default: everything heard is passed to the agent, which decides
-    # for itself whether it was being spoken to. Turn it on to go back to
-    # needing the name every time.
-    required: bool = False
-    # Proper nouns come back mangled, and differently per accent. Without this
-    # the assistant just ignores you and gives no clue why.
-    fuzzy: bool = True
-    fuzzy_threshold: float = 0.78
+    # Half duplex by default: the microphone is muted while JARVIS speaks, so it
+    # does not transcribe its own voice. Turning this on keeps listening through
+    # a reply, which allows barging in - but with one microphone and no echo
+    # cancellation the only thing standing between you and JARVIS answering
+    # itself is the text comparison in echo.py. Speakers rather than headphones
+    # will almost certainly need it left off.
+    listen_while_speaking: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,8 +77,6 @@ class SttConfig:
     whisper_compute_type: str = "default"
     whisper_beam_size: int = 1
     whisper_vad: bool = True
-    # Biases decoding towards these, so the wake word survives an accent.
-    hotwords: str = "JARVIS"
 
 
 @dataclass(frozen=True)
@@ -168,7 +139,6 @@ class Config:
     """Top level configuration."""
 
     audio: AudioConfig = field(default_factory=AudioConfig)
-    wake: WakeConfig = field(default_factory=WakeConfig)
     stt: SttConfig = field(default_factory=SttConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
     service: ServiceConfig = field(default_factory=ServiceConfig)
@@ -213,7 +183,7 @@ CONFIG_FILES = (
     "jarvis.toml",
 )
 
-_SECTIONS = frozenset({"audio", "wake", "stt", "tts", "service"})
+_SECTIONS = frozenset({"audio", "stt", "tts", "service"})
 
 
 def find_config_file(root: Path | None = None) -> Path | None:
