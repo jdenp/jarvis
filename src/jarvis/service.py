@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,6 +27,10 @@ from .tts import SpeechEngine, build_speaker
 from .wake import WakeMatcher
 
 logger = logging.getLogger("jarvis.service")
+
+# A client vanishing mid request. Normal here: /heard blocks for up to a minute,
+# and MCP servers get killed with a request in flight.
+GONE_AWAY = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
 
 
 class VoiceService:
@@ -208,18 +213,38 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except GONE_AWAY:
+            # Long polls are held open for a minute at a time, so a client that
+            # gets killed while waiting is routine, not an error.
+            logger.debug("Client hung up before the reply was written.")
+
+
+class _Server(ThreadingHTTPServer):
+    """Threaded, so a blocked /heard does not stop a /say arriving."""
+
+    daemon_threads = True
+
+    def handle_error(self, request, client_address) -> None:
+        """Swallow disconnects instead of printing a traceback for each one.
+
+        The default prints the whole stack to stderr, which in the service's
+        own window looks alarming and means nothing.
+        """
+        error = sys.exc_info()[1]
+        if isinstance(error, GONE_AWAY):
+            logger.debug("Client %s went away mid request.", client_address)
+            return
+        logger.exception("Error handling a request from %s", client_address)
 
 
 def build_server(service: VoiceService) -> ThreadingHTTPServer:
-    """HTTP front end for a service. Threaded, so a blocked /heard does not
-    stop a /say arriving."""
+    """HTTP front end for a service."""
     handler = type("Handler", (_Handler,), {"service": service})
     address = (service.config.service.host, service.config.service.port)
-    server = ThreadingHTTPServer(address, handler)
-    server.daemon_threads = True
-    return server
+    return _Server(address, handler)

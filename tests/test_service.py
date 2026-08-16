@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import replace
@@ -254,6 +255,42 @@ def test_speech_during_a_long_task_is_waiting_at_the_next_checkpoint(running):
 
     result = client.heard(since=cursor, wait=5, addressed_only=True, settle=0)
     assert len(result["heard"]) == 3, "everything said while busy is still there"
+
+
+def test_a_client_hanging_up_does_not_print_a_traceback(running, caplog):
+    """A long poll held open for a minute means clients disappear mid request
+    all the time. socketserver prints the whole stack for each one, which in the
+    service's own window looks like something broke."""
+    service, _client, _ = running
+    server = build_server(service)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="jarvis.service"):
+            try:
+                raise ConnectionResetError(10054, "forcibly closed by the remote host")
+            except ConnectionResetError:
+                server.handle_error(object(), ("127.0.0.1", 61004))
+    finally:
+        server.server_close()
+
+    assert "Traceback" not in caplog.text
+    assert "went away mid request" in caplog.text
+    assert not any(r.levelno >= logging.WARNING for r in caplog.records), "not an error"
+
+
+def test_a_real_error_is_still_reported(running, caplog):
+    service, _client, _ = running
+    server = build_server(service)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="jarvis.service"):
+            try:
+                raise ValueError("something genuinely broke")
+            except ValueError:
+                server.handle_error(object(), ("127.0.0.1", 61004))
+    finally:
+        server.server_close()
+
+    assert "something genuinely broke" in caplog.text
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
 
 
 def test_client_says_how_to_fix_it_when_nothing_is_listening():
