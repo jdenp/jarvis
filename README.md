@@ -108,6 +108,57 @@ Two things worth knowing before you build on it:
   the only knob worth touching. It is set high deliberately - being cut off mid sentence
   is worse than waiting.
 
+## Transcription accuracy, speed and VRAM
+
+The three trade against each other, so the defaults are conservative and this is the
+knob most worth touching. Measured on this machine (RTX 4070 Ti) with five seconds of
+speech, each in a fresh process so the CUDA context is not shared:
+
+| `whisper_model` | `whisper_device` | warm transcribe | VRAM |
+| --- | --- | --- | --- |
+| `base.en` | `cpu` | 0.32s | none |
+| `base.en` | `cuda` | 0.07s | 339 MiB |
+| `small.en` | `cpu` | 0.98s | none |
+| `small.en` | `cuda` | 0.18s | 563 MiB |
+
+Two things fall out of that.
+
+**Accuracy comes from the model, not the device.** `small.en` is markedly better than
+`base.en` at proper nouns and at accents the model was not weighted towards - which is
+what turns "jarvis" into Jovis, Darvus or Java's. CUDA does not make it more accurate,
+it makes the larger model affordable in time.
+
+**Most of the VRAM is the CUDA context, not the weights.** `base.en` in int8 is about
+75 MiB of weights against a 339 MiB total, so choosing a smaller model to save VRAM
+barely helps - roughly 265 MiB is the cost of using the GPU at all.
+
+Whether it is worth it depends on what else the GPU is doing. On a machine also running
+a local LLM, 0.2s off a pipeline whose delay is dominated by `audio.pause_threshold`
+(2.0s) is a poor trade for several hundred megabytes. On an idle GPU it is free.
+
+**The shipped default is `base.en` on `cpu`** - no VRAM, no CUDA install, 0.32s. If
+accuracy matters more than latency and the GPU is spoken for, `small.en` on `cpu` is the
+middle ground: the better model for nothing but about 0.66s more per utterance, which
+against a 2.0s `pause_threshold` takes the round trip from roughly 3.1s to 3.8s.
+
+To use the GPU instead:
+
+```powershell
+uv sync --extra cuda    # CUDA runtime as pip packages, no system install needed
+```
+
+then in `jarvis.toml`:
+
+```toml
+[stt]
+whisper_model = "small.en"      # or base.en for half the VRAM
+whisper_device = "auto"         # falls back to cpu if CUDA will not load
+whisper_compute_type = "int8_float16"
+```
+
+`auto` proves the device works with a real inference before accepting it, so a broken
+CUDA install falls back to CPU rather than silently returning nothing.
+
 ## What leaves this machine
 
 Nothing, unless you ask for it. At startup JARVIS prints exactly what each stage is doing:
