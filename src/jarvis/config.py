@@ -35,8 +35,16 @@ class AudioConfig:
     # network, so a footstep as loud as a word still scores near zero; energy is
     # loudness alone and cannot tell them apart. auto falls back to energy.
     vad: str = "auto"  # auto | silero | energy
-    # Silero's cutoff. Lower hears quieter speech, and more noise as speech.
-    vad_threshold: float = 0.5
+    # Silero's cutoff for deciding speech has started. Lower hears more.
+    vad_threshold: float = 0.35
+    # Once speaking, how far the score may dip before it counts as a pause.
+    # Silero's own implementation does this, and without it a quiet consonant
+    # mid word reads as silence.
+    vad_hysteresis: float = 0.15
+    # Least speech that counts as a phrase rather than a noise. Measured in real
+    # speech now, so this is stricter than it looks - too high and short answers
+    # like "yes" are dropped without trace.
+    min_speech_seconds: float = 0.15
     # The four below are energy mode only. Silero ignores loudness entirely.
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True

@@ -15,8 +15,15 @@ phrase_time_limit = 60.0
 # cannot hold a phrase open. "energy" is loudness alone, which cannot tell them
 # apart. "auto" uses silero and falls back to energy if it will not load.
 vad = "auto"
-# Silero's cutoff. Lower hears quieter speech, and more noise as speech.
-vad_threshold = 0.5
+# Silero's cutoff for deciding speech has started. Lower hears more.
+vad_threshold = 0.35
+# Once speaking, how far the score may dip before it counts as a pause. Silero's
+# own implementation does this; without it a quiet consonant reads as silence.
+vad_hysteresis = 0.15
+# Least speech that counts as a phrase rather than a noise. This is measured in
+# real speech, so it is stricter than it looks - at 0.3 short answers like "no"
+# and "stop" were dropped without trace.
+min_speech_seconds = 0.15
 # The rest of this section is energy mode only - silero ignores loudness.
 calibration_seconds = 1.5
 dynamic_energy_threshold = true

@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.6.0"
+version = "0.6.1"
 description = "Jarvis - An AI voice assistant inspired by Iron Man"
 readme = "README.md"
 requires-python = ">=3.12"

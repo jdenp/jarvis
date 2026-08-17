@@ -77,7 +77,7 @@ class SileroDetector:
     name = "silero"
     calibrates = False
 
-    def __init__(self, threshold: float = 0.5) -> None:
+    def __init__(self, threshold: float = 0.35, hysteresis: float = 0.15) -> None:
         import numpy as np
         from faster_whisper.vad import get_vad_model
 
@@ -85,6 +85,7 @@ class SileroDetector:
         # Shares faster-whisper's session, which is already pinned to one thread.
         self._session = get_vad_model().session
         self.threshold = threshold
+        self.hysteresis = hysteresis
         self.reset()
 
     def reset(self) -> None:
@@ -93,6 +94,7 @@ class SileroDetector:
         self._h = np.zeros((1, 1, 128), dtype="float32")
         self._c = np.zeros((1, 1, 128), dtype="float32")
         self._context = np.zeros(CONTEXT, dtype="float32")
+        self._active = False
 
     def probability(self, buffer: bytes) -> float:
         """Speech probability for one frame, 0.0 if it is the wrong size."""
@@ -108,7 +110,10 @@ class SileroDetector:
         return float(np.asarray(probs).reshape(-1)[0])
 
     def is_speech(self, buffer: bytes) -> bool:
-        return self.probability(buffer) >= self.threshold
+        """Harder to start speaking than to keep speaking, as Silero intends."""
+        bar = self.threshold - self.hysteresis if self._active else self.threshold
+        self._active = self.probability(buffer) >= bar
+        return self._active
 
 
 def build_detector(config: AudioConfig | None = None):
@@ -122,11 +127,15 @@ def build_detector(config: AudioConfig | None = None):
         raise ValueError(f"Unknown vad {config.vad!r}. Choose auto, silero or energy.")
 
     try:
-        detector = SileroDetector(config.vad_threshold)
+        detector = SileroDetector(config.vad_threshold, config.vad_hysteresis)
     except Exception as exc:
         if wanted == "silero":
             raise
         logger.warning("Silero is unavailable (%s), falling back to loudness.", exc)
         return EnergyDetector(config)
-    logger.info("Speech detection: silero, threshold %.2f.", config.vad_threshold)
+    logger.info(
+        "Speech detection: silero, threshold %.2f, holding to %.2f.",
+        config.vad_threshold,
+        config.vad_threshold - config.vad_hysteresis,
+    )
     return detector

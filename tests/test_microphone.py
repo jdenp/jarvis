@@ -178,6 +178,14 @@ def test_energy_mode_still_calibrates():
     assert mic.energy_threshold == 80
 
 
+def test_a_short_answer_is_not_thrown_away():
+    """The regression this guards: min_speech_seconds counts real speech now, so
+    0.3s dropped "No." and "Stop." without trace - the worst word to lose."""
+    short = "#" * 6 + SILENCE  # 0.19s of speech
+    assert len(run(make_mic(min_speech_seconds=0.15), short)) == 1
+    assert run(make_mic(min_speech_seconds=0.3), short) == []
+
+
 def test_a_device_at_the_wrong_rate_is_called_out(caplog):
     """Silero assumes 16 kHz. speech_recognition opens at the device default,
     which was 44100 here, so frames were not the length it thought."""

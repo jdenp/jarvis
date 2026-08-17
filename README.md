@@ -259,7 +259,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 162 tests, no hardware, model or network needed
+uv run pytest        # 165 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

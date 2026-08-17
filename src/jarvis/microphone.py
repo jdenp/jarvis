@@ -26,9 +26,7 @@ from .vad import SAMPLE_RATE, SAMPLES, build_detector
 
 logger = logging.getLogger("jarvis.microphone")
 
-# Silence kept either side of a phrase, and the least speech that counts as one.
-KEEP_SILENCE = 0.5
-SHORTEST_PHRASE = 0.3
+KEEP_SILENCE = 0.5  # silence kept either side of a phrase
 
 
 class MicrophoneError(RuntimeError):
@@ -155,7 +153,7 @@ class Microphone:
                 SAMPLE_RATE,
             )
         keep = max(1, math.ceil(KEEP_SILENCE / seconds_per_buffer))
-        shortest = max(1, math.ceil(SHORTEST_PHRASE / seconds_per_buffer))
+        shortest = max(1, math.ceil(self.config.min_speech_seconds / seconds_per_buffer))
         longest = max(1, math.ceil(self.config.phrase_time_limit / seconds_per_buffer))
 
         frames: deque[bytes] = deque()

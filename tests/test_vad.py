@@ -81,6 +81,25 @@ def test_a_wrong_sized_buffer_is_not_speech(silero):
     assert silero.is_speech(b"") is False
 
 
+def test_hysteresis_holds_speech_through_a_dip(monkeypatch):
+    """Without it, a quiet consonant mid word reads as a pause."""
+    detector = SileroDetector(threshold=0.35, hysteresis=0.15)
+    scores = iter([0.9, 0.25, 0.9, 0.1])
+    monkeypatch.setattr(detector, "probability", lambda _buffer: next(scores))
+    frame = bytes(SAMPLES * 2)
+
+    assert detector.is_speech(frame) is True
+    assert detector.is_speech(frame) is True, "0.25 is above the 0.20 holding bar"
+    assert detector.is_speech(frame) is True
+    assert detector.is_speech(frame) is False, "0.10 is below it, so the pause starts"
+
+
+def test_the_bar_to_start_speaking_is_the_higher_one(monkeypatch):
+    detector = SileroDetector(threshold=0.35, hysteresis=0.15)
+    monkeypatch.setattr(detector, "probability", lambda _buffer: 0.25)
+    assert detector.is_speech(bytes(SAMPLES * 2)) is False
+
+
 def test_reset_clears_the_state(silero):
     silero.reset()
     before = silero._h.copy()

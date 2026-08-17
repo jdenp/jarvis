@@ -122,6 +122,15 @@ Two things it does not fix. A television with people talking on it is speech by 
 measure, and only speaker identification would help. And Silero is level-independent, which
 cuts both ways: a voice in the next room counts too.
 
+**Swapping the predicate quietly moved two other settings.** `min_speech_seconds` guards
+against a click being taken for a phrase, and it used to be met by room tone alone - so at
+0.3s it was no test at all. Counting real speech made it a real test, and "No." and "Stop."
+were dropped without trace. It is 0.15s now, and losing "stop" is the kind of failure worth
+a test of its own. Silero also needs hysteresis, which its own implementation has and this
+did not: speech starts at `vad_threshold` and holds until `vad_threshold - vad_hysteresis`,
+so a quiet consonant mid word is not a pause. Any predicate swapped in here has to be checked
+against both, because neither is visible in the loop that uses them.
+
 One trap worth knowing: `sr.Microphone(sample_rate=None)` - the default - opens at the
 *device's* rate, 44100 on this mic, and Silero only accepts 512 samples of 16 kHz. Nothing
 errors; the frames are simply not the length it thinks, and the scores are junk. The rate is
