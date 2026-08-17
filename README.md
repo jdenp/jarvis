@@ -266,27 +266,8 @@ uv run ruff format .
 
 ## Example configuration
 
-- **GPU** - RTX 4070 Ti, 12 GB
-- **CPU** - Ryzen 7 7700X, 8 cores
-- **RAM** - 32 GB DDR5-6000
-- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context, `--n-cpu-moe 25`
-- **Agent** - Cline CLI over MCP, `openai-compatible` provider at `127.0.0.1:8081`
-- **STT** - `small.en` on CUDA, `int8_float16`
-- **TTS** - SAPI, Microsoft George
-
-llama.cpp sampling, tuned for tool calling rather than chat:
-
-```
---temp 0.2 --top-k 20 --top-p 0.8 --min-p 0.05 --jinja
-```
-
-Cline needs to be told the context size, since it cannot discover it from a custom
-endpoint. In `providers.json`, `contextWindow` must match llama.cpp's `-c` or compaction
-fires too late:
-
-```json
-{ "contextWindow": 131072, "maxTokens": 32000 }
-```
+One real setup in full - hardware, the llama.cpp launcher it runs, and the local config
+overrides: [`docs/example-configuration.md`](docs/example-configuration.md).
 
 ## License
 
