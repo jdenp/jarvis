@@ -76,7 +76,8 @@ class Acknowledger:
     """Speaks a holding line when an answer is taking a while.
 
     Cancels itself the moment the real answer arrives, so a quick reply never
-    gets a redundant "one moment" in front of it.
+    gets a redundant "one moment" in front of it. Deliberately dumb, and it
+    should not stay that way - see "Still missing" in DESIGN.md.
     """
 
     def __init__(self, voice: VoiceClient, config: ServiceConfig) -> None:
@@ -308,7 +309,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     def check_for_speech() -> dict:
         nonlocal cursor
         try:
-            result = voice.heard(since=cursor, wait=0, settle=0)
+            result = voice.heard(since=cursor, wait=0)
         except ServiceUnavailable as exc:
             return {"error": str(exc), "heard": []}
 

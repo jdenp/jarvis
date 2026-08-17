@@ -24,7 +24,7 @@ class FakeVoice:
     def status(self) -> dict:
         return {"cursor": 0}
 
-    def heard(self, since=0, wait=0, settle=None) -> dict:
+    def heard(self, since=0, wait=0) -> dict:
         return {"heard": list(self.next_heard), "cursor": 1}
 
     def say(self, text: str) -> None:
@@ -155,7 +155,7 @@ def test_backlog_from_before_the_first_listen_is_skipped():
         def status(self) -> dict:
             return {"cursor": self.cursor}
 
-        def heard(self, since=0, wait=0, settle=None) -> dict:
+        def heard(self, since=0, wait=0) -> dict:
             asked_from.append(since)
             return {"heard": list(self.next_heard), "cursor": self.cursor}
 

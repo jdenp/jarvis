@@ -10,7 +10,6 @@ import json
 import logging
 import sys
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -159,25 +158,17 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             since = int(query.get("since", ["0"])[0])
             wait = float(query.get("wait", ["0"])[0])
-            settle = float(query.get("settle", [str(settings.settle_seconds)])[0])
         except ValueError:
-            self._json(400, {"error": "since, wait and settle must be numbers"})
+            self._json(400, {"error": "since and wait must be numbers"})
             return
 
         wait = max(0.0, min(wait, settings.max_wait_seconds))
-        settle = max(0.0, min(settle, 10.0))
         transcript = self.service.transcript
 
-        items = transcript.since(since)
-        if not items and wait:
-            items = transcript.wait_for(since, timeout=wait)
+        delivered = transcript.since(since)
+        if not delivered and wait:
+            delivered = transcript.wait_for(since, timeout=wait)
 
-        # Give a hesitating speaker a moment to finish, so a pause part way
-        # through a request does not return half of it.
-        if items and settle:
-            time.sleep(settle)
-
-        delivered = transcript.since(since) if items else []
         # Only advance past what actually went out - reporting the
         # transcript's own cursor swallows anything that arrived during the wait.
         self._json(

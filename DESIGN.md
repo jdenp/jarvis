@@ -42,7 +42,7 @@ Two limits, neither fixable by changing the transport:
   told to make between the steps of a long task, so a change of mind reaches it before it
   has finished doing the wrong thing.
 - **The latency floor is whatever `pause_threshold` is set to**, currently 1.2s, plus
-  Whisper and a 0.8s settle window. Measured cost from transcript to agent is ~0.0s, so
+  about 0.2s of Whisper. Measured cost from transcript to agent is ~0.0s, so
   optimising the transport is pointless. It is set high deliberately: being cut off mid
   sentence is a worse experience than waiting, and the two trade directly against each
   other. The ceiling is `phrase_time_limit` - see below.
@@ -206,3 +206,18 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   comparison in `echo.py`. Real AEC would make barge-in workable
 - Nothing tells the agent that speech arrived while it was busy. It only finds out when it
   next calls `wait_for_speech`. An MCP notification could improve that, if clients honour it
+- **The holding line should come from the agent, not from a timer.** `Acknowledger` is a
+  `threading.Timer` in the MCP server that speaks a canned phrase when `say()` has not been
+  called in time. It works, and it is the wrong place for it: JARVIS is meant to be ears and
+  a mouth, and this is the one spot where it decides what to say. The phrases cannot
+  reference the question, cannot say *what* is taking a while, and cannot tell a slow search
+  from a stuck one.
+
+  The agent could do it properly given the elapsed time. Something like
+  `seconds_since_they_spoke` on every tool result, plus an instruction to speak a lead-in
+  once it passes a couple of seconds, and the canned list could go.
+
+  One catch to design around: an agent only acts between tool calls, so it cannot speak
+  while blocked inside a slow one. The timer covers exactly that gap. So the likely shape is
+  the agent owning the early holding line and the timer surviving as a longer-delay backstop,
+  rather than a straight replacement

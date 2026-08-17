@@ -36,8 +36,7 @@
     "port": 8770,
     "max_wait_seconds": 55.0,
     "transcript_file": "heard.jsonl",
-    "settle_seconds": 0.8,
-    "acknowledge_after": 4.0,
+    "acknowledge_after": 2.5,
     "stale_after_seconds": 120.0,
     "acknowledgements": [
       "Let me have a look.",
@@ -51,7 +50,19 @@
       "Let me check.",
       "Bear with me.",
       "On it now.",
-      "Give me a moment, sir."
+      "Give me a moment, sir.",
+      "Let me find out.",
+      "Looking now, sir.",
+      "I'm on it.",
+      "Just checking.",
+      "One moment.",
+      "Let me see.",
+      "Working on that, sir.",
+      "Give me a moment.",
+      "Checking now.",
+      "Won't be a moment, sir.",
+      "Let me dig into that.",
+      "Having a look now."
     ]
   },
   "log_level": "INFO"

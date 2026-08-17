@@ -105,12 +105,10 @@ class ServiceConfig:
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
-    # Held after a phrase arrives, in case another follows. Small, because
-    # audio.pause_threshold already absorbs hesitation inside a phrase.
-    settle_seconds: float = 0.8
     # If the agent has not answered within this long, speak a holding line so
-    # the wait does not sound like a crash. 0 disables it.
-    acknowledge_after: float = 4.0
+    # the wait does not sound like a crash. 0 disables it. Kept just above where
+    # real answers land, or it talks over the reply it was covering for.
+    acknowledge_after: float = 2.5
     # Past this, an utterance is flagged as backlog rather than a live
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
@@ -129,6 +127,18 @@ class ServiceConfig:
         "Bear with me.",
         "On it now.",
         "Give me a moment, sir.",
+        "Let me find out.",
+        "Looking now, sir.",
+        "I'm on it.",
+        "Just checking.",
+        "One moment.",
+        "Let me see.",
+        "Working on that, sir.",
+        "Give me a moment.",
+        "Checking now.",
+        "Won't be a moment, sir.",
+        "Let me dig into that.",
+        "Having a look now.",
     )
 
 

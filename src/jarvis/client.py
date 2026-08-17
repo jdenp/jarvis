@@ -28,14 +28,12 @@ class VoiceClient:
     def status(self) -> dict:
         return self._get("/status", {})
 
-    def heard(self, since: int = 0, wait: float = 0.0, settle: float | None = None) -> dict:
+    def heard(self, since: int = 0, wait: float = 0.0) -> dict:
         """Utterances after ``since``. With ``wait``, blocks until there is one."""
         params: dict[str, object] = {
             "since": since,
             "wait": max(0.0, min(wait, self.config.max_wait_seconds)),
         }
-        if settle is not None:
-            params["settle"] = max(0.0, settle)
         return self._get("/heard", params)
 
     def say(self, text: str) -> dict:
