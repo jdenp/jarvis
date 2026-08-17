@@ -10,6 +10,14 @@ log_level = "INFO"
 # phrase never ends on silence at all. High, because being cut off mid sentence
 # is worse than waiting - pause_quiet_fraction is what avoids the wait.
 phrase_time_limit = 60.0
+# How a buffer is judged to be speech. "silero" scores each 32ms frame with a
+# 1.2MB network, so a footstep as loud as a word still scores near zero and
+# cannot hold a phrase open. "energy" is loudness alone, which cannot tell them
+# apart. "auto" uses silero and falls back to energy if it will not load.
+vad = "auto"
+# Silero's cutoff. Lower hears quieter speech, and more noise as speech.
+vad_threshold = 0.5
+# The rest of this section is energy mode only - silero ignores loudness.
 calibration_seconds = 1.5
 dynamic_energy_threshold = true
 # energy_threshold = 300  # set this to skip calibration entirely

@@ -31,6 +31,13 @@ class AudioConfig:
     # phrase never ends on silence. High, because being cut off mid sentence is
     # worse than waiting - PhraseEnd is what keeps the wait from happening.
     phrase_time_limit: float = 60.0
+    # How a buffer is judged to be speech. silero scores each frame with a 1.2MB
+    # network, so a footstep as loud as a word still scores near zero; energy is
+    # loudness alone and cannot tell them apart. auto falls back to energy.
+    vad: str = "auto"  # auto | silero | energy
+    # Silero's cutoff. Lower hears quieter speech, and more noise as speech.
+    vad_threshold: float = 0.5
+    # The four below are energy mode only. Silero ignores loudness entirely.
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None

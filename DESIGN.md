@@ -100,9 +100,38 @@ whose pauses at punctuation are longer and more regular than a real speaker's, s
 as an ordering rather than a measurement of your own voice.
 `scripts/measure-pause-tolerance.py` regenerates the table if you want to argue with it.
 
-Continuous noise cannot be solved this way at all - there is no pause to find - which is what
-`phrase_time_limit` is for. It stays at 60s: reaching it means waiting a minute, but the
-alternative is cutting someone off mid sentence, and only unbroken noise gets there.
+`phrase_time_limit` stays at 60s as the last resort. Reaching it means waiting a minute, but
+the alternative is cutting someone off mid sentence, and very little gets there now.
+
+**A pause is measured in frames that are not speech, not in quiet ones.** Loudness cannot
+tell a footstep from a word, so any tolerance rule is guessing. `vad.py` runs Silero, a 1.2MB
+network that scores each 32ms frame, and the whole predicate in `_run` is that one boolean -
+which is the only reason swapping it was a small change.
+
+It earns its place on measurements rather than reputation. Thumps as loud as speech score
+0.006 and never cross the 0.5 cutoff; the same sentence 24dB quieter scores the same as the
+original, so it also removes the need to raise your voice at a desk mic. Cost is 62us per
+32ms frame on a 7700X - 514x real time, 0.19% of one core - and no VRAM, which matters here
+because the GPU has ~127MB spare with the local model loaded. onnxruntime and the model both
+arrive with faster-whisper, so it adds no dependency.
+`scripts/measure-noise-rejection.py` shows the difference it makes: with footsteps twice a
+second the loudness rule still copes, and between 3 and 5 a second the phrase never ends at
+all, while Silero delivers the same 4.10s every time.
+
+Two things it does not fix. A television with people talking on it is speech by any honest
+measure, and only speaker identification would help. And Silero is level-independent, which
+cuts both ways: a voice in the next room counts too.
+
+One trap worth knowing: `sr.Microphone(sample_rate=None)` - the default - opens at the
+*device's* rate, 44100 on this mic, and Silero only accepts 512 samples of 16 kHz. Nothing
+errors; the frames are simply not the length it thinks, and the scores are junk. The rate is
+passed explicitly now, and `_run` warns if a source turns up at anything else. The tell was a
+probe reading 517 frames in 6s where 188 were due - exactly 44100/16000.
+
+`EnergyDetector` is kept, as `audio.vad = "energy"` and as the automatic fallback if
+onnxruntime will not load. It is also the only thing `calibration_seconds`,
+`min_energy_threshold` and `dynamic_energy_threshold` still affect - in silero mode there is
+no threshold to calibrate, and startup skips it.
 
 Reading the device directly also makes the echo gate trivial. `listen_in_background` only
 hands a phrase over once it *ends*, so a mute flag checked on delivery says nothing about

@@ -5,7 +5,8 @@ agent is thinking. One Recognizer and one Microphone stay open for the session -
 reopening per utterance is slow and throws away the calibration.
 
 The stream is cut into phrases here rather than by speech_recognition, so that
-background noise cannot hold a phrase open. See PhraseEnd.
+background noise cannot hold a phrase open. See PhraseEnd, and vad.py for how a
+buffer is judged to be speech at all.
 """
 
 from __future__ import annotations
@@ -21,24 +22,21 @@ from types import TracebackType
 import speech_recognition as sr
 
 from .config import AudioConfig
+from .vad import SAMPLE_RATE, SAMPLES, build_detector
 
 logger = logging.getLogger("jarvis.microphone")
+
+# Silence kept either side of a phrase, and the least speech that counts as one.
+KEEP_SILENCE = 0.5
+SHORTEST_PHRASE = 0.3
 
 
 class MicrophoneError(RuntimeError):
     """Raised when the input device cannot be opened."""
 
 
-def buffer_energy(buffer: bytes) -> float:
-    """RMS of one buffer of 16-bit mono audio, which is what pyaudio gives us."""
-    import numpy as np
-
-    samples = np.frombuffer(buffer, dtype=np.int16).astype(np.float32)
-    return float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
-
-
 class PhraseEnd:
-    """Decides when a phrase has finished, from a trailing window of energies.
+    """Decides when a phrase has finished, from a trailing window of buffers.
 
     speech_recognition needs ``pause_threshold`` of *consecutive* quiet buffers,
     so one keyboard click resets the count and a noisy room holds the phrase open
@@ -56,9 +54,9 @@ class PhraseEnd:
         self.window = max(self.needed, math.ceil(self.needed / fraction))
         self._quiet: deque[bool] = deque(maxlen=self.window)
 
-    def feed(self, energy: float, threshold: float) -> bool:
+    def feed(self, quiet: bool) -> bool:
         """Add one buffer. True once the window holds a full pause of quiet."""
-        self._quiet.append(energy <= threshold)
+        self._quiet.append(quiet)
         return sum(self._quiet) >= self.needed
 
     @property
@@ -77,12 +75,8 @@ class Microphone:
 
     def __init__(self, config: AudioConfig | None = None) -> None:
         self.config = config or AudioConfig()
+        self.detector = build_detector(self.config)
         self._recognizer = sr.Recognizer()
-        self._recognizer.dynamic_energy_threshold = self.config.dynamic_energy_threshold
-        self._recognizer.pause_threshold = self.config.pause_threshold
-        if self.config.energy_threshold is not None:
-            self._recognizer.energy_threshold = self.config.energy_threshold
-            self._recognizer.dynamic_energy_threshold = False
 
         self._source: sr.Microphone | None = None
         self._queue: queue.Queue[sr.AudioData] = queue.Queue(maxsize=16)
@@ -93,14 +87,22 @@ class Microphone:
 
     @property
     def energy_threshold(self) -> float:
-        return self._recognizer.energy_threshold
+        """Only meaningful for the energy detector; Silero ignores loudness."""
+        return getattr(self.detector, "threshold", 0.0)
 
     def start(self) -> None:
-        """Open the device, calibrate, and begin background capture."""
+        """Open the device, calibrate if needed, and begin background capture."""
         if self._thread is not None:
             return
         try:
-            self._source = sr.Microphone(device_index=self.config.device_index)
+            # 16 kHz explicitly. Left to itself speech_recognition opens at the
+            # device default - 44100 on this mic - and Silero silently scores
+            # frames that are not the length it thinks they are.
+            self._source = sr.Microphone(
+                device_index=self.config.device_index,
+                sample_rate=SAMPLE_RATE,
+                chunk_size=SAMPLES,
+            )
         except OSError as exc:  # pragma: no cover - hardware dependent
             raise MicrophoneError(f"Could not open input device: {exc}") from exc
 
@@ -108,10 +110,12 @@ class Microphone:
         self._running.set()
         self._thread = threading.Thread(target=self._capture, name="jarvis-capture", daemon=True)
         self._thread.start()
-        logger.info("Listening (energy threshold %.0f).", self.energy_threshold)
+        logger.info("Listening (%s).", self.detector.name)
 
     def _calibrate(self) -> None:
-        """Measure ambient noise on the recognizer that will do the listening."""
+        """Measure ambient noise, if the detector actually uses a threshold."""
+        if not self.detector.calibrates:
+            return
         if self.config.energy_threshold is not None:
             logger.info("Using fixed energy threshold %.0f.", self.config.energy_threshold)
             return
@@ -125,19 +129,7 @@ class Microphone:
         except OSError as exc:  # pragma: no cover - hardware dependent
             raise MicrophoneError(f"Could not read from input device: {exc}") from exc
 
-        self._apply_threshold_floor()
-
-    def _apply_threshold_floor(self) -> None:
-        """Keep calibration from leaving the mic sensitive enough to hear the speakers."""
-        floor = self.config.min_energy_threshold
-        measured = self._recognizer.energy_threshold
-        if measured < floor:
-            logger.info(
-                "Calibrated to %.0f, low enough to pick up the speakers. Raising to %.0f.",
-                measured,
-                floor,
-            )
-            self._recognizer.energy_threshold = floor
+        self.detector.calibrate(self._recognizer.energy_threshold)
 
     def _capture(self) -> None:
         """Hold the device open and read it until stopped."""
@@ -156,61 +148,66 @@ class Microphone:
         after the fact when a delivered phrase was recorded.
         """
         seconds_per_buffer = source.CHUNK / source.SAMPLE_RATE
-        keep = max(1, math.ceil(self._recognizer.non_speaking_duration / seconds_per_buffer))
-        shortest = max(1, math.ceil(self._recognizer.phrase_threshold / seconds_per_buffer))
+        if not self.detector.calibrates and source.SAMPLE_RATE != SAMPLE_RATE:
+            logger.warning(
+                "Device is at %d Hz, but speech detection needs %d Hz. Set audio.vad "
+                "to 'energy'.",
+                source.SAMPLE_RATE,
+                SAMPLE_RATE,
+            )
+        keep = max(1, math.ceil(KEEP_SILENCE / seconds_per_buffer))
+        shortest = max(1, math.ceil(SHORTEST_PHRASE / seconds_per_buffer))
         longest = max(1, math.ceil(self.config.phrase_time_limit / seconds_per_buffer))
 
         frames: deque[bytes] = deque()
-        detector: PhraseEnd | None = None
-        recorded = loud = 0
+        pause: PhraseEnd | None = None
+        recorded = spoken = 0
 
         while self._running.is_set():
             buffer = source.stream.read(source.CHUNK)
             if not buffer:
                 break
             if not self._accepting():
+                # A gap in the audio, so any streaming state is now stale.
                 frames.clear()
-                detector, recorded, loud = None, 0, 0
+                self.detector.reset()
+                pause, recorded, spoken = None, 0, 0
                 continue
 
-            energy = buffer_energy(buffer)
+            speech = self.detector.is_speech(buffer)
             frames.append(buffer)
 
-            if detector is None:
+            if pause is None:
                 if len(frames) > keep:
                     frames.popleft()
-                if energy > self._recognizer.energy_threshold:
-                    detector = PhraseEnd(
+                if speech:
+                    pause = PhraseEnd(
                         seconds_per_buffer,
                         self.config.pause_threshold,
                         self.config.pause_quiet_fraction,
                     )
-                else:
-                    self._adjust(energy, seconds_per_buffer)
                 continue
 
             recorded += 1
-            loud += energy > self._recognizer.energy_threshold
-            finished = detector.feed(energy, self._recognizer.energy_threshold)
-            self._adjust(energy, seconds_per_buffer)
+            spoken += speech
+            finished = pause.feed(not speech)
             if not finished and recorded < longest:
                 continue
 
             if finished:
                 # Trim the silence it ended on, but only what is actually silent -
-                # a word spoken inside the window belongs to this phrase, and the
-                # next one starts from scratch, so popping it loses it outright.
-                for _ in range(max(0, detector.trailing_quiet - keep)):
+                # a word inside the window belongs to this phrase, and the next
+                # one starts from scratch, so popping it loses it outright.
+                for _ in range(max(0, pause.trailing_quiet - keep)):
                     if not frames:
                         break
                     frames.pop()
             else:
                 logger.debug("Phrase hit the %.0fs limit.", self.config.phrase_time_limit)
-            # Speaking buffers, not elapsed ones, or a click plus a pause counts.
-            if loud >= shortest:
+            if spoken >= shortest:
                 self._deliver(frames, source)
             frames.clear()
-            detector, recorded, loud = None, 0, 0
+            pause, recorded, spoken = None, 0, 0
 
     def _accepting(self) -> bool:
         """Whether audio arriving right now is wanted.
@@ -218,18 +215,6 @@ class Microphone:
         Checked per buffer, so JARVIS's own voice is dropped as it is recorded.
         """
         return not self._muted.is_set() and time.monotonic() >= self._deaf_until
-
-    def _adjust(self, energy: float, seconds_per_buffer: float) -> None:
-        """speech_recognition's asymmetric weighted average, plus the floor."""
-        recognizer = self._recognizer
-        if not recognizer.dynamic_energy_threshold:
-            return
-        damping = recognizer.dynamic_energy_adjustment_damping**seconds_per_buffer
-        target = energy * recognizer.dynamic_energy_ratio
-        recognizer.energy_threshold = max(
-            self.config.min_energy_threshold,
-            recognizer.energy_threshold * damping + target * (1 - damping),
-        )
 
     def _deliver(self, frames: deque[bytes], source) -> None:
         audio = sr.AudioData(b"".join(frames), source.SAMPLE_RATE, source.SAMPLE_WIDTH)

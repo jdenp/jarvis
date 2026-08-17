@@ -18,6 +18,11 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
   sentence, so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
 - A plain CLI for everything else
+- **Speech detection, not loudness.** A footstep is as loud as a word, and under a
+  loudness test it holds a phrase open until the time limit. Silero scores each 32ms frame
+  instead: measured here, thumps as loud as speech score 0.006, and the same sentence 24dB
+  quieter scores the same as the original - so it also hears you without your raising your
+  voice. It costs 0.19% of one core and no VRAM
 - **No wake word at all.** Everything heard is passed on verbatim and the agent judges
   what was addressed to it - no name to say, and no string matching to produce phantom
   detections
@@ -120,10 +125,11 @@ Two things worth knowing before you build on it:
   Transport from transcription to the agent costs ~0.0s, so this is the knob that
   matters. It is set high deliberately - being cut off mid sentence is worse than
   waiting.
-- **Background noise no longer holds a phrase open.** A phrase ends on a pause, and
-  `audio.pause_quiet_fraction` lets that pause survive a click or a distant voice rather
-  than restarting on every one. `audio.phrase_time_limit` (60s) is the last resort for
-  noise unbroken enough that no pause ever happens.
+- **Background noise no longer holds a phrase open.** A pause is measured in frames that
+  are not speech, so noise has to sound like a voice to count. `audio.pause_quiet_fraction`
+  additionally lets a pause survive a brief interruption, and `audio.phrase_time_limit`
+  (60s) is the last resort. A television with people talking on it is the case none of
+  this solves - that needs speaker identification.
 
 ## Speech recognition
 
@@ -234,7 +240,8 @@ whatever `JARVIS_CONFIG` points at.
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, shared by the CLI and MCP |
 | `mcp_server.py` | The tools an agent can call |
-| `microphone.py` | Background capture, phrase splitting, calibration, mute |
+| `microphone.py` | Background capture, phrase splitting, mute |
+| `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
 | `reap.py` | Clearing MCP servers that outlived their client |
@@ -252,7 +259,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 150 tests, no hardware, model or network needed
+uv run pytest        # 162 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

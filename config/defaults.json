@@ -2,6 +2,8 @@
   "audio": {
     "device_index": null,
     "phrase_time_limit": 60.0,
+    "vad": "auto",
+    "vad_threshold": 0.5,
     "calibration_seconds": 1.5,
     "dynamic_energy_threshold": true,
     "energy_threshold": null,
