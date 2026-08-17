@@ -6,9 +6,11 @@ log_level = "INFO"
 
 [audio]
 # device_index = 1    # leave unset for the system default, or use `jarvis --list-devices`
-# Hard cap on one phrase. Costs nothing to leave high: a phrase still ends on
-# silence, this only stops a stuck stream recording forever.
-phrase_time_limit = 60.0
+# Hard cap on one phrase, and so the worst case wait before an agent hears you.
+# Continuous background noise stops a phrase ending on silence at all, and then
+# this is the only thing that ends it. Lower it if you often wait; raise it if a
+# long sentence gets split in two.
+phrase_time_limit = 15.0
 calibration_seconds = 1.5
 dynamic_energy_threshold = true
 # energy_threshold = 300  # set this to skip calibration entirely
@@ -17,8 +19,12 @@ dynamic_energy_threshold = true
 # though the echo guard should catch that first.
 min_energy_threshold = 55.0
 # Silence that ends a phrase. The main thing to change if you keep getting cut
-# off mid sentence, and the main cost in how long before the agent sees you.
-pause_threshold = 1.7
+# off mid sentence, and the floor under how long before the agent sees you.
+pause_threshold = 1.5
+# How much of that window has to be quiet. Below 1.0, a keyboard click or a
+# distant voice no longer resets the wait and holds the phrase open. Lower
+# tolerates a noisier room; too low and it ends between your own words.
+pause_quiet_fraction = 0.85
 # How long after JARVIS stops talking the microphone stays ignored. Covers the
 # output buffer draining and the room's echo tail. Raise it in a live room, but
 # note that a reply starting inside this window is dropped.

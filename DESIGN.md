@@ -41,11 +41,11 @@ Two limits, neither fixable by changing the transport:
   by nature, which is what `check_for_speech` is for: a non-blocking peek the agent is
   told to make between the steps of a long task, so a change of mind reaches it before it
   has finished doing the wrong thing.
-- **The latency floor is whatever `pause_threshold` is set to**, currently 1.7s, plus
-  ~0.3s of Whisper and a 0.8s settle window. Measured cost from transcript to agent is
-  ~0.0s, so optimising the transport is pointless. It is set high deliberately: being
-  cut off mid sentence is a worse experience than waiting, and the two trade directly
-  against each other.
+- **The latency floor is whatever `pause_threshold` is set to**, currently 1.5s, plus
+  Whisper and a 0.8s settle window. Measured cost from transcript to agent is ~0.0s, so
+  optimising the transport is pointless. It is set high deliberately: being cut off mid
+  sentence is a worse experience than waiting, and the two trade directly against each
+  other. The ceiling is `phrase_time_limit` - see below.
 
 `max_wait_seconds` defaults to 55 because agent clients time out tool calls (Cline's is
 around 60s). The tool takes a timeout, returns empty on expiry, and the agent calls again -
@@ -79,17 +79,25 @@ accurate; the agent is better placed to judge than a string match.
 dropped at DEBUG, so it vanished without trace and looked identical to a hang. It logs at
 INFO now, naming the word to use.
 
-**Gate the microphone on when audio was recorded, not when it arrived.**
-`listen_in_background` only hands a phrase over once the phrase *ends*. A mute flag checked
-in the callback therefore says nothing about when the audio was captured: JARVIS speaks, the
-listener is mid-phrase recording it, JARVIS stops, `unmute()` drains an empty queue, and only
-*then* does the phrase arrive - unmuted, and containing JARVIS's own voice.
+**Own the capture loop, so a phrase can end while the room is still noisy.**
+`speech_recognition` ends a phrase after `pause_threshold` of *consecutive* buffers below the
+energy threshold, and resets that count on any single buffer above it. One keyboard click a
+second therefore holds a phrase open indefinitely, and the only thing that ends it is
+`phrase_time_limit` - so a sentence spoken into a noisy room reaches the agent a minute
+later, or not until the speaker has given up. `PhraseEnd` in `microphone.py` ends the phrase
+once the trailing window is *mostly* quiet (`pause_quiet_fraction`, 0.85), which tolerates
+clicks and a distant voice while still needing a real pause. Continuous noise is not
+solvable this way and is what `phrase_time_limit` is for; it is 15s rather than 60s because
+it is the worst case wait, not a safety net.
 
-So `_on_audio` works backwards from the phrase length to when it started, and drops anything
-overlapping the window in which JARVIS was speaking (plus `echo_guard_seconds` for the output
-buffer and room echo). `EchoGuard` in `echo.py` is the second line of defence, comparing new
-transcripts against what was recently spoken - hearing yourself is lossy and usually clips
-the start, so it matches on containment or a similarity ratio rather than equality.
+Reading the device directly also makes the echo gate trivial. `listen_in_background` only
+hands a phrase over once it *ends*, so a mute flag checked on delivery says nothing about
+when the audio was recorded - JARVIS speaks, the listener is mid-phrase recording it,
+`unmute()` drains an empty queue, and only then does the phrase arrive, unmuted and full of
+JARVIS's own voice. Gating each buffer as it is read needs no such reasoning. `EchoGuard` in
+`echo.py` is the second line of defence, comparing new transcripts against what was recently
+spoken - hearing yourself is lossy and usually clips the start, so it matches on containment
+or a similarity ratio rather than equality.
 
 There is also a floor under the calibrated energy threshold. A quiet room calibrates to
 single digits, which is sensitive enough to hear the speakers at all, and no amount of gating

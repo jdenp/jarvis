@@ -3,14 +3,19 @@
 Capture runs on a background thread into a queue, so nothing is lost while the
 agent is thinking. One Recognizer and one Microphone stay open for the session -
 reopening per utterance is slow and throws away the calibration.
+
+The stream is cut into phrases here rather than by speech_recognition, so that
+background noise cannot hold a phrase open. See PhraseEnd.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import queue
 import threading
 import time
+from collections import deque
 from types import TracebackType
 
 import speech_recognition as sr
@@ -24,10 +29,33 @@ class MicrophoneError(RuntimeError):
     """Raised when the input device cannot be opened."""
 
 
-def phrase_duration(audio: sr.AudioData) -> float:
-    """Length of a captured phrase in seconds."""
-    bytes_per_second = audio.sample_rate * audio.sample_width
-    return len(audio.frame_data) / bytes_per_second if bytes_per_second else 0.0
+def buffer_energy(buffer: bytes) -> float:
+    """RMS of one buffer of 16-bit mono audio, which is what pyaudio gives us."""
+    import numpy as np
+
+    samples = np.frombuffer(buffer, dtype=np.int16).astype(np.float32)
+    return float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+
+
+class PhraseEnd:
+    """Decides when a phrase has finished, from a trailing window of energies.
+
+    speech_recognition needs ``pause_threshold`` of *consecutive* quiet buffers,
+    so one keyboard click resets the count and a noisy room holds the phrase
+    open until the time limit. This only needs the window mostly quiet.
+    """
+
+    def __init__(
+        self, seconds_per_buffer: float, pause_threshold: float, quiet_fraction: float
+    ) -> None:
+        self.window = max(1, math.ceil(pause_threshold / seconds_per_buffer))
+        self.needed = max(1, round(self.window * quiet_fraction))
+        self._quiet: deque[bool] = deque(maxlen=self.window)
+
+    def feed(self, energy: float, threshold: float) -> bool:
+        """Add one buffer. True once the trailing window is mostly quiet."""
+        self._quiet.append(energy <= threshold)
+        return len(self._quiet) == self.window and sum(self._quiet) >= self.needed
 
 
 class Microphone:
@@ -43,11 +71,11 @@ class Microphone:
             self._recognizer.dynamic_energy_threshold = False
 
         self._source: sr.Microphone | None = None
-        self._stop_listening = None
         self._queue: queue.Queue[sr.AudioData] = queue.Queue(maxsize=16)
         self._muted = threading.Event()
         self._deaf_until = 0.0
-        self._lock = threading.Lock()
+        self._running = threading.Event()
+        self._thread: threading.Thread | None = None
 
     @property
     def energy_threshold(self) -> float:
@@ -55,7 +83,7 @@ class Microphone:
 
     def start(self) -> None:
         """Open the device, calibrate, and begin background capture."""
-        if self._stop_listening is not None:
+        if self._thread is not None:
             return
         try:
             self._source = sr.Microphone(device_index=self.config.device_index)
@@ -63,9 +91,9 @@ class Microphone:
             raise MicrophoneError(f"Could not open input device: {exc}") from exc
 
         self._calibrate()
-        self._stop_listening = self._recognizer.listen_in_background(
-            self._source, self._on_audio, phrase_time_limit=self.config.phrase_time_limit
-        )
+        self._running.set()
+        self._thread = threading.Thread(target=self._capture, name="jarvis-capture", daemon=True)
+        self._thread.start()
         logger.info("Listening (energy threshold %.0f).", self.energy_threshold)
 
     def _calibrate(self) -> None:
@@ -97,16 +125,98 @@ class Microphone:
             )
             self._recognizer.energy_threshold = floor
 
-    def _on_audio(self, _recognizer: sr.Recognizer, audio: sr.AudioData) -> None:
-        """Background thread callback. Drops audio while muted or backed up."""
-        if self._muted.is_set():
+    def _capture(self) -> None:
+        """Hold the device open and read it until stopped."""
+        assert self._source is not None
+        try:
+            with self._source as source:
+                self._run(source)
+        except OSError:  # pragma: no cover - hardware dependent
+            logger.exception("Microphone capture stopped.")
+
+    def _run(self, source) -> None:
+        """Cut the stream into phrases and queue them.
+
+        Ours rather than speech_recognition's, for the phrase end rule in
+        PhraseEnd and because gating per buffer is simpler than working out
+        after the fact when a delivered phrase was recorded.
+        """
+        seconds_per_buffer = source.CHUNK / source.SAMPLE_RATE
+        keep = max(1, math.ceil(self._recognizer.non_speaking_duration / seconds_per_buffer))
+        shortest = max(1, math.ceil(self._recognizer.phrase_threshold / seconds_per_buffer))
+        longest = max(1, math.ceil(self.config.phrase_time_limit / seconds_per_buffer))
+
+        frames: deque[bytes] = deque()
+        detector: PhraseEnd | None = None
+        recorded = loud = 0
+
+        while self._running.is_set():
+            buffer = source.stream.read(source.CHUNK)
+            if not buffer:
+                break
+            if not self._accepting():
+                frames.clear()
+                detector, recorded, loud = None, 0, 0
+                continue
+
+            energy = buffer_energy(buffer)
+            frames.append(buffer)
+
+            if detector is None:
+                if len(frames) > keep:
+                    frames.popleft()
+                if energy > self._recognizer.energy_threshold:
+                    detector = PhraseEnd(
+                        seconds_per_buffer,
+                        self.config.pause_threshold,
+                        self.config.pause_quiet_fraction,
+                    )
+                else:
+                    self._adjust(energy, seconds_per_buffer)
+                continue
+
+            recorded += 1
+            loud += energy > self._recognizer.energy_threshold
+            finished = detector.feed(energy, self._recognizer.energy_threshold)
+            self._adjust(energy, seconds_per_buffer)
+            if not finished and recorded < longest:
+                continue
+
+            if finished:
+                # The window that ended it was mostly silence, so drop most of it.
+                for _ in range(max(0, detector.window - keep)):
+                    if not frames:
+                        break
+                    frames.pop()
+            else:
+                logger.debug("Phrase hit the %.0fs limit.", self.config.phrase_time_limit)
+            # Speaking buffers, not elapsed ones, or a click plus a pause counts.
+            if loud >= shortest:
+                self._deliver(frames, source)
+            frames.clear()
+            detector, recorded, loud = None, 0, 0
+
+    def _accepting(self) -> bool:
+        """Whether audio arriving right now is wanted.
+
+        Checked per buffer, so JARVIS's own voice is dropped as it is recorded.
+        """
+        return not self._muted.is_set() and time.monotonic() >= self._deaf_until
+
+    def _adjust(self, energy: float, seconds_per_buffer: float) -> None:
+        """speech_recognition's asymmetric weighted average, plus the floor."""
+        recognizer = self._recognizer
+        if not recognizer.dynamic_energy_threshold:
             return
-        # A phrase only arrives once it ends, so the mute flag says nothing
-        # about when it was recorded. Work back and drop anything that overlaps.
-        started_at = time.monotonic() - phrase_duration(audio)
-        if started_at < self._deaf_until:
-            logger.debug("Dropped a phrase that overlapped JARVIS speaking.")
-            return
+        damping = recognizer.dynamic_energy_adjustment_damping**seconds_per_buffer
+        target = energy * recognizer.dynamic_energy_ratio
+        recognizer.energy_threshold = max(
+            self.config.min_energy_threshold,
+            recognizer.energy_threshold * damping + target * (1 - damping),
+        )
+
+    def _deliver(self, frames: deque[bytes], source) -> None:
+        audio = sr.AudioData(b"".join(frames), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
         try:
             self._queue.put_nowait(audio)
         except queue.Full:
@@ -142,10 +252,10 @@ class Microphone:
 
     def stop(self) -> None:
         """Stop background capture and release the device."""
-        with self._lock:
-            stopper, self._stop_listening = self._stop_listening, None
-        if stopper is not None:
-            stopper(wait_for_stop=True)
+        self._running.clear()
+        thread, self._thread = self._thread, None
+        if thread is not None:
+            thread.join(timeout=5)
             logger.debug("Microphone stopped.")
         self._source = None
 

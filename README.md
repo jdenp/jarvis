@@ -115,11 +115,16 @@ Two things worth knowing before you build on it:
   Some clients count repeated identical results as a stuck loop and end the session, so if
   yours allows a long tool timeout, raise `max_wait_seconds` to match and it will return
   empty far less often.
-- **The latency floor is `audio.pause_threshold`**, 1.7s by default: that much silence
-  before JARVIS decides your sentence ended, plus ~0.3s of Whisper and a 0.8s settle
-  window. Measured transport cost from transcription to the agent is ~0.0s, so that is
-  the only knob worth touching. It is set high deliberately - being cut off mid sentence
-  is worse than waiting.
+- **The latency floor is `audio.pause_threshold`**, 1.5s by default: that much silence
+  before JARVIS decides your sentence ended, plus Whisper and a 0.8s settle window.
+  Transport from transcription to the agent costs ~0.0s, so this is the knob that
+  matters. It is set high deliberately - being cut off mid sentence is worse than
+  waiting.
+- **The latency ceiling is `audio.phrase_time_limit`**, 15s. A phrase ends on silence,
+  so continuous background noise means it never ends and the cap is the only thing that
+  finishes it. Intermittent noise - typing, a distant voice - is handled by
+  `audio.pause_quiet_fraction`, which only requires the pause window to be *mostly*
+  quiet rather than silent throughout.
 
 ## Speech recognition
 
@@ -230,7 +235,7 @@ whatever `JARVIS_CONFIG` points at.
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, shared by the CLI and MCP |
 | `mcp_server.py` | The tools an agent can call |
-| `microphone.py` | Background capture, calibration, mute |
+| `microphone.py` | Background capture, phrase splitting, calibration, mute |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
 | `reap.py` | Clearing MCP servers that outlived their client |
@@ -248,7 +253,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 141 tests, no hardware, model or network needed
+uv run pytest        # 149 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

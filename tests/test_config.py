@@ -71,3 +71,14 @@ def test_unknown_section_is_rejected(tmp_path):
 def test_optional_field_accepts_empty_string():
     config = Config.load(path=None, environ={"JARVIS_AUDIO_ENERGY_THRESHOLD": ""})
     assert config.audio.energy_threshold is None
+
+
+def test_the_config_path_is_not_read_as_a_setting():
+    """JARVIS_CONFIG says where to look, not what to set. Treating it as an
+    option made the documented override fail on startup."""
+    config = Config.load(environ={"JARVIS_CONFIG": "somewhere/jarvis.json"})
+    assert config.stt.backend == "whisper"
+
+
+def test_the_home_path_is_not_read_as_a_setting():
+    assert Config.load(environ={"JARVIS_HOME": "C:/elsewhere"}).log_level == "INFO"

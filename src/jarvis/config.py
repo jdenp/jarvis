@@ -27,18 +27,24 @@ class AudioConfig:
     """Microphone capture settings."""
 
     device_index: int | None = None
-    # Hard cap on one phrase, only to stop a stuck stream recording forever.
-    # It adds no delay - a phrase still ends on silence - and hitting it cuts you off.
-    phrase_time_limit: float = 60.0
+    # Hard cap on one phrase, and so the worst case delay before an agent hears
+    # you. Continuous noise keeps a phrase from ending on silence at all, and
+    # then this is the only thing that ends it. Raising it risks a long wait;
+    # lowering it risks splitting a long sentence in two.
+    phrase_time_limit: float = 15.0
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
     # Floor under calibration - a silent room calibrates low enough to hear its
     # own speakers. Raise it if JARVIS hears itself, lower it if you must shout.
     min_energy_threshold: float = 55.0
-    # Silence that ends a phrase. Generous on purpose, and the main cost in the
+    # Silence that ends a phrase. Generous on purpose, and the floor under the
     # delay before an agent sees you spoke. Raise it if you keep getting cut off.
-    pause_threshold: float = 1.7
+    pause_threshold: float = 1.5
+    # How much of that window has to be quiet. Below 1.0 a click or a distant
+    # voice no longer resets the wait and hold the phrase open - see PhraseEnd.
+    # Lower tolerates more noise; too low and it ends between your own words.
+    pause_quiet_fraction: float = 0.85
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
     # Half duplex by default. On, it allows barging in, but without echo
@@ -160,6 +166,10 @@ CONFIG_FILES = (
 
 _SECTIONS = frozenset({"audio", "stt", "tts", "service"})
 
+# Where to look, not what to set. Without this JARVIS_CONFIG=x is read as a
+# setting called "config" and startup fails on the file it was meant to load.
+RESERVED_ENV = frozenset({"JARVIS_HOME", "JARVIS_CONFIG"})
+
 
 def find_config_file(root: Path | None = None) -> Path | None:
     """First config file that exists, or None. JARVIS_CONFIG overrides the search."""
@@ -196,7 +206,7 @@ def _env_overrides(environ: dict[str, str]) -> dict[str, Any]:
     """Turn JARVIS_STT_BACKEND=x into {"stt": {"backend": "x"}}."""
     overrides: dict[str, Any] = {}
     for key, value in environ.items():
-        if not key.startswith("JARVIS_") or key == "JARVIS_HOME":
+        if not key.startswith("JARVIS_") or key in RESERVED_ENV:
             continue
         remainder = key[len("JARVIS_") :].lower()
         section, _, option = remainder.partition("_")

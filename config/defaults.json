@@ -1,12 +1,13 @@
 {
   "audio": {
     "device_index": null,
-    "phrase_time_limit": 60.0,
+    "phrase_time_limit": 15.0,
     "calibration_seconds": 1.5,
     "dynamic_energy_threshold": true,
     "energy_threshold": null,
     "min_energy_threshold": 55.0,
-    "pause_threshold": 1.7,
+    "pause_threshold": 1.5,
+    "pause_quiet_fraction": 0.85,
     "echo_guard_seconds": 0.5,
     "listen_while_speaking": false
   },
