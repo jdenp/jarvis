@@ -41,21 +41,35 @@ class PhraseEnd:
     """Decides when a phrase has finished, from a trailing window of energies.
 
     speech_recognition needs ``pause_threshold`` of *consecutive* quiet buffers,
-    so one keyboard click resets the count and a noisy room holds the phrase
-    open until the time limit. This only needs the window mostly quiet.
+    so one keyboard click resets the count and a noisy room holds the phrase open
+    until the time limit. This still waits for a whole ``pause_threshold`` of
+    quiet, but allows it to be interrupted: the window is widened, and the quiet
+    inside it only has to add up. So ``pause_threshold`` keeps meaning what it
+    says and the fraction buys noise tolerance rather than spending patience.
     """
 
     def __init__(
         self, seconds_per_buffer: float, pause_threshold: float, quiet_fraction: float
     ) -> None:
-        self.window = max(1, math.ceil(pause_threshold / seconds_per_buffer))
-        self.needed = max(1, round(self.window * quiet_fraction))
+        fraction = min(1.0, max(0.05, quiet_fraction))
+        self.needed = max(1, math.ceil(pause_threshold / seconds_per_buffer))
+        self.window = max(self.needed, math.ceil(self.needed / fraction))
         self._quiet: deque[bool] = deque(maxlen=self.window)
 
     def feed(self, energy: float, threshold: float) -> bool:
-        """Add one buffer. True once the trailing window is mostly quiet."""
+        """Add one buffer. True once the window holds a full pause of quiet."""
         self._quiet.append(energy <= threshold)
-        return len(self._quiet) == self.window and sum(self._quiet) >= self.needed
+        return sum(self._quiet) >= self.needed
+
+    @property
+    def trailing_quiet(self) -> int:
+        """Consecutive quiet buffers at the end, so trimming never cuts speech."""
+        count = 0
+        for quiet in reversed(self._quiet):
+            if not quiet:
+                break
+            count += 1
+        return count
 
 
 class Microphone:
@@ -183,8 +197,10 @@ class Microphone:
                 continue
 
             if finished:
-                # The window that ended it was mostly silence, so drop most of it.
-                for _ in range(max(0, detector.window - keep)):
+                # Trim the silence it ended on, but only what is actually silent -
+                # a word spoken inside the window belongs to this phrase, and the
+                # next one starts from scratch, so popping it loses it outright.
+                for _ in range(max(0, detector.trailing_quiet - keep)):
                     if not frames:
                         break
                     frames.pop()

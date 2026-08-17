@@ -120,11 +120,10 @@ Two things worth knowing before you build on it:
   Transport from transcription to the agent costs ~0.0s, so this is the knob that
   matters. It is set high deliberately - being cut off mid sentence is worse than
   waiting.
-- **The latency ceiling is `audio.phrase_time_limit`**, 15s. A phrase ends on silence,
-  so continuous background noise means it never ends and the cap is the only thing that
-  finishes it. Intermittent noise - typing, a distant voice - is handled by
-  `audio.pause_quiet_fraction`, which only requires the pause window to be *mostly*
-  quiet rather than silent throughout.
+- **Background noise no longer holds a phrase open.** A phrase ends on a pause, and
+  `audio.pause_quiet_fraction` lets that pause survive a click or a distant voice rather
+  than restarting on every one. `audio.phrase_time_limit` (60s) is the last resort for
+  noise unbroken enough that no pause ever happens.
 
 ## Speech recognition
 
@@ -253,7 +252,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 149 tests, no hardware, model or network needed
+uv run pytest        # 150 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

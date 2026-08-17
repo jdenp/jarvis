@@ -70,12 +70,18 @@ def test_buffer_energy_reads_the_amplitude():
 # --------------------------------------------------------------- PhraseEnd
 
 
-def test_a_phrase_cannot_end_before_the_window_is_full():
-    end = PhraseEnd(PER_BUFFER, pause_threshold=1.5, quiet_fraction=0.85)
-    assert end.window == 24
-    for _ in range(end.window - 1):
-        assert end.feed(QUIET, 1000) is False
-    assert end.feed(QUIET, 1000) is True
+def test_the_fraction_does_not_shorten_the_pause_itself():
+    """The trap: requiring a fraction of a fixed window silently cuts
+    pause_threshold, so 1.5s of patience became 1.28s. The window widens
+    instead, and a clean pause still has to run the full length."""
+    strict = PhraseEnd(PER_BUFFER, pause_threshold=1.5, quiet_fraction=1.0)
+    lenient = PhraseEnd(PER_BUFFER, pause_threshold=1.5, quiet_fraction=0.85)
+    assert strict.needed == lenient.needed == 24, "1.5s at 64ms a buffer"
+    assert (strict.window, lenient.window) == (24, 29)
+
+    for _ in range(23):
+        assert lenient.feed(QUIET, 1000) is False
+    assert lenient.feed(QUIET, 1000) is True
 
 
 def test_intermittent_noise_no_longer_holds_the_phrase_open():
@@ -87,6 +93,15 @@ def test_intermittent_noise_no_longer_holds_the_phrase_open():
     for i in range(end.window * 2):
         finished = end.feed(LOUD if i % 8 == 0 else QUIET, 1000)
     assert finished, "one loud buffer in eight should still count as a pause"
+
+
+def test_the_trailing_trim_never_reaches_back_into_speech():
+    """Trimmed frames are lost outright - the next phrase starts from scratch -
+    so only genuinely silent buffers may be dropped."""
+    end = PhraseEnd(PER_BUFFER, pause_threshold=1.5, quiet_fraction=0.85)
+    for i in range(end.window):
+        end.feed(LOUD if i == end.window - 4 else QUIET, 1000)
+    assert end.trailing_quiet == 3, "a word 3 buffers from the end stays put"
 
 
 def test_talking_through_the_window_does_not_end_the_phrase():
@@ -105,10 +120,10 @@ def test_speech_followed_by_silence_becomes_one_phrase():
 def test_speech_followed_by_intermittent_noise_still_ends():
     """The user-visible bug: say something, then background noise, and the
     sentence does not reach the agent until the phrase time limit expires."""
-    noisy = "".join("#" if i % 8 == 0 else "." for i in range(40))
+    noisy = "".join("#" if i % 8 == 0 else "." for i in range(60))
     durations = run(make_mic(), "#" * 10 + noisy)
     assert len(durations) == 1
-    assert durations[0] < 2.0, "should not have swallowed the whole noisy tail"
+    assert durations[0] < 3.5, "ended during the noise, not at the end of it"
 
 
 def test_continuous_noise_is_bounded_by_the_phrase_time_limit():

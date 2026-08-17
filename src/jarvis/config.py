@@ -27,11 +27,10 @@ class AudioConfig:
     """Microphone capture settings."""
 
     device_index: int | None = None
-    # Hard cap on one phrase, and so the worst case delay before an agent hears
-    # you. Continuous noise keeps a phrase from ending on silence at all, and
-    # then this is the only thing that ends it. Raising it risks a long wait;
-    # lowering it risks splitting a long sentence in two.
-    phrase_time_limit: float = 15.0
+    # Hard cap on one phrase, only reached if noise is unbroken enough that the
+    # phrase never ends on silence. High, because being cut off mid sentence is
+    # worse than waiting - PhraseEnd is what keeps the wait from happening.
+    phrase_time_limit: float = 60.0
     calibration_seconds: float = 1.5
     dynamic_energy_threshold: bool = True
     energy_threshold: float | None = None
@@ -41,9 +40,10 @@ class AudioConfig:
     # Silence that ends a phrase. Generous on purpose, and the floor under the
     # delay before an agent sees you spoke. Raise it if you keep getting cut off.
     pause_threshold: float = 1.5
-    # How much of that window has to be quiet. Below 1.0 a click or a distant
-    # voice no longer resets the wait and hold the phrase open - see PhraseEnd.
-    # Lower tolerates more noise; too low and it ends between your own words.
+    # Noise allowed inside that pause without restarting it: 0.85 tolerates
+    # 0.32s of clicks or a distant voice. Measured against rendered speech,
+    # 0.85 cut 1 sentence in 5 short, 0.8 cut 2, and 0.8 buys only 0.06s more
+    # tolerance for it. It does not shorten the pause itself. See PhraseEnd.
     pause_quiet_fraction: float = 0.85
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5

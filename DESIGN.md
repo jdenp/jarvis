@@ -84,11 +84,25 @@ INFO now, naming the word to use.
 energy threshold, and resets that count on any single buffer above it. One keyboard click a
 second therefore holds a phrase open indefinitely, and the only thing that ends it is
 `phrase_time_limit` - so a sentence spoken into a noisy room reaches the agent a minute
-later, or not until the speaker has given up. `PhraseEnd` in `microphone.py` ends the phrase
-once the trailing window is *mostly* quiet (`pause_quiet_fraction`, 0.85), which tolerates
-clicks and a distant voice while still needing a real pause. Continuous noise is not
-solvable this way and is what `phrase_time_limit` is for; it is 15s rather than 60s because
-it is the worst case wait, not a safety net.
+later, or not until the speaker has given up.
+
+`PhraseEnd` in `microphone.py` still waits for a whole `pause_threshold` of quiet, but lets
+it be interrupted: the window is widened by `pause_quiet_fraction` and the quiet inside it
+only has to add up. Requiring a *fraction of a fixed window* instead - which is how this was
+first written - silently shortens the pause, turning 1.5s of patience into 1.28s, on the one
+setting that has been tuned by ear more than any other. Widening keeps `pause_threshold`
+meaning what it says, so the fraction buys noise tolerance rather than spending patience.
+
+0.85 is measured, not guessed. Rendered through the same SAPI voice and replayed through the
+real threshold dynamics, 0.85 ended one sentence in five early and 0.8 ended two, for 0.06s
+more noise tolerance - so the knee is around 0.85. Both figures come from synthesised speech,
+whose pauses at punctuation are longer and more regular than a real speaker's, so treat them
+as an ordering rather than a measurement of your own voice.
+`scripts/measure-pause-tolerance.py` regenerates the table if you want to argue with it.
+
+Continuous noise cannot be solved this way at all - there is no pause to find - which is what
+`phrase_time_limit` is for. It stays at 60s: reaching it means waiting a minute, but the
+alternative is cutting someone off mid sentence, and only unbroken noise gets there.
 
 Reading the device directly also makes the echo gate trivial. `listen_in_background` only
 hands a phrase over once it *ends*, so a mute flag checked on delivery says nothing about
