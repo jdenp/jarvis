@@ -213,11 +213,10 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   reference the question, cannot say *what* is taking a while, and cannot tell a slow search
   from a stuck one.
 
-  The agent could do it properly given the elapsed time. Something like
-  `seconds_since_they_spoke` on every tool result, plus an instruction to speak a lead-in
-  once it passes a couple of seconds, and the canned list could go.
-
-  One catch to design around: an agent only acts between tool calls, so it cannot speak
-  while blocked inside a slow one. The timer covers exactly that gap. So the likely shape is
-  the agent owning the early holding line and the timer surviving as a longer-delay backstop,
-  rather than a straight replacement
+  The objection to moving it is that an agent only acts *between* tool calls, so it cannot
+  speak while blocked inside a slow one - which is the gap the timer covers. But that argues
+  for moving the words, not the clock: `say(text, hold="Still looking, sir")`, where `hold`
+  is spoken if `say()` has not been called again within `acknowledge_after`. The agent
+  pre-loads its own holding line in a call it was making anyway, so it costs no extra round
+  trip and needs no parallel tool calls, and JARVIS goes back to being only a mouth. The
+  canned list survives as the fallback for when `hold` is omitted
