@@ -10,7 +10,7 @@
     "dynamic_energy_threshold": true,
     "energy_threshold": null,
     "min_energy_threshold": 55.0,
-    "pause_threshold": 1.5,
+    "pause_threshold": 1.2,
     "pause_quiet_fraction": 0.85,
     "echo_guard_seconds": 0.5,
     "listen_while_speaking": false

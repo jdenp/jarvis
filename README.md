@@ -120,7 +120,7 @@ Two things worth knowing before you build on it:
   Some clients count repeated identical results as a stuck loop and end the session, so if
   yours allows a long tool timeout, raise `max_wait_seconds` to match and it will return
   empty far less often.
-- **The latency floor is `audio.pause_threshold`**, 1.5s by default: that much silence
+- **The latency floor is `audio.pause_threshold`**, 1.2s by default: that much non-speech
   before JARVIS decides your sentence ended, plus Whisper and a 0.8s settle window.
   Transport from transcription to the agent costs ~0.0s, so this is the knob that
   matters. It is set high deliberately - being cut off mid sentence is worse than

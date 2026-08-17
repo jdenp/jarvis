@@ -41,7 +41,7 @@ Two limits, neither fixable by changing the transport:
   by nature, which is what `check_for_speech` is for: a non-blocking peek the agent is
   told to make between the steps of a long task, so a change of mind reaches it before it
   has finished doing the wrong thing.
-- **The latency floor is whatever `pause_threshold` is set to**, currently 1.5s, plus
+- **The latency floor is whatever `pause_threshold` is set to**, currently 1.2s, plus
   Whisper and a 0.8s settle window. Measured cost from transcript to agent is ~0.0s, so
   optimising the transport is pointless. It is set high deliberately: being cut off mid
   sentence is a worse experience than waiting, and the two trade directly against each
@@ -93,12 +93,16 @@ first written - silently shortens the pause, turning 1.5s of patience into 1.28s
 setting that has been tuned by ear more than any other. Widening keeps `pause_threshold`
 meaning what it says, so the fraction buys noise tolerance rather than spending patience.
 
-0.85 is measured, not guessed. Rendered through the same SAPI voice and replayed through the
-real threshold dynamics, 0.85 ended one sentence in five early and 0.8 ended two, for 0.06s
-more noise tolerance - so the knee is around 0.85. Both figures come from synthesised speech,
-whose pauses at punctuation are longer and more regular than a real speaker's, so treat them
-as an ordering rather than a measurement of your own voice.
-`scripts/measure-pause-tolerance.py` regenerates the table if you want to argue with it.
+0.85 was measured against the loudness predicate, where it cut one sentence in five short
+and 0.8 cut two. Re-measured against Silero it cuts none, at any fraction down to 0.75 - a
+gap between words is not speech but it is also nowhere near a whole `pause_threshold` of it,
+so the fraction has far less to do now that the predicate is honest. 0.85 stays as the
+conservative end of a range that no longer bites.
+
+Both sets of figures come from synthesised speech, whose pauses at punctuation are longer and
+more regular than a real speaker's, so read them as an ordering rather than a measurement of
+your own voice. A genuine 1.2s hesitation mid sentence will still split the utterance, which
+is what `pause_threshold` is for. `scripts/measure-pause-tolerance.py` regenerates the table.
 
 `phrase_time_limit` stays at 60s as the last resort. Reaching it means waiting a minute, but
 the alternative is cutting someone off mid sentence, and very little gets there now.

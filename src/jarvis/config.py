@@ -52,9 +52,9 @@ class AudioConfig:
     # Floor under calibration - a silent room calibrates low enough to hear its
     # own speakers. Raise it if JARVIS hears itself, lower it if you must shout.
     min_energy_threshold: float = 55.0
-    # Silence that ends a phrase. Generous on purpose, and the floor under the
-    # delay before an agent sees you spoke. Raise it if you keep getting cut off.
-    pause_threshold: float = 1.5
+    # Non-speech that ends a phrase, and the floor under the delay before an
+    # agent sees you spoke. Raise it if you keep getting cut off mid sentence.
+    pause_threshold: float = 1.2
     # Noise allowed inside that pause without restarting it: 0.85 tolerates
     # 0.32s of clicks or a distant voice. Measured against rendered speech,
     # 0.85 cut 1 sentence in 5 short, 0.8 cut 2, and 0.8 buys only 0.06s more

@@ -1,10 +1,9 @@
-"""How low can audio.pause_quiet_fraction go before it cuts real speech short?
+"""Where does audio.pause_threshold start cutting real speech short?
 
 Run with: uv run --no-sync python scripts/measure-pause-tolerance.py
 
-
-Renders sentences through the same SAPI voice JARVIS speaks with, then replays
-the energy trace through the real threshold dynamics and the real PhraseEnd rule.
+Renders sentences through the same SAPI voice JARVIS speaks with, scores every
+frame with the real detector, and replays that through the real PhraseEnd rule.
 A phrase that ends before the speech does is a mid-sentence cut.
 """
 
@@ -12,17 +11,20 @@ import math
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import speech_recognition as sr
 
 from jarvis.config import AudioConfig
-from jarvis.microphone import Microphone, PhraseEnd, buffer_energy
+from jarvis.microphone import PhraseEnd
+from jarvis.vad import SAMPLE_RATE, SAMPLES, SECONDS_PER_BUFFER, build_detector
 
-CHUNK, RATE = 1024, 16_000
-PER = CHUNK / RATE
+PER = SECONDS_PER_BUFFER
 OUT = Path(tempfile.mkdtemp(prefix="jarvis-pause-"))
+PAUSES = (1.2, 1.5)
+FRACTIONS = (1.0, 0.9, 0.85, 0.8, 0.75)
 
 # Deliberately awkward: commas, a trailing clause, an "um", a list. The pauses
-# inside these are what a too-low fraction would end the phrase on.
+# inside these are what a too-short threshold would end the phrase on.
 SENTENCES = [
     "Jarvis, can you check the config file and tell me what the whisper model is set to?",
     "So, um, what I want you to do is, open the launcher, and then change the temperature.",
@@ -47,26 +49,28 @@ def render(text: str, path: str) -> None:
     stream.Close()
 
 
-def energies(path: str) -> list[float]:
+def frames(path: str) -> list[bytes]:
     with sr.AudioFile(path) as source:
         audio = sr.Recognizer().record(source)
-    raw = audio.get_raw_data(convert_rate=RATE, convert_width=2)
-    frames = [raw[i : i + CHUNK * 2] for i in range(0, len(raw) - CHUNK * 2, CHUNK * 2)]
-    return [buffer_energy(f) for f in frames]
+    raw = audio.get_raw_data(convert_rate=SAMPLE_RATE, convert_width=2)
+    spoken = np.frombuffer(raw, dtype=np.int16)
+    # Rendered files stop almost dead on the last word, so a pause never
+    # completes. Real silence after it is what makes the margin mean anything.
+    samples = np.concatenate([spoken, np.zeros(SAMPLE_RATE * 3, dtype=np.int16)])
+    step = SAMPLES
+    return [samples[i : i + step].tobytes() for i in range(0, len(samples) - step + 1, step)]
 
 
-def trace(values: list[float]) -> tuple[list[bool], int]:
-    """Quiet/loud per buffer under the live threshold, and the last loud buffer."""
-    mic = Microphone(AudioConfig())  # dynamic threshold, floor 55, as shipped
-    mic._recognizer.energy_threshold = 300.0
-    quiet, last_loud = [], 0
-    for index, energy in enumerate(values):
-        is_quiet = energy <= mic._recognizer.energy_threshold
-        quiet.append(is_quiet)
-        if not is_quiet:
-            last_loud = index
-        mic._adjust(energy, PER)
-    return quiet, last_loud
+def trace(path: str) -> tuple[list[bool], int]:
+    """Quiet per frame under the shipped detector, and the last speaking frame."""
+    detector = build_detector(AudioConfig())
+    quiet, last_speech = [], 0
+    for index, frame in enumerate(frames(path)):
+        speech = detector.is_speech(frame)
+        quiet.append(not speech)
+        if speech:
+            last_speech = index
+    return quiet, last_speech
 
 
 def ends_at(quiet: list[bool], fraction: float, pause: float) -> int | None:
@@ -76,26 +80,31 @@ def ends_at(quiet: list[bool], fraction: float, pause: float) -> int | None:
         if not started:
             started = not is_quiet
             continue
-        if end.feed(0.0 if is_quiet else 1e9, 1.0):
+        if end.feed(is_quiet):
             return index
     return None
 
 
-for pause in (1.5, 1.7):
-    print(f"\n=== pause_threshold {pause}s ({math.ceil(pause / PER)} buffers of quiet needed) ===")
-    header = "  ".join(f"f={f:<4}" for f in (1.0, 0.9, 0.85, 0.8, 0.75, 0.7))
+traces = {}
+for i, sentence in enumerate(SENTENCES):
+    path = str(OUT / f"say{i}.wav")
+    render(sentence, path)
+    traces[i] = trace(path)
+
+for pause in PAUSES:
+    needed = math.ceil(pause / PER)
+    print(f"\n=== pause_threshold {pause}s ({needed} frames of non-speech needed) ===")
+    header = "  ".join(f"f={f:<4}" for f in FRACTIONS)
     print(f"{'speech':>7}  {header}")
-    for i, sentence in enumerate(SENTENCES):
-        path = str(OUT / f"say{i}.wav")
-        render(sentence, path)
-        quiet, last_loud = trace(energies(path))
+    for i in sorted(traces):
+        quiet, last_speech = traces[i]
         row = []
-        for f in (1.0, 0.9, 0.85, 0.8, 0.75, 0.7):
-            index = ends_at(quiet, f, pause)
+        for fraction in FRACTIONS:
+            index = ends_at(quiet, fraction, pause)
             if index is None:
                 row.append("  none")
             else:
-                margin = (index - last_loud) * PER
+                margin = (index - last_speech) * PER
                 row.append(f"{margin:+6.2f}" if margin > 0 else f"{margin:+6.2f}*")
-        print(f"{last_loud * PER:>6.2f}s  " + "  ".join(f"{cell:<6}" for cell in row))
+        print(f"{last_speech * PER:>6.2f}s  " + "  ".join(f"{cell:<6}" for cell in row))
     print("  margin = seconds between the last speech and the phrase ending. * = cut mid sentence.")

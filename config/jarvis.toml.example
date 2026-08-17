@@ -32,9 +32,9 @@ dynamic_energy_threshold = true
 # to speak up to be heard, drop this. Raise it if JARVIS starts hearing itself,
 # though the echo guard should catch that first.
 min_energy_threshold = 55.0
-# Silence that ends a phrase. The main thing to change if you keep getting cut
-# off mid sentence, and the floor under how long before the agent sees you.
-pause_threshold = 1.5
+# Non-speech that ends a phrase. The main thing to change if you keep getting
+# cut off mid sentence, and the floor under how long before the agent sees you.
+pause_threshold = 1.2
 # Noise allowed inside the pause without restarting it. 0.85 tolerates about
 # 0.32s of clicks or a distant voice per pause, and does not shorten the pause
 # itself. Lower tolerates a noisier room, at the cost of ending on your own
