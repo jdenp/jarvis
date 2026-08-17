@@ -88,16 +88,3 @@ port = 8770
 # timeout (Cline's is around 60s) so the agent re-calls rather than erroring.
 max_wait_seconds = 55.0
 transcript_file = "heard.jsonl"
-# If the agent has not spoken an answer within this long, JARVIS says a holding
-# line so the wait does not sound like a crash. It is cancelled the moment the
-# real answer arrives, so quick replies never get "one moment" in front of them.
-# Set to 0 to turn it off. Keep it just above where real answers land, or it
-# talks over the reply it was covering for.
-acknowledge_after = 2.5
-acknowledgements = [
-    "Let me have a look.",
-    "One moment, sir.",
-    "Looking into that now.",
-    "Give me a second.",
-    "Checking that for you, sir.",
-]

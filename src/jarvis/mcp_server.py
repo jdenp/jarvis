@@ -7,12 +7,10 @@ own the microphone. DESIGN.md has the reasoning behind the blocking read.
 from __future__ import annotations
 
 import logging
-import random
-import threading
 from datetime import UTC, datetime
 
 from .client import ServiceUnavailable, VoiceClient
-from .config import Config, ServiceConfig
+from .config import Config
 
 logger = logging.getLogger("jarvis.mcp")
 
@@ -59,10 +57,21 @@ THREE RULES:
    mentioned all mean the other half is a moment away. Only ask if it is still
    incomplete the second time.
 
-WHILE YOU WORK: they cannot see your screen, so silence looks like a crash. Say
-what you are about to do before anything slow, and call check_for_speech between
-steps of a long task - it returns instantly and is the only way "actually, do it
-the other way" reaches you before you have finished doing it the first way.
+BEFORE ANYTHING SLOW, SPEAK FIRST. One question decides it:
+
+   CAN I ANSWER THIS RIGHT NOW, FROM WHAT I ALREADY KNOW?
+
+   YES -> say(the answer). Done.
+   NO, it needs a search, a file, a command, anything at all ->
+        say("Let me have a look, sir.")  <- first, before you start
+        ...then do the work, then say() the real answer.
+
+That one line is all they need. Guess wrong towards speaking: they cannot see
+your screen, and silence is indistinguishable from a crash.
+
+WHILE YOU WORK: call check_for_speech between steps of a long task - it returns
+instantly and is the only way "actually, do it the other way" reaches you before
+you have finished doing it the first way.
 
 SPOKEN REPLIES are read aloud: under forty words, no markdown, never read code or
 long paths. Say "sir" as a tendency not a rule - an acknowledgement, the end of a
@@ -72,70 +81,11 @@ unhurried, no theatrics.
 wait_for_speech returning nothing means they have not spoken yet. Call it again."""
 
 
-class Acknowledger:
-    """Speaks a holding line when an answer is taking a while.
-
-    Cancels itself the moment the real answer arrives, so a quick reply never
-    gets a redundant "one moment" in front of it. Deliberately dumb, and it
-    should not stay that way - see "Still missing" in DESIGN.md.
-    """
-
-    def __init__(self, voice: VoiceClient, config: ServiceConfig) -> None:
-        self._voice = voice
-        self._after = config.acknowledge_after
-        # Shuffled - a new process spawns often enough that a fixed order
-        # only ever played the first phrase.
-        self._phrases = list(config.acknowledgements)
-        random.shuffle(self._phrases)
-        self._lock = threading.Lock()
-        self._timer: threading.Timer | None = None
-        self._index = 0
-
-    @property
-    def enabled(self) -> bool:
-        return self._after > 0 and bool(self._phrases)
-
-    def arm(self) -> None:
-        """Start the clock on an answer we are now waiting for."""
-        self.cancel()
-        if not self.enabled:
-            return
-        with self._lock:
-            self._timer = threading.Timer(self._after, self._speak)
-            self._timer.daemon = True
-            self._timer.start()
-
-    def cancel(self) -> None:
-        with self._lock:
-            timer, self._timer = self._timer, None
-        if timer is not None:
-            timer.cancel()
-
-    def _speak(self) -> None:
-        with self._lock:
-            phrase = self._phrases[self._index % len(self._phrases)]
-            self._index += 1
-        try:
-            self._voice.say(phrase)
-        except Exception:  # the real answer still matters more than this
-            logger.debug("Could not speak the holding line.", exc_info=True)
-
-
 QUESTION_OPENERS = (
     "what", "when", "where", "who", "why", "how", "which", "whose",
     "is", "are", "was", "were", "do", "does", "did", "can", "could",
     "will", "would", "should", "shall", "have", "has", "am",
 )  # fmt: skip
-
-
-def probably_needs_work(text: str) -> bool:
-    """Whether an utterance is likely to send the agent off doing something.
-
-    Gates the holding line: "Working on it, sir" at someone who only said
-    "thanks" answers something that was never a request.
-    """
-    words = text.strip().split()
-    return len(words) >= 3 or text.strip().endswith("?")
 
 
 def age_seconds(item: dict, now: datetime | None = None) -> float | None:
@@ -177,7 +127,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     unanswered_question: str | None = None
     quiet_calls = 0
     first_listen = True
-    acknowledger = Acknowledger(voice, config.service)
 
     server = MCPServer(
         name="jarvis",
@@ -202,9 +151,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         # No timeout argument on purpose. Given one, models pick a small number
         # and give up while the user is still deciding what to say.
         nonlocal cursor, unanswered_question, quiet_calls, first_listen
-
-        # Calling this again means the agent has moved on, so no holding line.
-        acknowledger.cancel()
 
         # "Start listening" means from now, not from whenever the client
         # launched this process. First call only, or speech queued while the
@@ -257,10 +203,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         last = spoken_text[-1]
         if looks_like_a_question(last):
             unanswered_question = last
-        # Arming on "okay" produces a holding line for a reply never coming.
-        if probably_needs_work(last):
-            acknowledger.arm()
-
         # Restated here as well as in the instructions: a tool result lands
         # in context at the moment the model decides whether to speak.
         payload = {
@@ -342,7 +284,6 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     )
     def say(text: str) -> dict:
         nonlocal unanswered_question
-        acknowledger.cancel()
         try:
             voice.say(text)
         except ServiceUnavailable as exc:
@@ -352,8 +293,10 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
             "spoken": True,
             "text": text,
             "next_step": (
-                "Spoken. NOW CALL wait_for_speech - do NOT finish the task! They "
-                "are still listening, and their reply reaches you no other way."
+                "Spoken. Was that the answer? NOW CALL wait_for_speech - do NOT "
+                "finish the task, they are still listening. Was it a lead-in, you "
+                "saying you would go and look? THEN GO AND DO IT NOW - do not "
+                "listen yet, and say() the real answer when you have it."
             ),
         }
 

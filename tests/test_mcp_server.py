@@ -104,18 +104,6 @@ def test_say_still_reaches_the_service(rig):
     assert voice.said == ["Right you are."]
 
 
-def test_the_holding_line_is_not_armed_for_an_acknowledgement(rig):
-    """ "Okay." and "Thanks." need no reply. Speaking "Working on it, sir" at
-    them answers something that was never a request."""
-    from jarvis.mcp_server import probably_needs_work
-
-    assert probably_needs_work("Okay.") is False
-    assert probably_needs_work("Thanks.") is False
-    assert probably_needs_work("Hello.") is False
-    assert probably_needs_work("What's the weather in Melbourne?") is True
-    assert probably_needs_work("open the config file") is True
-
-
 def test_idle_returns_are_not_identical(rig):
     """Four identical empty results in a row read as a stuck loop to a client
     counting consecutive failures, which killed the session."""

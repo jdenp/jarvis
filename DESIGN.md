@@ -107,6 +107,27 @@ is what `pause_threshold` is for. `scripts/measure-pause-tolerance.py` regenerat
 `phrase_time_limit` stays at 60s as the last resort. Reaching it means waiting a minute, but
 the alternative is cutting someone off mid sentence, and very little gets there now.
 
+**JARVIS never speaks on its own initiative.** There used to be an `Acknowledger`: a
+`threading.Timer` in the MCP server that spoke a canned phrase when `say()` had not been
+called within a couple of seconds, so a slow answer did not sound like a crash. It was the
+one place JARVIS decided *what* to say, and it is gone.
+
+Two attempts to keep it are worth not repeating. Letting the agent supply the phrase through
+`say(text, hold=...)` works mechanically but asks the wrong thing of a small model:
+composing a follow-up that lands ten seconds later, with no context to attach it to, is a
+judgement to make while it should be thinking about the actual question. And leaving the
+canned timer in alongside an agent that now speaks first means two holding lines in a row
+whenever the agent is a little slow, which is worse than either alone.
+
+What replaced it is a rule in the instructions: if the answer is not immediate, say one line
+before starting. The agent knows what it is about to do, and a timer never can. If the agent
+forgets, there is silence - and silence is the honest signal that the agent forgot, rather
+than something JARVIS papers over.
+
+Note the constraint that shaped this: an agent only acts *between* tool calls, so nothing
+told to it can make it speak from *inside* a slow one. Anything that tries to fill that gap
+has to be JARVIS talking, which is the thing being removed.
+
 **A pause is measured in frames that are not speech, not in quiet ones.** Loudness cannot
 tell a footstep from a word, so any tolerance rule is guessing. `vad.py` runs Silero, a 1.2MB
 network that scores each 32ms frame, and the whole predicate in `_run` is that one boolean -
@@ -206,17 +227,5 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   comparison in `echo.py`. Real AEC would make barge-in workable
 - Nothing tells the agent that speech arrived while it was busy. It only finds out when it
   next calls `wait_for_speech`. An MCP notification could improve that, if clients honour it
-- **The holding line should come from the agent, not from a timer.** `Acknowledger` is a
-  `threading.Timer` in the MCP server that speaks a canned phrase when `say()` has not been
-  called in time. It works, and it is the wrong place for it: JARVIS is meant to be ears and
-  a mouth, and this is the one spot where it decides what to say. The phrases cannot
-  reference the question, cannot say *what* is taking a while, and cannot tell a slow search
-  from a stuck one.
-
-  The objection to moving it is that an agent only acts *between* tool calls, so it cannot
-  speak while blocked inside a slow one - which is the gap the timer covers. But that argues
-  for moving the words, not the clock: `say(text, hold="Still looking, sir")`, where `hold`
-  is spoken if `say()` has not been called again within `acknowledge_after`. The agent
-  pre-loads its own holding line in a call it was making anyway, so it costs no extra round
-  trip and needs no parallel tool calls, and JARVIS goes back to being only a mouth. The
-  canned list survives as the fallback for when `hold` is omitted
+- Nothing fills the silence if the agent forgets to speak before slow work. That is
+  deliberate - see above - but it does mean a forgetful agent sounds broken
