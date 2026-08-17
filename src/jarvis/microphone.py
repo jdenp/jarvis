@@ -150,8 +150,7 @@ class Microphone:
         seconds_per_buffer = source.CHUNK / source.SAMPLE_RATE
         if not self.detector.calibrates and source.SAMPLE_RATE != SAMPLE_RATE:
             logger.warning(
-                "Device is at %d Hz, but speech detection needs %d Hz. Set audio.vad "
-                "to 'energy'.",
+                "Device is at %d Hz, but speech detection needs %d Hz. Set audio.vad to 'energy'.",
                 source.SAMPLE_RATE,
                 SAMPLE_RATE,
             )
