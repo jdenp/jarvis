@@ -57,7 +57,7 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
   -fa on ^
   -ub 2048 ^
   -ctk q8_0 -ctv q8_0 ^
-  --temp 0.2 --top-k 20 --top-p 0.8 --min-p 0.05 ^
+  --temp 0.3 --top-k 20 --top-p 0.8 --min-p 0.05 ^
   --jinja ^
   --load-mode mlock ^
   --no-reasoning-preserve ^
