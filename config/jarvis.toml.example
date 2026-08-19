@@ -70,10 +70,11 @@ whisper_vad = true             # skip silence before transcribing
 # auto means sapi, the offline Windows voice. edge sounds far better but sends
 # every reply to Microsoft, so it has to be named explicitly.
 engine = "auto"                # auto | sapi | edge | none
-# Preference order, first installed wins. George is British male but ships as a
-# OneCore voice; run scripts/expose-onecore-voices.ps1 (elevated) to let SAPI
-# see it, otherwise this falls through to Hazel. `-List` shows what you have.
-sapi_voice = "George, Hazel"
+# Preference order, first installed wins. Both are female - Hazel is en-GB and
+# usually the Windows default, Zira is en-US. For a British male, George ships as
+# a OneCore voice only: run scripts/expose-onecore-voices.ps1 (elevated) to let
+# SAPI see it, then name it first here. `-List` shows what you have.
+sapi_voice = "Hazel, Zira"
 voice = "en-GB-RyanNeural"     # edge only, `edge-tts --list-voices` for more
 rate = 210                     # words per minute. SAPI steps coarsely: ~205+ is
                                # one notch faster than default, ~265+ is two.

@@ -1,9 +1,9 @@
 # Make Windows OneCore voices visible to SAPI5.
 #
 # Windows ships more voices than SAPI can see. Microsoft George (British male)
-# is usually installed as a OneCore voice only, so `jarvis` cannot select it and
-# falls back to Hazel. This copies the OneCore voice registrations across to the
-# SAPI5 hive, which is where SAPI looks.
+# is usually installed as a OneCore voice only, so SAPI cannot select it at all.
+# This copies the OneCore voice registrations across to the SAPI5 hive, which is
+# where SAPI looks.
 #
 # Needs an elevated PowerShell. Registrations point at the same voice data
 # already on disk - nothing is downloaded and no files are modified.

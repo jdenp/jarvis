@@ -27,7 +27,7 @@
   "tts": {
     "engine": "auto",
     "voice": "en-GB-RyanNeural",
-    "sapi_voice": "George, Hazel",
+    "sapi_voice": "Hazel, Zira",
     "rate": 210,
     "volume": 1.0
   },

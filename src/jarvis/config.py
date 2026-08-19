@@ -88,9 +88,8 @@ class TtsConfig:
 
     engine: str = "auto"  # auto (local first) | sapi | edge | none
     voice: str = "en-GB-RyanNeural"  # edge only
-    # Preference order, first installed wins. George needs registering first -
-    # see scripts/expose-onecore-voices.ps1.
-    sapi_voice: str = "George, Hazel"
+    # Preference order, first installed wins. Hazel is en-GB, Zira the en-US fallback.
+    sapi_voice: str = "Hazel, Zira"
     rate: int = 210
     volume: float = 1.0
 
