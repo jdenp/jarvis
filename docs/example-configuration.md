@@ -13,16 +13,15 @@ list of options.
 
 ## Software
 
-- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 192k context, `--n-cpu-moe 26`
+- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context, `--n-cpu-moe 25`
 - **Agent** - Cline CLI over MCP, `openai-compatible` provider at `127.0.0.1:8081`
 - **STT** - `small.en` on CUDA, `int8_float16`
 - **TTS** - SAPI, Microsoft Hazel
 
-VRAM is the binding constraint. At these settings llama-server accounts for about 8.1 GB of
-the 12 GB card - measured as the jump in `nvidia-smi` across a start - and Whisper wants
-another ~580 MB with ~340 MB of CUDA context on top. That is why speech detection stays on
-the CPU: Silero costs 0.19% of one core and no VRAM, where a GPU denoiser would have to be
-paid for out of `--n-cpu-moe`.
+VRAM is the binding constraint. llama-server alone leaves 810 MB free on the 12 GB card, and
+Whisper takes ~580 MB with ~340 MB of CUDA context on top - about 127 MB spare once everything
+is up. That is why speech detection stays on the CPU: Silero costs 0.19% of one core and no
+VRAM, where a GPU denoiser would have to be paid for out of `--n-cpu-moe`.
 
 ## The llama.cpp launcher
 
@@ -33,7 +32,7 @@ are Qwen3's own recommendations rather than llama.cpp's looser 40 and 0.95.
 
 ```bat
 @echo off
-title Qwen3.6-35B agent server - one 192k slot - 127.0.0.1:8081
+title Qwen3.6-35B agent server - one 128k slot - 127.0.0.1:8081
 
 cd /d "%~dp0"
 cd "llama-b10237-bin-win-cuda-12.4-x64"
@@ -55,7 +54,7 @@ cd "llama-b10237-bin-win-cuda-12.4-x64"
 :: arguments and the command breaks.
 llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
   -ngl 99 ^
-  --n-cpu-moe 26 ^
+  --n-cpu-moe 25 ^
   -fa on ^
   -ub 2048 ^
   -ctk q8_0 -ctv q8_0 ^
@@ -63,7 +62,7 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
   --jinja ^
   --load-mode mlock ^
   --no-reasoning-preserve ^
-  -c 196608 ^
+  -c 131072 ^
   --parallel 1 ^
   --cache-reuse 256 ^
   --host 127.0.0.1 ^
@@ -73,23 +72,31 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
 timeout /t 2 /nobreak >nul
 ```
 
-Context and `--n-cpu-moe` trade directly against each other. More context is more KV cache,
-and moving one more MoE layer off the GPU pays for it at roughly 528 MB a layer, going by the
-expert tensor sizes llama.cpp prints while loading. 192k loads in about a minute here.
+Context and `--n-cpu-moe` trade against each other: more context is more KV cache, and moving
+another MoE layer off the GPU is how you pay for it. 128k loads in about 46 seconds here.
 
 One thing to know if you copy this: `llama-server.exe` is called bare, relying on `cmd`
 searching its own directory. That fails wherever `NoDefaultCurrentDirectoryInExePath` is
 set, which some sandboxed shells do, and the error is the unhelpful `'llama-server.exe' is
 not recognized as an internal or external command`. Writing `.\llama-server.exe` avoids it.
 
-## Telling Cline the context size
+## Telling Cline when to compact
 
-Cline cannot discover the context window from a custom endpoint, so it has to be told. In
-`providers.json`, `contextWindow` must match llama.cpp's `-c` or compaction fires too late:
+Cline cannot discover the context window from a custom endpoint, so `contextWindow` in
+`providers.json` has to tell it. It must not exceed llama.cpp's `-c`, or requests overflow the
+server instead of being compacted. Setting it deliberately *lower* is the useful part, though -
+answers here start degrading well before 128k, so compacting earlier beats filling the window:
 
 ```json
-{ "contextWindow": 196608, "maxTokens": 32000 }
+{ "contextWindow": 65536, "maxTokens": 32000 }
 ```
+
+Cline compacts at 0.9 of that figure, so 64k triggers at about 59k tokens. Keeping it small
+also keeps compaction survivable. It runs as a hub command against a timeout hardcoded at 30
+seconds, with no setting or environment variable behind it, and summarising six figures of
+tokens on this hardware does not finish inside 30 seconds. For scale, one `run.start` in
+`hub-daemon.log` took 11.5 minutes and only completed because that particular command is
+exempt from the timeout.
 
 ## Local overrides
 
