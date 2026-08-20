@@ -54,16 +54,23 @@ class SapiSpeaker:
 
     Not pyttsx3: it waits on COM events through a message pump, and those stop
     arriving once the microphone initialises COM. Speak then returns silently.
+
+    Spoken asynchronously and polled, so the purge that cancels it runs on this
+    thread. SAPI lives in the apartment that created it, so a purge sent from
+    another thread cannot be delivered until the Speak it was meant to cancel has
+    already finished - and it blocks that other thread until then.
     """
 
     is_local = True
 
-    SYNCHRONOUS = 0
+    ASYNC = 1  # SVSFlagsAsync
     PURGE_ASYNC = 3  # SVSFlagsAsync | SVSFPurgeBeforeSpeak
+    POLL_MS = 50
 
     def __init__(self, config: TtsConfig) -> None:
         import comtypes.client
 
+        self._cancelled = threading.Event()
         self._voice = comtypes.client.CreateObject("SAPI.SpVoice")
         self._voice.Rate = _sapi_rate(config.rate)
         self._voice.Volume = int(max(0.0, min(1.0, config.volume)) * 100)
@@ -96,17 +103,19 @@ class SapiSpeaker:
         return None
 
     def speak(self, text: str) -> None:
-        self._voice.Speak(text, self.SYNCHRONOUS)
+        self._cancelled.clear()
+        self._voice.Speak(text, self.ASYNC)
+        while not self._voice.WaitUntilDone(self.POLL_MS):
+            if self._cancelled.is_set():
+                self._voice.Speak("", self.PURGE_ASYNC)
+                return
 
     def stop(self) -> None:
-        # Purging is what cuts a synchronous Speak short from another thread.
-        self._voice.Speak("", self.PURGE_ASYNC)
+        """Safe from any thread: no COM call, just a flag speak() is watching."""
+        self._cancelled.set()
 
     def close(self) -> None:
-        try:
-            self.stop()
-        except Exception:  # pragma: no cover - teardown is best effort
-            logger.debug("SAPI voice did not shut down cleanly.", exc_info=True)
+        self.stop()
 
 
 def _sapi_rate(words_per_minute: int) -> int:

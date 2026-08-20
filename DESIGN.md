@@ -208,6 +208,17 @@ touching anything else.
 pygame hold thread-affine resources. `SpeechEngine` takes a factory and calls it inside the
 worker. Building on the main thread and calling from the worker gets you silence or a hang.
 
+**Cancel SAPI from the thread that owns it, not from the caller.** `speak()` hands SAPI the
+text asynchronously and polls `WaitUntilDone`, checking a flag between polls and issuing the
+purge itself; `stop()` makes no COM call at all. It used to speak synchronously and cancel with
+a purge from whichever thread called `interrupt()`, on the belief that a purge cuts a
+synchronous `Speak` short from outside. It does not. The voice lives in the apartment that
+created it, so a call from another thread has to be marshalled in, and that cannot happen while
+the worker is blocked inside `Speak` - the purge is delivered only once the utterance it was
+cancelling has ended, and it blocks the caller until then. Measured: `interrupt()` returned
+after 5.02s on a 4s utterance, against 0.000s and a cut at 1.12s afterwards. `close()` was
+paying that cost on every shutdown.
+
 **Count pending utterances, do not flag idleness.** `SpeechEngine` tracks a count under a
 `Condition` rather than setting an idle `Event`. A flag races: the worker can see an empty
 queue and mark itself idle in the window between `say()` incrementing and `say()` enqueueing,

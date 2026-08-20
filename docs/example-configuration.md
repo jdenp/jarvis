@@ -83,20 +83,25 @@ not recognized as an internal or external command`. Writing `.\llama-server.exe`
 ## Telling Cline when to compact
 
 Cline cannot discover the context window from a custom endpoint, so `contextWindow` in
-`providers.json` has to tell it. It must not exceed llama.cpp's `-c`, or requests overflow the
-server instead of being compacted. Setting it deliberately *lower* is the useful part, though -
-answers here start degrading well before 128k, so compacting earlier beats filling the window:
+`providers.json` has to tell it, and it compacts at 0.9 of whatever it is told. That figure
+has to be chosen from both ends. Too high and answers degrade before it ever compacts; too
+low and it compacts constantly, and every compaction is a chance to be interrupted:
 
 ```json
-{ "contextWindow": 65536, "maxTokens": 32000 }
+{ "contextWindow": 90112, "maxTokens": 32000 }
 ```
 
-Cline compacts at 0.9 of that figure, so 64k triggers at about 59k tokens. Keeping it small
-also keeps compaction survivable. It runs as a hub command against a timeout hardcoded at 30
-seconds, with no setting or environment variable behind it, and summarising six figures of
-tokens on this hardware does not finish inside 30 seconds. For scale, one `run.start` in
-`hub-daemon.log` took 11.5 minutes and only completed because that particular command is
-exempt from the timeout.
+88k triggers compaction at about 81k tokens. Adding `maxTokens` for the reply comes to 113k,
+which still fits the server's 131,072 with room to spare - the ceiling worth watching, since
+`contextWindow` alone exceeding `-c` means requests overflow the server rather than being
+compacted.
+
+Compaction is the fragile part of a voice session. It runs as a hub command against a timeout
+hardcoded at 30 seconds, with no setting or environment variable behind it. In
+`hub-daemon.log` the calls that land take 21-32ms, so when one fails at 30s the command was
+never serviced rather than slow - and a `wait_for_speech` long poll holding a tool call open
+for up to `max_wait_seconds` is the obvious suspect. Compacting less often is the cheap
+mitigation.
 
 ## Local overrides
 

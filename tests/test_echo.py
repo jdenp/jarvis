@@ -72,3 +72,37 @@ def test_sounds_like_ignores_empty_sides():
 
 def test_unrelated_text_of_similar_length_is_not_a_match():
     assert sounds_like("open the config file", "close the browser tab") is False
+
+
+LONG_REPLY = (
+    "Alright sir, here is a long message for you. The Windows operating system was "
+    "first released in 1985. It went through many versions before reaching Windows 10 "
+    "and the current Windows 11. The kernel is called NT, which stands for New "
+    "Technology."
+)
+
+
+def test_the_tail_of_an_interrupted_reply_is_still_an_echo():
+    """Barging in cuts a reply mid sentence, so what comes back is a run out of the
+    middle of a much longer utterance. Whole-string similarity scores that near
+    zero, and JARVIS's own last words landed in the transcript as a request."""
+    guard = EchoGuard()
+    guard.remember(LONG_REPLY)
+    assert guard.is_echo("through many versions before reaching") is True
+
+
+def test_a_misheard_word_does_not_save_it_either():
+    guard = EchoGuard()
+    guard.remember(LONG_REPLY)
+    assert guard.is_echo("the kernel is called and tea which stands for") is True
+
+
+def test_a_short_command_is_not_an_echo_by_coincidence():
+    """The run test needs a floor. Two or three letters of any short phrase appear
+    somewhere in a long reply, and swallowing real commands is far worse than
+    letting an echo through."""
+    guard = EchoGuard()
+    guard.remember(LONG_REPLY)
+    assert guard.is_echo("stop") is False
+    assert guard.is_echo("no") is False
+    assert guard.is_echo("open the config") is False

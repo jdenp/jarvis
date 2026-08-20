@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from jarvis.tts import NullSpeaker, SpeechEngine, _sapi_rate, iter_sentences
@@ -118,6 +121,40 @@ def test_interrupt_clears_the_queue_and_releases_waiters():
     engine.interrupt()
     assert engine.wait(timeout=5)
     assert engine.speaking is False
+    engine.close()
+
+
+def test_interrupt_does_not_wait_for_the_utterance_it_is_cancelling():
+    """SAPI was spoken synchronously and cancelled with a purge from whichever
+    thread called interrupt(). SAPI lives in the apartment that created it, so that
+    purge could not be delivered until the Speak it was meant to cancel had
+    finished - and it blocked the caller until then. close() paid that on every
+    shutdown, waiting out the last reply before it could exit."""
+    started = threading.Event()
+
+    class Slow(NullSpeaker):
+        """Blocks in speak() until told to stop, as a real backend does."""
+
+        def __init__(self) -> None:
+            self.done = threading.Event()
+
+        def speak(self, text: str) -> None:
+            started.set()
+            assert self.done.wait(timeout=5), "stop() never arrived"
+
+        def stop(self) -> None:
+            self.done.set()
+
+    engine = SpeechEngine(Slow)
+    engine.say("A long reply that someone is about to talk over.")
+    assert started.wait(timeout=5)
+
+    at = time.monotonic()
+    engine.interrupt()
+    elapsed = time.monotonic() - at
+
+    assert elapsed < 1.0, f"interrupt() blocked the caller for {elapsed:.2f}s"
+    assert engine.wait(timeout=5), "and the utterance really was cut short"
     engine.close()
 
 
