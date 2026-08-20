@@ -128,6 +128,12 @@ Note the constraint that shaped this: an agent only acts *between* tool calls, s
 told to it can make it speak from *inside* a slow one. Anything that tries to fill that gap
 has to be JARVIS talking, which is the thing being removed.
 
+Where the rule lives decides whether it fires. Stated only in the instructions and in
+`jarvis.md`, it was ignored: both are read once, a long way back, while the choice is made
+the instant `wait_for_speech` returns. That result carried "do the work, then call say() with
+the answer" - the opposite - and the nearer text won every time. The fork now sits in the
+result itself, and neither loop diagram teaches work-then-speak any more.
+
 **A pause is measured in frames that are not speech, not in quiet ones.** Loudness cannot
 tell a footstep from a word, so any tolerance rule is guessing. `vad.py` runs Silero, a 1.2MB
 network that scores each 32ms frame, and the whole predicate in `_run` is that one boolean -

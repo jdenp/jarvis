@@ -18,7 +18,8 @@ Voice mode ends when they say so, or when they go back to typing.
 ## The loop
 
 ```
-wait_for_speech()  ->  do the work  ->  say(answer)  ->  wait_for_speech()
+instant?  wait_for_speech()  ->  say(answer)  ->  wait_for_speech()
+slow?     wait_for_speech()  ->  say(lead-in)  ->  work  ->  say(answer)  ->  wait_for_speech()
 ```
 
 **ALWAYS straight back to `wait_for_speech` after speaking.** No "anything else?", no

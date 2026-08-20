@@ -49,7 +49,18 @@ def test_speech_comes_back_with_the_judgement_call_attached(rig):
     result = raw("wait_for_speech")
     assert "what time is it" in result
     assert "MEANT FOR YOU?" in result
-    assert "must be say()" in result, "the action, not just the nuance"
+    assert "MUST BE say()" in result, "the action, not just the nuance"
+
+
+def test_the_lead_in_rule_is_at_the_decision_point(rig):
+    """The rule lived only in the instructions and jarvis.md - both read once and a
+    long way back - while this result said "do the work, then call say() with the
+    answer". The nearer text won, so the agent worked in silence instead."""
+    _, _voice, raw = rig
+    result = raw("wait_for_speech")
+    assert "Let me have a look, sir." in result, "the lead-in, ready to be spoken"
+    assert "FIRST, BEFORE you start" in result, "before the work, not after"
+    assert "Do the work, then" not in result, "the contradiction is gone"
 
 
 def test_staying_silent_is_not_refused(rig):

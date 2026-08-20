@@ -22,8 +22,8 @@ tools or start the service until asked. "jarvis" on its own means start listenin
 now - call wait_for_speech immediately, no text reply, nothing else first. So do
 "listen", "use voice", "talk to me". It ends when they say so or go back to typing.
 
-THE LOOP: wait_for_speech -> do the work -> say(answer) -> wait_for_speech
-                                                          ^^^^^^^^^^^^^^^
+THE LOOP: wait_for_speech -> say() -> wait_for_speech
+                                      ^^^^^^^^^^^^^^^
 ALWAYS STRAIGHT BACK TO wait_for_speech! No "anything else?", no written recap.
 NEVER finish or complete the task after a reply - voice is ONE LONG CONVERSATION,
 not a task per sentence, and completing hangs up on someone still sitting at the
@@ -208,14 +208,21 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         payload = {
             "heard": spoken_text,
             "next_step": (
-                "MEANT FOR YOU? Do the work, then CALL say() WITH THE ANSWER. "
-                "say() IS THE ONLY THING THEY CAN HEAR. They are listening, not "
-                "reading - text you write reaches NOBODY, and neither does a task "
-                "result. Your very next tool call must be say(): NOT "
-                "wait_for_speech, NOT completion, NOT prose. DECIDING to reply is "
-                "not replying - if you are about to write the words out, CALL "
-                "say() WITH THEM INSTEAD! Then call wait_for_speech again; never "
-                "end the task. "
+                "MEANT FOR YOU? ONE QUESTION DECIDES YOUR NEXT TOOL CALL: can "
+                "you answer RIGHT NOW, from what you already know? "
+                "YES -> say(the answer). "
+                "NO - it needs a search, a file, a command, ANY tool call at all "
+                '-> say("Let me have a look, sir.") FIRST, BEFORE you start, then '
+                "do the work, then say() the real answer. NEVER GO QUIET AND "
+                "START WORKING: they cannot see your screen, so silence reads as "
+                "a crash! "
+                "EITHER WAY YOUR NEXT TOOL CALL MUST BE say(). NOT prose, NOT "
+                "completion, NOT another search. say() IS THE ONLY THING THEY CAN "
+                "HEAR - they are listening, not reading, so text you write reaches "
+                "NOBODY and neither does a task result. DECIDING to reply is not "
+                "replying: if you are about to write the words out, CALL say() "
+                "WITH THEM INSTEAD! After the real answer, wait_for_speech again; "
+                "never end the task. "
                 "NOT MEANT FOR YOU (background talk, a fragment that is not a "
                 "request)? Stay silent and call wait_for_speech again. "
                 "CUT OFF MID SENTENCE? Call wait_for_speech again; the rest is "
