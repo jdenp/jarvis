@@ -48,8 +48,7 @@ def test_speech_comes_back_with_the_judgement_call_attached(rig):
     _, _voice, raw = rig
     result = raw("wait_for_speech")
     assert "what time is it" in result
-    assert "MEANT FOR YOU?" in result
-    assert "MUST BE say()" in result, "the action, not just the nuance"
+    assert "Can you answer right now? say() it." in result, "the decision, first"
 
 
 def test_the_lead_in_rule_is_at_the_decision_point(rig):
@@ -58,9 +57,21 @@ def test_the_lead_in_rule_is_at_the_decision_point(rig):
     answer". The nearer text won, so the agent worked in silence instead."""
     _, _voice, raw = rig
     result = raw("wait_for_speech")
-    assert "Let me have a look, sir." in result, "the lead-in, ready to be spoken"
-    assert "FIRST, BEFORE you start" in result, "before the work, not after"
+    assert "say one short line FIRST" in result, "before the work, not after"
+    assert "in your own words" in result, "composed, not recited - one fixed line sounds robotic"
+    assert "however many tool calls it takes" in result, "the work is not one call"
     assert "Do the work, then" not in result, "the contradiction is gone"
+
+
+def test_the_instruction_is_short_and_read_last(rig):
+    """A small model given five competing clauses picks whichever it read last, and
+    `detail` used to be after this one."""
+    _, _voice, raw = rig
+    result = raw("wait_for_speech")
+    start = result.index("Can you answer right now")
+    end = result.index("wait_for_speech again.", start)
+    assert end - start < 480, f"the instruction spans {end - start} characters"
+    assert result.rindex("next_step") > result.rindex("detail")
 
 
 def test_staying_silent_is_not_refused(rig):

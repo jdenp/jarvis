@@ -203,33 +203,21 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         last = spoken_text[-1]
         if looks_like_a_question(last):
             unanswered_question = last
-        # Restated here as well as in the instructions: a tool result lands
-        # in context at the moment the model decides whether to speak.
-        payload = {
-            "heard": spoken_text,
-            "next_step": (
-                "MEANT FOR YOU? ONE QUESTION DECIDES YOUR NEXT TOOL CALL: can "
-                "you answer RIGHT NOW, from what you already know? "
-                "YES -> say(the answer). "
-                "NO - it needs a search, a file, a command, ANY tool call at all "
-                '-> say("Let me have a look, sir.") FIRST, BEFORE you start, then '
-                "do the work, then say() the real answer. NEVER GO QUIET AND "
-                "START WORKING: they cannot see your screen, so silence reads as "
-                "a crash! "
-                "EITHER WAY YOUR NEXT TOOL CALL MUST BE say(). NOT prose, NOT "
-                "completion, NOT another search. say() IS THE ONLY THING THEY CAN "
-                "HEAR - they are listening, not reading, so text you write reaches "
-                "NOBODY and neither does a task result. DECIDING to reply is not "
-                "replying: if you are about to write the words out, CALL say() "
-                "WITH THEM INSTEAD! After the real answer, wait_for_speech again; "
-                "never end the task. "
-                "NOT MEANT FOR YOU (background talk, a fragment that is not a "
-                "request)? Stay silent and call wait_for_speech again. "
-                "CUT OFF MID SENTENCE? Call wait_for_speech again; the rest is "
-                "already queued."
-            ),
-            "detail": heard,
-        }
+        # Read at the moment the model picks its next tool call, so it says what
+        # to call and little else. Length was the problem: the decision used to sit
+        # in the middle of five competing clauses, and `detail` came after it, so
+        # the last thing read before deciding was a copy of `heard` with
+        # timestamps. next_step goes last now.
+        payload = {"heard": spoken_text, "detail": heard}
+        next_step = (
+            "Can you answer right now? say() it. "
+            "If it needs a search, a file, a command - say one short line FIRST, in "
+            "your own words, so they know you heard: let me take a look, one moment, "
+            "let me check that. Then do the work, however many tool calls it takes, "
+            "and say() the answer when you have it. "
+            "NOTHING YOU WRITE REACHES THEM, ONLY say(). "
+            "Not for you, or cut off mid sentence? wait_for_speech again."
+        )
         stale_after = config.service.stale_after_seconds
         if stale_after > 0 and newest_age is not None and newest_age > stale_after:
             payload["stale"] = (
@@ -242,6 +230,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
                 f'You never spoke an answer to "{missed}". If you worked one out, '
                 "say() it now along with anything new."
             )
+        payload["next_step"] = next_step
         return payload
 
     @server.tool(
