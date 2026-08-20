@@ -110,6 +110,29 @@ class ServiceConfig:
 
 
 @dataclass(frozen=True)
+class WebConfig:
+    """A page on the LAN you can talk to from a phone.
+
+    Off by default, and unlike the service API this one is meant to be routable -
+    so it is not allowed to run without a token.
+    """
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8771
+    # Blank generates one at startup and logs the URL with it. Set it to keep the
+    # same link across restarts.
+    token: str = ""
+    # A browser will not open a microphone without a secure context, so a self
+    # signed certificate is generated on first run. Without it, typing still works.
+    https: bool = True
+    certificate_file: str = "web-cert.pem"
+    private_key_file: str = "web-key.pem"
+    # How long a phone may hold the transcript stream open before reconnecting.
+    stream_seconds: float = 600.0
+
+
+@dataclass(frozen=True)
 class Config:
     """Top level configuration."""
 
@@ -117,6 +140,7 @@ class Config:
     stt: SttConfig = field(default_factory=SttConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
     service: ServiceConfig = field(default_factory=ServiceConfig)
+    web: WebConfig = field(default_factory=WebConfig)
     log_level: str = "INFO"
 
     @property
@@ -156,7 +180,7 @@ CONFIG_FILES = (
     "jarvis.toml",
 )
 
-_SECTIONS = frozenset({"audio", "stt", "tts", "service"})
+_SECTIONS = frozenset({"audio", "stt", "tts", "service", "web"})
 
 # Where to look, not what to set. Without this JARVIS_CONFIG=x is read as a
 # setting called "config" and startup fails on the file it was meant to load.

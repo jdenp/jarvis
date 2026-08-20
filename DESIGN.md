@@ -224,6 +224,36 @@ paying that cost on every shutdown.
 queue and mark itself idle in the window between `say()` incrementing and `say()` enqueueing,
 so `wait()` returns while an utterance is still to come.
 
+## The phone page
+
+`web.py` is the only part of JARVIS meant to be reachable from the network, which is what
+shapes it. The service API in `service.py` is loopback and deliberately authless; this one
+requires a token on every route, and refuses to run without one.
+
+It lives inside `jarvis serve` rather than beside it. It needs the transcript and the Whisper
+model that are already loaded, and a second process would mean a second copy of the model in
+VRAM - on a 12GB card shared with an LLM, that is the whole budget.
+
+**The phone synthesises the reply itself.** SAPI renders to the desktop's speakers, so sending
+audio to the phone would mean encoding, buffering and keeping it in step with a connection
+that drops when the tab backgrounds. The page already has the text, so `speechSynthesis` says
+it there. No audio leaves the machine, which is the promise the rest of JARVIS makes, and the
+cost is that the voice is whatever the phone has.
+
+**HTTPS is not optional, for a reason that is not security.** A browser will not open a
+microphone outside a secure context, and a LAN address over HTTP is not one. So a self signed
+certificate is generated on first run, named for every address this machine answers on -
+`localhost` would not cover the address the phone dials. Without a certificate the page still
+serves and says the microphone is unavailable, rather than failing on the first press.
+
+**Uploads are drained before being refused.** Answering 413 without reading the body leaves
+the phone writing into a closed socket, which it reports as a network failure rather than the
+reason. The page checks the size first so the normal path never gets there.
+
+**The stream is polled, not pushed.** Two sources with independent conditions - the transcript
+and the reply ring - and waiting on both at once is more machinery than a quarter second of
+latency on a phone is worth.
+
 ## Swapping a component
 
 Each is a Protocol or a factory, so a replacement only has to match the shape:

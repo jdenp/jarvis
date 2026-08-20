@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>JARVIS</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --line: #232b36;
+    --text: #e6edf3;
+    --dim: #8b949e;
+    --me: #1f6feb;
+    --him: #21262d;
+    --live: #3fb950;
+    --warn: #d29922;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    /* Keeps the talk button clear of the home indicator. */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { font-size: 15px; letter-spacing: .14em; margin: 0; font-weight: 600; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); flex: none; }
+  #dot.on { background: var(--live); box-shadow: 0 0 8px var(--live); }
+  #dot.bad { background: var(--warn); }
+  #state { margin-left: auto; font-size: 12px; color: var(--dim); }
+
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .line { max-width: 84%; padding: 9px 13px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; }
+  .me { align-self: flex-end; background: var(--me); border-bottom-right-radius: 5px; }
+  .him { align-self: flex-start; background: var(--him); border-bottom-left-radius: 5px; }
+  .note { align-self: center; color: var(--dim); font-size: 13px; text-align: center; max-width: 92%; }
+  .when { display: block; font-size: 11px; opacity: .6; margin-top: 3px; }
+
+  footer { border-top: 1px solid var(--line); background: var(--panel); padding: 10px 12px 12px; }
+  #row { display: flex; gap: 8px; align-items: center; }
+  input[type=text] {
+    flex: 1; min-width: 0; padding: 12px 14px; border-radius: 22px;
+    border: 1px solid var(--line); background: #0b0f14; color: var(--text); font-size: 16px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--me); }
+  button {
+    font: inherit; color: var(--text); background: var(--him);
+    border: 1px solid var(--line); border-radius: 22px; padding: 12px 18px;
+  }
+  button:disabled { opacity: .45; }
+  #talk {
+    width: 100%; margin-top: 10px; padding: 20px; border-radius: 26px;
+    font-size: 17px; font-weight: 600; background: var(--me); border-color: transparent;
+    touch-action: none; user-select: none;
+  }
+  #talk.recording { background: #b62324; transform: scale(.99); }
+  #options { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--dim); }
+  #options label { display: flex; align-items: center; gap: 6px; }
+  #start { position: fixed; inset: 0; display: flex; flex-direction: column;
+           align-items: center; justify-content: center; gap: 18px; background: var(--bg); z-index: 9; padding: 24px; }
+  #start p { color: var(--dim); text-align: center; max-width: 30ch; margin: 0; }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1 style="letter-spacing:.2em;margin:0">J A R V I S</h1>
+  <p>Tap to connect. Phones only allow a microphone and a voice after you touch the page.</p>
+  <button id="begin" style="padding:16px 32px;background:var(--me);border-color:transparent">Connect</button>
+  <p id="startnote" style="font-size:13px"></p>
+</div>
+
+<header>
+  <span id="dot"></span>
+  <h1>JARVIS</h1>
+  <span id="state">connecting</span>
+</header>
+
+<div id="log"></div>
+
+<footer>
+  <div id="row">
+    <input id="text" type="text" placeholder="Type instead" autocomplete="off"
+           autocorrect="off" enterkeyhint="send">
+    <button id="send">Send</button>
+  </div>
+  <button id="talk">Hold to talk</button>
+  <div id="options">
+    <label><input id="speak" type="checkbox" checked> Speak replies here</label>
+    <label><input id="desktop" type="checkbox"> Also on desktop</label>
+  </div>
+</footer>
+
+<script>
+"use strict";
+
+const log = document.getElementById("log");
+const dot = document.getElementById("dot");
+const state = document.getElementById("state");
+const talk = document.getElementById("talk");
+const textBox = document.getElementById("text");
+const sendButton = document.getElementById("send");
+const speakHere = document.getElementById("speak");
+const alsoDesktop = document.getElementById("desktop");
+const splash = document.getElementById("start");
+const startNote = document.getElementById("startnote");
+
+let heardCursor = 0;
+let saidCursor = 0;
+let maxUpload = 8 * 1024 * 1024;
+let recorder = null;
+let stream = null;
+let source = null;
+let ready = false;
+
+// The token arrives in the query string; the server also sets it as a cookie, so
+// drop it out of the address bar rather than leaving it in the phone's history.
+if (location.search.includes("t=")) {
+  history.replaceState(null, "", location.pathname);
+}
+
+function at(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch (_) {
+    return "";
+  }
+}
+
+function add(kind, text, when) {
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+  const line = document.createElement("div");
+  line.className = "line " + kind;
+  line.textContent = text;
+  if (when) {
+    const stamp = document.createElement("span");
+    stamp.className = "when";
+    stamp.textContent = at(when);
+    line.appendChild(stamp);
+  }
+  log.appendChild(line);
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function note(text) {
+  const line = document.createElement("div");
+  line.className = "note";
+  line.textContent = text;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setState(label, cls) {
+  state.textContent = label;
+  dot.className = cls || "";
+}
+
+// ------------------------------------------------------------------ speaking
+
+let voice = null;
+
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  // British first, to match the desktop voice, then anything English.
+  return voices.find(v => /en-GB/i.test(v.lang))
+      || voices.find(v => /^en/i.test(v.lang))
+      || voices[0];
+}
+
+function unlockSpeech() {
+  // iOS will not speak until synthesis has been used inside a real gesture.
+  const warm = new SpeechSynthesisUtterance(" ");
+  warm.volume = 0;
+  speechSynthesis.speak(warm);
+  voice = pickVoice();
+  if (!voice) speechSynthesis.onvoiceschanged = () => { voice = pickVoice(); };
+}
+
+function speak(text) {
+  if (!speakHere.checked || !("speechSynthesis" in window)) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  if (voice) utterance.voice = voice;
+  utterance.rate = 1.05;
+  speechSynthesis.speak(utterance);
+}
+
+// -------------------------------------------------------------------- stream
+
+function connect() {
+  if (source) source.close();
+  source = new EventSource(`/events?heard=${heardCursor}&said=${saidCursor}`);
+
+  source.addEventListener("open", () => setState("listening", "on"));
+  source.addEventListener("heard", event => {
+    const item = JSON.parse(event.data);
+    heardCursor = Math.max(heardCursor, item.id);
+    add("me", item.text, item.at);
+  });
+  source.addEventListener("said", event => {
+    const item = JSON.parse(event.data);
+    saidCursor = Math.max(saidCursor, item.id);
+    add("him", item.text, item.at);
+    speak(item.text);
+  });
+  source.addEventListener("error", () => {
+    setState("reconnecting", "bad");
+    // The server closes the stream on a timer, so this is routine. EventSource
+    // retries on its own; reopening here would double up the connections.
+  });
+}
+
+async function catchUp() {
+  const response = await fetch("/state");
+  if (!response.ok) throw new Error(`state ${response.status}`);
+  const data = await response.json();
+  log.innerHTML = "";
+  const lines = [
+    ...data.heard.map(item => ({ kind: "me", ...item })),
+    ...data.said.map(item => ({ kind: "him", ...item })),
+  ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  for (const line of lines.slice(-60)) add(line.kind, line.text, line.at);
+  heardCursor = data.heard_cursor;
+  saidCursor = data.said_cursor;
+  if (data.max_upload) maxUpload = data.max_upload;
+  if (!data.can_record) note("This service cannot transcribe a recording. Typing still works.");
+  return data;
+}
+
+// --------------------------------------------------------------------- input
+
+async function post(path, body, kind) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: kind ? { "Content-Type": kind } : {},
+    body,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`${path} ${response.status}: ${detail}`);
+  }
+  return response.json();
+}
+
+async function sendTyped() {
+  const text = textBox.value.trim();
+  if (!text) return;
+  textBox.value = "";
+  try {
+    if (alsoDesktop.checked) {
+      await post("/say", JSON.stringify({ text }), "application/json");
+    } else {
+      await post("/heard", JSON.stringify({ text }), "application/json");
+    }
+  } catch (error) {
+    note(String(error));
+  }
+}
+
+sendButton.addEventListener("click", sendTyped);
+textBox.addEventListener("keydown", event => {
+  if (event.key === "Enter") sendTyped();
+});
+
+// ------------------------------------------------------------------ recording
+
+function bestMimeType() {
+  // Android gives webm/opus, iOS mp4/aac. Either decodes server side, so take
+  // whatever the browser admits to supporting.
+  const wanted = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/aac", ""];
+  for (const kind of wanted) {
+    if (!kind || (window.MediaRecorder && MediaRecorder.isTypeSupported(kind))) return kind;
+  }
+  return "";
+}
+
+async function openMicrophone() {
+  if (stream) return stream;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error(
+      window.isSecureContext
+        ? "This browser has no microphone support."
+        : "The microphone needs HTTPS. Reload over https:// and accept the certificate."
+    );
+  }
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  return stream;
+}
+
+async function startRecording() {
+  if (!ready || recorder) return;
+  try {
+    const microphone = await openMicrophone();
+    const kind = bestMimeType();
+    recorder = new MediaRecorder(microphone, kind ? { mimeType: kind } : undefined);
+    const chunks = [];
+    recorder.addEventListener("dataavailable", event => {
+      if (event.data && event.data.size) chunks.push(event.data);
+    });
+    recorder.addEventListener("stop", async () => {
+      recorder = null;
+      talk.classList.remove("recording");
+      talk.textContent = "Hold to talk";
+      const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+      if (blob.size < 1200) {
+        note("Too short to transcribe.");
+        return;
+      }
+      // Checked here as well as server side: refusing mid upload reads as a
+      // network failure on the phone rather than a reason.
+      if (blob.size > maxUpload) {
+        note(`That is ${(blob.size / 1048576).toFixed(1)}MB, over the limit. Try a shorter one.`);
+        return;
+      }
+      setState("transcribing", "bad");
+      try {
+        const result = await post("/audio", blob, blob.type || "application/octet-stream");
+        if (!result.heard) note("Nothing recognisable in that.");
+      } catch (error) {
+        note(String(error));
+      } finally {
+        setState("listening", "on");
+      }
+    });
+    recorder.start();
+    talk.classList.add("recording");
+    talk.textContent = "Release to send";
+  } catch (error) {
+    note(String(error));
+    recorder = null;
+  }
+}
+
+function stopRecording() {
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+}
+
+talk.addEventListener("pointerdown", event => { event.preventDefault(); startRecording(); });
+talk.addEventListener("pointerup", event => { event.preventDefault(); stopRecording(); });
+talk.addEventListener("pointercancel", stopRecording);
+talk.addEventListener("pointerleave", stopRecording);
+// A held button on iOS otherwise brings up the selection menu.
+talk.addEventListener("contextmenu", event => event.preventDefault());
+
+// ---------------------------------------------------------------------- start
+
+document.getElementById("begin").addEventListener("click", async () => {
+  startNote.textContent = "";
+  try {
+    unlockSpeech();
+    const data = await catchUp();
+    ready = true;
+    splash.remove();
+    connect();
+    if (!data.secure) {
+      note("Served over HTTP, so the microphone is unavailable. Typing works.");
+    }
+  } catch (error) {
+    startNote.textContent = String(error);
+  }
+});
+
+// Phones suspend a backgrounded tab. Coming back, catch up rather than trust the
+// stream to have survived it.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && ready) {
+    catchUp().then(connect).catch(error => note(String(error)));
+  }
+});
+</script>
+</body>
+</html>

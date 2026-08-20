@@ -38,5 +38,15 @@
     "transcript_file": "heard.jsonl",
     "stale_after_seconds": 120.0
   },
+  "web": {
+    "enabled": false,
+    "host": "0.0.0.0",
+    "port": 8771,
+    "token": "",
+    "https": true,
+    "certificate_file": "web-cert.pem",
+    "private_key_file": "web-key.pem",
+    "stream_seconds": 600.0
+  },
   "log_level": "INFO"
 }

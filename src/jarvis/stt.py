@@ -6,9 +6,11 @@ microphone audio, so it is opt in and warns loudly when selected.
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import site
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
@@ -21,11 +23,20 @@ logger = logging.getLogger("jarvis.stt")
 
 WHISPER_SAMPLE_RATE = 16_000
 
+# One model in the process, and now more than one caller: the capture loop and
+# whatever the web page uploads. Module scope rather than per instance so a stub
+# built without __init__ still holds it.
+_TRANSCRIBING = threading.Lock()
+
 
 class Transcriber(Protocol):
     """Anything that turns captured audio into text."""
 
     def transcribe(self, audio: sr.AudioData) -> str | None: ...
+
+    def transcribe_file(self, data: bytes) -> str | None:
+        """Encoded audio from somewhere other than the microphone. Optional."""
+        return None
 
     @property
     def is_local(self) -> bool: ...
@@ -122,16 +133,37 @@ class WhisperSTT:
         except Exception as exc:
             logger.error("Could not convert captured audio - %s", exc)
             return None
+        return self._run(samples)
 
+    def transcribe_file(self, data: bytes) -> str | None:
+        """Transcribe an encoded recording, as a browser produces.
+
+        faster-whisper decodes through PyAV, so the container the phone chose -
+        webm/opus on Android, mp4/aac on iOS - does not have to be known here.
+        """
+        if not data:
+            return None
         try:
-            segments, _info = self._model.transcribe(
-                samples,
-                language=self.config.language[:2].lower() or None,
-                beam_size=self.config.whisper_beam_size,
-                vad_filter=self.config.whisper_vad,
-                condition_on_previous_text=False,
-            )
-            text = " ".join(segment.text.strip() for segment in segments).strip()
+            from faster_whisper import decode_audio
+
+            samples = decode_audio(io.BytesIO(data), sampling_rate=WHISPER_SAMPLE_RATE)
+        except Exception as exc:
+            logger.error("Could not decode the uploaded recording - %s", exc)
+            return None
+        return self._run(samples)
+
+    def _run(self, samples) -> str | None:
+        """One model, two callers - the capture loop and anything on the network."""
+        try:
+            with _TRANSCRIBING:
+                segments, _info = self._model.transcribe(
+                    samples,
+                    language=self.config.language[:2].lower() or None,
+                    beam_size=self.config.whisper_beam_size,
+                    vad_filter=self.config.whisper_vad,
+                    condition_on_previous_text=False,
+                )
+                text = " ".join(segment.text.strip() for segment in segments).strip()
         except Exception as exc:
             logger.error("Local transcription failed - %s", exc)
             return None

@@ -25,6 +25,9 @@ edge = ["edge-tts>=6.1", "pygame>=2.6"]
 # utterance and costs ~340MB of VRAM, most of it the CUDA context rather than
 # the model - so it is worth it only if the GPU is otherwise idle.
 cuda = ["nvidia-cublas-cu12>=12.4", "nvidia-cudnn-cu12>=9,<10"]
+# For the phone page. Only needed to generate the certificate a browser insists
+# on before it will open a microphone; without it the page still works for typing.
+web = ["cryptography>=42"]
 
 [project.scripts]
 jarvis = "jarvis.cli:main"

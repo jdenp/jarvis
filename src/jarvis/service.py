@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -44,6 +45,8 @@ class VoiceService:
         self.speech = speech
         self.transcript = transcript or Transcript(config.log_dir / config.service.transcript_file)
         self._echo = EchoGuard()
+        # Anything that wants to know what was spoken, not just what was heard.
+        self.on_say: list[Callable[[str], None]] = []
         self._speaking = threading.Lock()
         self._speaking_count = 0
         self._running = threading.Event()
@@ -89,6 +92,11 @@ class VoiceService:
             return
         logger.info("say: %s", text)
         self._echo.remember(text)
+        for listener in self.on_say:
+            try:
+                listener(text)
+            except Exception:  # pragma: no cover - a listener must not break speech
+                logger.exception("A say listener failed.")
 
         if self.config.audio.listen_while_speaking or self.microphone is None:
             self.speech.say(text)

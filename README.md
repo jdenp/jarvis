@@ -29,6 +29,9 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
+- **A phone page on the LAN**, off by default: hold a button and talk from another room,
+  through the same Whisper model and into the same transcript. See
+  [`docs/phone-page.md`](docs/phone-page.md)
 
 ## Requirements
 
@@ -259,7 +262,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 155 tests, no hardware, model or network needed
+uv run pytest        # 183 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```
@@ -268,6 +271,12 @@ uv run ruff format .
 
 One real setup in full - hardware, the llama.cpp launcher it runs, and the local config
 overrides: [`docs/example-configuration.md`](docs/example-configuration.md).
+
+## Talking to it from a phone
+
+`web.enabled` puts a page on your LAN with a hold-to-talk button and the transcript, over
+HTTPS with a token. What it does, what it deliberately does not, and the three things that
+stop it working: [`docs/phone-page.md`](docs/phone-page.md).
 
 ## License
 

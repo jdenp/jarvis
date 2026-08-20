@@ -7,3 +7,5 @@ config/jarvis.json
 config/jarvis.toml
 .pytest_cache/
 .ruff_cache/
+# The phone page's certificate. Machine specific, and one half is a private key.
+config/*.pem

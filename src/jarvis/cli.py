@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
     serve.add_argument("--no-http", action="store_true", help="transcribe to file only, no API")
+    serve.add_argument(
+        "--web",
+        action="store_true",
+        help="also serve the phone page on the LAN, whatever the config says",
+    )
+    serve.add_argument("--no-web", action="store_true", help="never serve the phone page")
 
     speak = sub.add_parser("say", help="speak text through the running service")
     speak.add_argument("text", nargs="+", help="what to say")
@@ -166,6 +172,8 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         service.stop()
         return 2
 
+    web = _start_web(config, service, args, logger)
+
     logger.info(
         "Voice service on http://%s:%s - `jarvis say`, `jarvis next` and `jarvis mcp` all "
         "talk to this. Ctrl+C to stop.",
@@ -177,10 +185,40 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     except KeyboardInterrupt:
         logger.info("\nStopping.")
     finally:
+        if web is not None:
+            web.stop()
         server.shutdown()
         server.server_close()
         service.stop()
     return 0
+
+
+def _start_web(config: Config, service, args: argparse.Namespace, logger):
+    """Bring up the phone page if it is wanted. Never fatal to the voice service."""
+    wanted = config.web.enabled or getattr(args, "web", False)
+    if getattr(args, "no_web", False) or not wanted:
+        return None
+
+    from .web import build_server as build_web
+
+    try:
+        web = build_web(service, config)
+    except OSError as exc:
+        logger.error(
+            "Could not bind the phone page to %s:%s - %s", config.web.host, config.web.port, exc
+        )
+        return None
+    except Exception:
+        logger.exception("The phone page could not start. The voice service is unaffected.")
+        return None
+
+    web.serve_in_background()
+    logger.warning("The phone page is on the network - anyone with the link can talk and listen.")
+    for link in web.links():
+        logger.info("Phone page: %s", link)
+    if not web.secure:
+        logger.warning("Served over HTTP, so a browser will not open its microphone.")
+    return web
 
 
 def run_say(config: Config, args: argparse.Namespace) -> int:
