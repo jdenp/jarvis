@@ -13,7 +13,7 @@ list of options.
 
 ## Software
 
-- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 128k context, `--n-cpu-moe 25`
+- **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 100k context, `--n-cpu-moe 22`
 - **Agent** - Cline CLI over MCP, `openai-compatible` provider at `127.0.0.1:8081`
 - **STT** - `small.en` on CUDA, `int8_float16`
 - **TTS** - SAPI, Microsoft Hazel
@@ -32,7 +32,7 @@ are Qwen3's own recommendations rather than llama.cpp's looser 40 and 0.95.
 
 ```bat
 @echo off
-title Qwen3.6-35B agent server - one 128k slot - 127.0.0.1:8081
+title Qwen3.6-35B agent server - one 100k slot - 127.0.0.1:8081
 
 cd /d "%~dp0"
 cd "llama-b10237-bin-win-cuda-12.4-x64"
@@ -54,7 +54,7 @@ cd "llama-b10237-bin-win-cuda-12.4-x64"
 :: arguments and the command breaks.
 llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
   -ngl 99 ^
-  --n-cpu-moe 25 ^
+  --n-cpu-moe 22 ^
   -fa on ^
   -ub 2048 ^
   -ctk q8_0 -ctv q8_0 ^
@@ -62,7 +62,7 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
   --jinja ^
   --load-mode mlock ^
   --no-reasoning-preserve ^
-  -c 131072 ^
+  -c 100000 ^
   --parallel 1 ^
   --cache-reuse 256 ^
   --host 127.0.0.1 ^
@@ -73,7 +73,7 @@ timeout /t 2 /nobreak >nul
 ```
 
 Context and `--n-cpu-moe` trade against each other: more context is more KV cache, and moving
-another MoE layer off the GPU is how you pay for it. 128k loads in about 46 seconds here.
+another MoE layer off the GPU is how you pay for it. 100k loads in about 35 seconds here.
 
 One thing to know if you copy this: `llama-server.exe` is called bare, relying on `cmd`
 searching its own directory. That fails wherever `NoDefaultCurrentDirectoryInExePath` is
