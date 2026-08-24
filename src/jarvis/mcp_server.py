@@ -283,6 +283,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         try:
             voice.say(text)
         except ServiceUnavailable as exc:
+            logger.warning("Say failed - %s", exc)
             return {"error": str(exc), "spoken": False}
         unanswered_question = None
         return {
@@ -297,6 +298,41 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         }
 
     @server.tool(
+        name="pause_transcription",
+        title="Pause transcription",
+        description=(
+            "Pause transcription so new utterances are not recorded. The microphone "
+            "keeps running but the transcript ignores what comes in. Press the Pause "
+            "key on your keyboard to toggle this from anywhere. Call again to resume."
+        ),
+    )
+    def pause_transcription() -> dict:
+        try:
+            result = voice.pause()
+            logger.info("Transcription paused.")
+            return {"paused": True, "message": "Transcription paused."}
+        except ServiceUnavailable as exc:
+            logger.warning("Pause failed - %s", exc)
+            return {"error": str(exc), "paused": False}
+
+    @server.tool(
+        name="resume_transcription",
+        title="Resume transcription",
+        description=(
+            "Resume recording utterances after a pause. The transcript will again "
+            "capture everything the user says."
+        ),
+    )
+    def resume_transcription() -> dict:
+        try:
+            voice.resume()
+            logger.info("Transcription resumed.")
+            return {"paused": False, "message": "Transcription resumed."}
+        except ServiceUnavailable as exc:
+            logger.warning("Resume failed - %s", exc)
+            return {"error": str(exc), "paused": True}
+
+    @server.tool(
         name="voice_status",
         title="Check the voice service",
         description="Report whether the microphone is live and which backends are in use.",
@@ -305,6 +341,7 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         try:
             return voice.status()
         except ServiceUnavailable as exc:
+            logger.warning("Status check failed - %s", exc)
             return {"error": str(exc), "listening": False}
 
     return server

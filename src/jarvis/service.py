@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import Config
 from .echo import EchoGuard
+from .hotkey import HotkeyListener
 from .microphone import Microphone
 from .stt import Transcriber, build_transcriber
 from .transcript import Transcript
@@ -48,6 +49,7 @@ class VoiceService:
         self._speaking_count = 0
         self._running = threading.Event()
         self._listener: threading.Thread | None = None
+        self._hotkey: HotkeyListener | None = None
 
     # ----------------------------------------------------------------- listen
 
@@ -64,6 +66,7 @@ class VoiceService:
         self._running.set()
         self._listener = threading.Thread(target=self._listen, name="jarvis-listen", daemon=True)
         self._listener.start()
+        self._start_hotkey()
 
     def _listen(self) -> None:
         assert self.microphone is not None and self.transcriber is not None
@@ -79,6 +82,25 @@ class VoiceService:
                 continue
             utterance = self.transcript.add(heard)
             logger.info("[%d] %s", utterance.id, heard)
+
+    def _start_hotkey(self) -> None:
+        """Register the Pause/Break key to toggle transcription."""
+        self._hotkey = HotkeyListener(
+            on_pause=self.pause,
+            on_resume=self.resume,
+        )
+        self._hotkey.start()
+
+    def pause(self) -> bool:
+        """Pause transcription. Returns True if was not already paused."""
+        if self.transcript.paused:
+            return False
+        self.transcript.pause()
+        return True
+
+    def resume(self) -> None:
+        """Resume transcription."""
+        self.transcript.resume()
 
     # ------------------------------------------------------------------ speak
 
@@ -121,6 +143,7 @@ class VoiceService:
             "cursor": self.transcript.cursor,
             "stt": self.config.stt.backend,
             "tts": self.config.tts.engine,
+            "paused": self.transcript.paused,
         }
 
     def stop(self) -> None:
@@ -128,6 +151,9 @@ class VoiceService:
         if self._listener is not None:
             self._listener.join(timeout=5)
             self._listener = None
+        if self._hotkey is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         if self.microphone is not None:
             self.microphone.stop()
         if self.speech is not None:
@@ -150,8 +176,32 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(200, self.service.status())
         elif url.path == "/heard":
             self._heard(query)
+        elif url.path == "/pause":
+            self.service.pause()
+            self._json(200, {"paused": True})
         else:
             self._json(404, {"error": "not found"})
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        if path == "/say":
+            self._do_say()
+        elif path == "/resume":
+            self.service.resume()
+            self._json(200, {"paused": False})
+        else:
+            self._json(404, {"error": "not found"})
+
+    def _do_say(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            text = str(payload["text"])
+        except (ValueError, KeyError, TypeError):
+            self._json(400, {"error": "expected a JSON body with a 'text' field"})
+            return
+        self.service.say(text)
+        self._json(200, {"spoken": text})
 
     def _heard(self, query: dict) -> None:
         settings = self.service.config.service
@@ -178,20 +228,6 @@ class _Handler(BaseHTTPRequestHandler):
                 "cursor": delivered[-1].id if delivered else since,
             },
         )
-
-    def do_POST(self) -> None:
-        if urlparse(self.path).path != "/say":
-            self._json(404, {"error": "not found"})
-            return
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length) or b"{}")
-            text = str(payload["text"])
-        except (ValueError, KeyError, TypeError):
-            self._json(400, {"error": "expected a JSON body with a 'text' field"})
-            return
-        self.service.say(text)
-        self._json(200, {"spoken": text})
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")

@@ -20,15 +20,24 @@ class FakeVoice:
     def __init__(self) -> None:
         self.said: list[str] = []
         self.next_heard = [{"text": "what time is it", "id": 1}]
+        self.paused = False
 
     def status(self) -> dict:
-        return {"cursor": 0}
+        return {"cursor": 0, "paused": self.paused}
 
     def heard(self, since=0, wait=0) -> dict:
         return {"heard": list(self.next_heard), "cursor": 1}
 
     def say(self, text: str) -> None:
         self.said.append(text)
+
+    def pause(self) -> dict:
+        self.paused = True
+        return {"paused": True}
+
+    def resume(self) -> dict:
+        self.paused = False
+        return {"paused": False}
 
 
 @pytest.fixture
@@ -211,3 +220,18 @@ def test_speaking_does_not_end_the_conversation(rig):
     result = raw("say", {"text": "Half past two, sir."})
     assert "wait_for_speech" in result
     assert "do NOT finish the task" in result
+
+
+def test_pause_transcription_tool(rig):
+    _, voice, raw = rig
+    voice.paused = False
+    result = raw("pause_transcription")
+    parsed = json.loads(result)
+    assert "paused" in parsed
+
+
+def test_resume_transcription_tool(rig):
+    _, voice, raw = rig
+    result = raw("resume_transcription")
+    parsed = json.loads(result)
+    assert "paused" in parsed

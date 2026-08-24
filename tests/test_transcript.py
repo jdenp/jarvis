@@ -82,3 +82,42 @@ def test_old_utterances_are_dropped_but_ids_keep_climbing():
         transcript.add(f"line {i}")
     assert transcript.cursor == 5
     assert [item.text for item in transcript.since(0)] == ["line 2", "line 3", "line 4"]
+
+
+def test_pause_stops_recording():
+    transcript = Transcript()
+    transcript.add("before")
+    transcript.pause()
+    transcript.add("during pause")
+    assert transcript.paused is True
+    assert [item.text for item in transcript.since(0)] == ["before"]
+    # cursor still advances
+    assert transcript.cursor == 2
+
+
+def test_resume_resumes_recording():
+    transcript = Transcript()
+    transcript.add("before")
+    transcript.pause()
+    transcript.add("during pause")
+    transcript.resume()
+    assert transcript.paused is False
+    transcript.add("after resume")
+    assert [item.text for item in transcript.since(0)] == ["before", "after resume"]
+
+
+def test_pause_resume_does_not_notify_waiters():
+    """A paused utterance must not wake a waiter."""
+    transcript = Transcript()
+    transcript.pause()
+    threading.Timer(0.2, lambda: transcript.add("during pause")).start()
+    items = transcript.wait_for(0, timeout=1)
+    assert items == []
+
+
+def test_toggle_pause_twice_is_idempotent():
+    transcript = Transcript()
+    assert transcript.pause() is True
+    assert transcript.pause() is False  # already paused
+    assert transcript.resume() is True
+    assert transcript.resume() is False  # already resumed

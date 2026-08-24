@@ -29,6 +29,8 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
+- **Pause/Break key shortcut.** Press Pause on your keyboard to toggle transcription
+  without touching the agent. Install with `uv sync --extra hotkey` first.
 
 ## Requirements
 
@@ -97,6 +99,11 @@ running MCP server, which Windows will not let anything overwrite. Bumping the v
 then makes every start fail with "The process cannot access the file". The project is
 installed editable, so code changes need no sync; run `uv sync` by hand when dependencies
 change.
+
+I recommend Cline for this - it handles the voice loop well, respects the blocking read
+pattern, and doesn't poll. The MCP tools map cleanly to the JARVIS model of ears + mouth
+with the agent as brain. If you are using something else, the loopback HTTP API at
+`http://127.0.0.1:53535` covers everything the MCP tools do.
 
 Four tools appear: `wait_for_speech()`, `check_for_speech()`, `say(text)` and
 `voice_status()`.

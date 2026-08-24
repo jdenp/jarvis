@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.6.11"
+version = "0.6.12"
 description = "Jarvis - An AI voice assistant inspired by Iron Man"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,9 @@ edge = ["edge-tts>=6.1", "pygame>=2.6"]
 # utterance and costs ~340MB of VRAM, most of it the CUDA context rather than
 # the model - so it is worth it only if the GPU is otherwise idle.
 cuda = ["nvidia-cublas-cu12>=12.4", "nvidia-cudnn-cu12>=9,<10"]
+# Global hotkey support (Pause/Break key to pause transcription). Optional -
+# install with `uv sync --extra hotkey` if you want the shortcut.
+hotkey = ["keyboard>=0.13"]
 
 [project.scripts]
 jarvis = "jarvis.cli:main"

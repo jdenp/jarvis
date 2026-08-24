@@ -41,6 +41,7 @@ class Transcript:
         self._items: deque[Utterance] = deque(maxlen=keep)
         self._next_id = 1
         self._condition = threading.Condition()
+        self._paused = False
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._resume(path)
@@ -64,13 +65,40 @@ class Transcript:
         with self._condition:
             return self._next_id - 1
 
+    def pause(self) -> bool:
+        """Stop recording new utterances. Returns True if was not already paused."""
+        with self._condition:
+            if self._paused:
+                return False
+            self._paused = True
+            return True
+
+    def resume(self) -> bool:
+        """Resume recording new utterances. Returns True if was not already resumed."""
+        with self._condition:
+            if not self._paused:
+                return False
+            self._paused = False
+            return True
+
+    @property
+    def paused(self) -> bool:
+        """Whether transcription is currently paused."""
+        with self._condition:
+            return self._paused
+
     def add(self, text: str) -> Utterance:
-        """Record an utterance and wake anything waiting."""
+        """Record an utterance and wake anything waiting.
+
+        If paused, the utterance still gets an id but does not enter the ring
+        or notify waiters, so clients holding a cursor never see it.
+        """
         with self._condition:
             utterance = Utterance.new(self._next_id, text)
             self._next_id += 1
-            self._items.append(utterance)
-            self._condition.notify_all()
+            if not self._paused:
+                self._items.append(utterance)
+                self._condition.notify_all()
         self._append_to_file(utterance)
         return utterance
 

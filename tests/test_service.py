@@ -265,3 +265,30 @@ def test_listen_while_speaking_leaves_the_microphone_open():
     service.say("Talking over myself.")
     assert microphone.muted is False, "full duplex: never muted"
     assert speech.said == ["Talking over myself."]
+
+
+def test_pause_stops_recording():
+    service, _, _ = make_service()
+    assert service.transcript.paused is False
+    result = service.pause()
+    assert result is True
+    assert service.transcript.paused is True
+    service.transcript.add("paused utterance")
+    assert [item.text for item in service.transcript.since(0)] == []
+
+
+def test_resume_resumes_recording():
+    service, _, _ = make_service()
+    service.transcript.add("before pause")
+    cursor = service.transcript.cursor
+    service.pause()
+    service.resume()
+    service.transcript.add("after resume")
+    assert [item.text for item in service.transcript.since(cursor)] == ["after resume"]
+
+
+def test_status_includes_paused():
+    service, _, _ = make_service()
+    status = service.status()
+    assert "paused" in status
+    assert status["paused"] is False

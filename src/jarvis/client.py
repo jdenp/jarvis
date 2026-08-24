@@ -44,6 +44,22 @@ class VoiceClient:
         except httpx.HTTPError as exc:
             raise self._unavailable(exc) from exc
 
+    def pause(self) -> dict:
+        try:
+            response = self._client.get("/pause")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            raise self._unavailable(exc) from exc
+
+    def resume(self) -> dict:
+        try:
+            response = self._client.post("/resume")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as exc:
+            raise self._unavailable(exc) from exc
+
     def _get(self, path: str, params: dict) -> dict:
         try:
             response = self._client.get(path, params=params)
