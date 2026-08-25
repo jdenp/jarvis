@@ -84,10 +84,11 @@ class VoiceService:
             logger.info("[%d] %s", utterance.id, heard)
 
     def _start_hotkey(self) -> None:
-        """Register the Pause/Break key to toggle transcription."""
+        """Register the configured key to toggle transcription."""
         self._hotkey = HotkeyListener(
             on_pause=self.pause,
             on_resume=self.resume,
+            key=self.config.service.hotkey,
         )
         self._hotkey.start()
 

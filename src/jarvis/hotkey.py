@@ -1,6 +1,6 @@
 """Global hotkey listener for pausing transcription.
 
-Registers the Pause/Break key as a toggle. When pressed, transcription stops;
+Registers a single key as a toggle. When pressed, transcription stops;
 pressed again, it resumes. Uses the ``keyboard`` library which must be installed
 as an optional dependency (``uv sync --extra hotkey``).
 """
@@ -8,80 +8,74 @@ as an optional dependency (``uv sync --extra hotkey``).
 from __future__ import annotations
 
 import logging
-import threading
+import time
+from collections.abc import Callable
 
 logger = logging.getLogger("jarvis.hotkey")
 
-# Virtual key code for Pause/Break.
-_PAUSE_KEY = "pause"
+# Ignore key auto-repeat while Pause is held down.
+_DEBOUNCE_SECONDS = 0.3
 
 
 class HotkeyListener:
     """Listens for the Pause key and calls back into the service."""
 
-    def __init__(self, on_pause: callable[[], None], on_resume: callable[[], None]) -> None:
+    def __init__(
+        self, on_pause: Callable[[], bool], on_resume: Callable[[], None], key: str = "end"
+    ) -> None:
+        self._key = key
         self._on_pause = on_pause
         self._on_resume = on_resume
-        self._thread: threading.Thread | None = None
-        self._running = False
+        self._unhook: Callable | None = None
+        self._last_fired = 0.0
 
     def start(self) -> None:
-        """Begin listening for the Pause key in a background thread."""
-        if self._thread is not None:
+        """Begin listening for the configured toggle key."""
+        if self._unhook is not None or not self._key:
             return
         try:
             import keyboard
         except ImportError:
-            logger.info("keyboard module not installed - hotkey disabled.")
+            logger.warning(
+                "keyboard module not installed - hotkey disabled. "
+                "Install it with 'uv sync --extra hotkey'."
+            )
             return
 
-        def _toggle() -> None:
-            # keyboard.on_press_key fires on every keydown. We need to detect
-            # the press, toggle state, and debounce so a held key doesn't
-            # fire repeatedly.
-            pass
+        def _handler(event) -> None:
+            # Some keys share a scan code, so match on the key name
+            if event.event_type != "down" or event.name != self._key:
+                return
+            now = time.monotonic()
+            if now - self._last_fired < _DEBOUNCE_SECONDS:
+                return
+            self._last_fired = now
+            if self._on_pause():
+                logger.info("Transcription paused via the %s key.", self._key)
+            else:
+                self._on_resume()
+                logger.info("Transcription resumed via the %s key.", self._key)
 
-        self._running = True
-        self._thread = threading.Thread(
-            target=self._listen,
-            name="jarvis-hotkey",
-            daemon=True,
-        )
-        self._thread.start()
-        logger.info("Hotkey listener started (Pause/Break to toggle).")
-
-    def _listen(self) -> None:
         try:
-            import keyboard
-
-            def _handler(event) -> None:
-                if event.event_type == "down" and event.name == _PAUSE_KEY:
-                    if self._on_pause():
-                        logger.info("Transcription paused via Pause key.")
-                    else:
-                        self._on_resume()
-                        logger.info("Transcription resumed via Pause key.")
-
-            keyboard.add_hotkey(_PAUSE_KEY, _handler)
-            keyboard.hook_key(_PAUSE_KEY, _handler)
-
-            # Keep the thread alive.
-            while self._running:
-                import time
-                time.sleep(1)
-        except ImportError:
-            logger.info("keyboard module not available - hotkey disabled.")
+            self._unhook = keyboard.hook_key(self._key, _handler)
+        except ValueError:
+            logger.warning("Unknown hotkey %r - hotkey disabled.", self._key)
+            return
         except Exception:
-            logger.exception("Hotkey listener stopped.")
+            logger.exception("Could not register the %r hotkey.", self._key)
+            return
+        logger.info("Hotkey listener started (%s to toggle).", self._key)
 
     def stop(self) -> None:
-        """Stop listening for the Pause key."""
-        self._running = False
-        thread, self._thread = self._thread, None
-        if thread is not None:
-            thread.join(timeout=2)
+        """Stop listening for the toggle key."""
+        unhook, self._unhook, key = self._unhook, None, self._key
+        if unhook is None:
+            return
         try:
             import keyboard
-            keyboard.unhook_all()
+
+            keyboard.unhook(unhook)
         except ImportError:
             pass
+        except Exception:
+            logger.exception("Could not unhook the %r hotkey.", key)

@@ -107,6 +107,9 @@ class ServiceConfig:
     # Past this, an utterance is flagged as backlog rather than a live
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
+    # Key that toggles transcription. Empty disables it. Avoid keys you type
+    # with - the hook is global and does not swallow the keypress.
+    hotkey: str = "end"
 
 
 @dataclass(frozen=True)

@@ -29,8 +29,11 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
-- **Pause/Break key shortcut.** Press Pause on your keyboard to toggle transcription
-  without touching the agent. Install with `uv sync --extra hotkey` first.
+- **Hotkey shortcut.** Press End to toggle transcription without touching the agent.
+  Install with `uv sync --extra hotkey` first. Change the key with `service.hotkey`,
+  or set it to `""` to disable. The hook is global and does not swallow the keypress,
+  so End still works normally in other apps - but it toggles JARVIS wherever you
+  press it.
 
 ## Requirements
 
