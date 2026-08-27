@@ -237,8 +237,27 @@ def select(
     truncated = max(0, len(placed) - limit)
     return tuple(
         Target(number, target.element, target.where)
-        for number, target in enumerate(placed[:limit], start=1)
+        for number, target in enumerate(_thin(placed, limit), start=1)
     ), truncated
+
+
+def _thin(targets: list[Target], limit: int) -> list[Target]:
+    """Cut an over-long list down by spreading the cut, not by lopping the end.
+
+    Taking the first N was silently catastrophic. The list is in reading order,
+    so the tail is the bottom of the window - and on a media player that is
+    exactly where the transport controls live. Asked to press play in Spotify,
+    166 targets became the top 60 and the play button was not among them, so the
+    request was impossible rather than merely hard, and nothing said so.
+
+    An even spread degrades instead: whatever is wanted has a chance of being
+    there, and every region of the window is represented. The result says it is
+    a sample, and `matching` returns the complete set for a search term.
+    """
+    if len(targets) <= limit or limit <= 0:
+        return targets
+    step = len(targets) / limit
+    return [targets[int(index * step)] for index in range(limit)]
 
 
 def _place_the_ambiguous(

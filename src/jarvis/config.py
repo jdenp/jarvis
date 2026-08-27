@@ -132,9 +132,13 @@ class ScreenConfig:
     """
 
     control: bool = False
-    # Most targets offered at once. Past a few dozen a model stops reading the
-    # list and starts guessing, and narrowing to one window is the better fix.
-    max_targets: int = 60
+    # Most targets offered at once. 60 was chosen on the theory that a long list
+    # makes a model guess; measured against real applications it was far worse
+    # than that - Spotify has 166 real targets and Outlook in a browser 177, so
+    # 60 hid most of both. At 200 nothing normal truncates at all, and 200
+    # targets is around 4k tokens, which any agent context can afford. When it
+    # does truncate the cut is spread rather than taken off the end.
+    max_targets: int = 200
     # Older than this and a scan is refused rather than acted on. Windows move.
     max_scan_age_seconds: float = 60.0
     # Anything narrower or shorter than this is a divider, not a target.

@@ -1,13 +1,45 @@
-"""Fakes shared between the screen tests and the tool tests.
+"""Fakes and fixtures shared across the suite.
 
-Here rather than in either of them because pytest only guarantees this file is
-importable from both - a test module importing another test module works only
-while pytest happens to be run from the repository root.
+The fakes live here rather than in either test module because pytest only
+guarantees this file is importable from both - a test module importing another
+test module works only while pytest happens to be run from the repository root.
 """
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
+import pytest
+
 from jarvis.screen import Element
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _keep_the_suite_out_of_the_real_log():
+    """Send test logging to a temporary directory, not to logs/jarvis.log.
+
+    `cli.main()` configures logging, so any test that goes through it attached a
+    rotating file handler to the repository's own log - and from then on every
+    warning any test provoked was written there too. Diagnosing a live session
+    then meant reading past "Unknown key 'nope'", "Pillow is not installed" and
+    a dozen dropped-phrase warnings, none of which had happened to the user.
+    Measured at ~3.5KB of noise per run.
+    """
+    from jarvis import logging_setup
+
+    real = logging_setup.configure
+    elsewhere = Path(tempfile.mkdtemp(prefix="jarvis-tests-"))
+
+    def configure(log_dir, level="INFO", console=True):
+        return real(elsewhere, level, console=False)
+
+    patch = pytest.MonkeyPatch()
+    patch.setattr(logging_setup, "configure", configure)
+    # cli.py imported the name directly, so patching the module is not enough.
+    patch.setattr("jarvis.cli.configure", configure)
+    yield
+    patch.undo()
 
 
 def button(name, left=0, top=0, width=80, height=24, **kwargs) -> Element:

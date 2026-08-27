@@ -42,7 +42,7 @@
   },
   "screen": {
     "control": false,
-    "max_targets": 60,
+    "max_targets": 200,
     "max_scan_age_seconds": 60.0,
     "min_target_pixels": 6,
     "label_chars": 80,

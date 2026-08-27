@@ -640,3 +640,59 @@ def test_entering_voice_mode_says_nothing():
     assert voice.said == [], "entering is silent"
     assert 'converse(say="", then="listen") at once' in INSTRUCTIONS
     assert "Yes sir?" not in INSTRUCTIONS, "no greeting is suggested either"
+
+
+# ----------------------------------------------- what the live session got wrong
+
+
+def screen_text(server, name, args=None):
+    return text_of(asyncio.run(server.call_tool(name, args or {})))
+
+
+def test_a_minimised_window_names_the_tool_that_fixes_it():
+    """A live session hit this refusal four times in a row and never called
+    focus_window. The message described the fix in prose - restore it, bring it
+    forward - and never said which tool did that."""
+    server, backend = screen_rig(True)
+    backend._minimised = True
+    result = screen_text(server, "look_at_screen")
+    assert "minimised" in result
+    assert "focus_window" in result, "the tool, by name"
+    assert "will refuse again" in result, "and that retrying is pointless"
+
+
+def test_with_control_off_it_says_nobody_here_can_restore_it():
+    server, backend = screen_rig(False)
+    backend._minimised = True
+    result = screen_text(server, "look_at_screen")
+    assert "focus_window" not in result, "that tool is not registered"
+    assert "Ask the user" in result
+
+
+def test_an_identical_scan_says_so():
+    """Four identical scans of Spotify and five of the taskbar in one session,
+    with nothing in the result to say that looking again had changed nothing."""
+    server, _backend = screen_rig(True)
+    first = screen_text(server, "look_at_screen")
+    again = screen_text(server, "look_at_screen")
+    assert "unchanged" not in first
+    assert "identical to the last scan" in again
+    assert "Do not call this again unchanged" in again
+
+
+def test_a_changed_screen_is_not_called_a_loop():
+    from conftest import button
+
+    server, backend = screen_rig(True)
+    screen_text(server, "look_at_screen")
+    backend._elements = [button("Send"), button("Cancel", top=40)]
+    assert "identical to the last scan" not in screen_text(server, "look_at_screen")
+
+
+def test_a_filter_that_found_almost_nothing_says_to_widen_it():
+    """The taskbar was scanned five times running at 2 targets out of 25. The
+    word was wrong, not the window, and nothing said which."""
+    server, _backend = screen_rig(True)
+    result = screen_text(server, "look_at_screen", {"matching": "reply"})
+    assert "narrowed this to 1" in result
+    assert "without matching" in result

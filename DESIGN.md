@@ -308,6 +308,38 @@ is the wrong trade: ticking three checkboxes would cost three rescans at 0.2s ea
 the point check already turns a stale number into a refusal rather than a misfire. The
 result says to look again instead, at the point where the next tool is being chosen.
 
+**Truncation must not amputate a region.** The first version took the first N targets in
+reading order, with N at 60. Reading order runs top to bottom, so the tail it discarded was
+the bottom of the window - and a media player keeps its transport controls there. A live
+session asked JARVIS to press play in Spotify: 166 real targets became the top 60, the play
+button was in the 106 dropped, and the result said only `not_shown: 106`. The request was
+not hard, it was impossible, and nothing in the result said so.
+
+Two changes. The cap is 200, which no normal application reaches - Spotify 166, Outlook in
+a browser 177 - so truncation stops happening at all in practice, and 200 targets is around
+4k tokens, which any agent context can afford. And when it does happen the cut is an even
+spread rather than a prefix, so every region of the window is represented and the result
+says it is a sample. A sample degrades; a prefix hides a third of the screen completely.
+
+**Say when looking again will change nothing.** The same session scanned Spotify four times
+identically and the taskbar five times, each result indistinguishable from the last, with
+nothing to say so. The scan is now fingerprinted by window and target labels, and a repeat
+is flagged `unchanged` with the two things that would actually alter it - focus_window, or
+scroll. Cheap, and it is the difference between a loop and a decision.
+
+**Name the tool, not the remedy.** The minimised refusal said "bring it to the front
+first". The same session hit it four times running and never called `focus_window`, because
+the message described the fix in prose and never said which tool performed it. It names the
+tool now, and says that retrying the same call will refuse again. The general lesson is the
+one that fixed the voice loop's result too: a refusal has to end on the call to make next.
+
+**Keep the test suite out of the real log.** `cli.main()` configures logging, so any test
+going through it attached a rotating file handler to the repository's own `logs/jarvis.log`
+- and from then on every warning any test provoked was written there. Diagnosing the live
+session above meant reading past "Pillow is not installed", "Unknown key 'nope'" and a
+dozen dropped-phrase warnings, none of which had happened to the user. Measured at ~3.5KB
+of noise per run, now zero.
+
 **Placing repeated labels.** A browser offers four buttons called Close and a coarse
 position does not separate them - a tab strip is all in the same ninth of the window.
 What does separate them is the thing before them in reading order, which is how anyone

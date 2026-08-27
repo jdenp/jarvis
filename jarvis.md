@@ -288,9 +288,16 @@ for those before hunting the taskbar.
 
 Two more things worth knowing:
 
-- **A crowded window is truncated, and says so.** Outlook in a browser has 142 real
-  targets. When `not_shown` comes back, do not guess at a number - call
-  `look_at_screen(matching="reply")` and find it by name.
+- **A very crowded window is sampled, and says so.** Two hundred targets fit, which
+  covers everything normal - Spotify has 166, Outlook in a browser 177. Past that the list
+  is an even spread across the window rather than all of it, so what you want may be
+  between two of these. Do not guess at a number: call
+  `look_at_screen(matching="reply")` for every match instead of a sample.
+- **An identical scan means nothing changed.** If the result says `unchanged`, looking
+  again will keep returning the same thing. Act on one of the numbers, or change what is
+  on screen first with `focus_window` or `scroll`.
+- **A minimised window is refused, and `focus_window` is the fix.** Do not retry
+  `look_at_screen` on it; it will refuse again for the same reason.
 - **Scrolled out of view means absent.** Offscreen controls are left out rather than
   offered at coordinates nobody can click. If what you want is not listed, `scroll` and
   look again.

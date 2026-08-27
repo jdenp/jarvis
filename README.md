@@ -271,6 +271,14 @@ Three more things are checked before a click lands:
   coordinates left over from wherever it was last drawn, so scanning one hands back
   numbers that point at other applications entirely.
 
+**A very crowded window is sampled, not cut short.** Two hundred targets fit, which
+covers anything normal. Past that the list is an even spread across the window and says
+so. It used to be the first sixty in reading order, which was silently catastrophic: the
+tail of that order is the bottom of the window, so on a media player it amputated the
+transport bar. Asked to press play in Spotify, 166 targets became the top 60 and the play
+button was not among them - the request was impossible rather than hard, and nothing said
+why.
+
 **Labels that repeat get placed.** A browser offers four buttons called Close with
 nothing to choose between them, so the repeats come back as `Close, after "Gutenberg /
 Alpha - GitLab"` - which is how anyone reads a tab strip. Only the repeats; on a unique
@@ -406,7 +414,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 298 tests, no hardware, model or network needed
+uv run pytest        # 303 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

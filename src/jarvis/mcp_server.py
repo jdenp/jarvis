@@ -219,6 +219,7 @@ def build_server(
     first_listen = True
     complained_about_marks = False
     logged_capabilities = False
+    last_scan: tuple[str, tuple[str, ...]] | None = None
 
     server = MCPServer(
         name="jarvis",
@@ -507,7 +508,15 @@ def build_server(
 
     def described(scan):
         """One scan, as the agent sees it. Never a coordinate."""
+        nonlocal last_scan
         payload = scan.as_dict(config.screen.label_chars)
+
+        # Four identical scans of Spotify and five of the taskbar, in one live
+        # session, with nothing in the result to say that looking again had
+        # changed nothing. Saying so is the cheapest way out of the loop.
+        fingerprint = (scan.window, tuple(t.element.label for t in scan.targets))
+        repeated = fingerprint == last_scan
+        last_scan = fingerprint
         others = [title for _, title in desktop.windows() if title != scan.window]
         if others:
             payload["other_windows"] = others[:12]
@@ -522,12 +531,29 @@ def build_server(
                 'set "screen": {"control": true} in config/jarvis.json and restart the '
                 "MCP server if they want you to act on any of this."
             )
+        elif repeated:
+            payload["unchanged"] = True
+            payload["next_step"] = (
+                "This is identical to the last scan - nothing on screen has changed, so "
+                "looking again will keep returning this. Either act on one of these "
+                'numbers with click(target=N, expecting="its label"), or change what is '
+                "on screen first: focus_window to bring a different one forward, or "
+                "scroll if what you want is out of view. Do not call this again unchanged."
+            )
         elif scan.truncated:
             payload["next_step"] = (
-                f"{scan.truncated} more targets did not fit and are not listed. If what "
-                "you want is missing, call look_at_screen again with matching= a word "
-                "from its label rather than guessing at a number. To act, name the "
+                f"This window has {scan.truncated} more targets than fit, so the list is "
+                "an even sample across it rather than all of them - what you want may be "
+                "between two of these. Call look_at_screen again with matching= a word "
+                "from its label to get every match instead of a sample. To act, name the "
                 'number AND what you expect it to be: click(target=12, expecting="Reply").'
+            )
+        elif scan.matching and len(scan.targets) <= 3:
+            payload["next_step"] = (
+                f"matching={scan.matching!r} narrowed this to {len(scan.targets)}. If what "
+                "you want is not here, the word is wrong rather than the window - call "
+                "look_at_screen again without matching and read the whole list. To act, "
+                'name the number AND what you expect: click(target=12, expecting="Reply").'
             )
         else:
             payload["next_step"] = (
@@ -541,6 +567,30 @@ def build_server(
 
             return [payload, Image(path=image)]
         return payload
+
+    def way_out(exc: ScreenUnavailable) -> dict:
+        """Name the tool that fixes this, since "bring it to the front" did not.
+
+        A live session hit the minimised refusal four times in a row and never
+        called focus_window. The message described the fix in prose and never
+        said which tool performed it.
+        """
+        if "minimised" not in str(exc):
+            return {}
+        if not config.screen.control:
+            return {
+                "next_step": (
+                    "Nothing here can restore it - screen control is off. Ask the user to "
+                    "bring that window up themselves, or to switch control on."
+                )
+            }
+        return {
+            "next_step": (
+                "Call focus_window with the same name. It restores the window, brings it "
+                "to the front and scans it in one go. Do not call look_at_screen on it "
+                "again first - it will refuse again for the same reason."
+            )
+        }
 
     def aim(target: int, expecting: str):
         """Resolve a number, having made the agent say what it is aiming at."""
@@ -589,7 +639,7 @@ def build_server(
             return described(desktop.look(window, matching))
         except ScreenUnavailable as exc:
             logger.warning("Look failed - %s", exc)
-            return {"error": str(exc), "targets": []}
+            return {"error": str(exc), "targets": [], **way_out(exc)}
 
     @server.tool(
         name="screenshot",
