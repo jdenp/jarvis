@@ -61,6 +61,7 @@ class FakeDesktop:
         minimised=False,
         rect=(0, 0, 800, 600),
         others=(),
+        always_visible=False,
     ) -> None:
         self._elements = list(elements)
         self.title = title
@@ -69,6 +70,10 @@ class FakeDesktop:
         self._minimised = minimised
         self.rect = rect
         self.others = list(others)
+        # The taskbar is always on top, so its targets are under the pointer even
+        # when it is not the foreground window - and SetForegroundWindow refuses
+        # to raise it. Everything else is covered when it is not in front.
+        self.always_visible = always_visible
         self.activations: list[int] = []
 
     def windows(self):
@@ -88,7 +93,13 @@ class FakeDesktop:
         return list(self._elements)
 
     def chain_at(self, x, y):
-        """Deepest first, as ElementFromPoint plus a walk up the parents gives."""
+        """Deepest first, as ElementFromPoint plus a walk up the parents gives.
+
+        Models occlusion, because the code under test decides whether to raise a
+        window on the strength of what is under the point.
+        """
+        if self.front != self.hwnd and not self.always_visible:
+            return [Element("", "Window", *self.rect[:2], 10, 10)]
         over = [
             element
             for element in self._elements

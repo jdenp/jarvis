@@ -13,9 +13,7 @@ from typing import Literal
 # At module level rather than deferred: the SDK resolves tool annotations from
 # module globals, so a `ctx: Context` parameter cannot see a local import. The
 # CLI only imports this module for the `mcp` command, so nothing else pays.
-import pydantic_core
 from mcp.server.mcpserver import Context, MCPServer
-from mcp_types import CallToolResult, TextContent
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
@@ -155,26 +153,6 @@ REPLY_WITH_CONVERSE = (
     + "Short and easy is still a tool call. Do not write the reply out. "
     "EMIT converse()."
 )
-
-
-def as_error(payload: dict) -> CallToolResult:
-    """The same payload, flagged so the client will not let the turn end on it.
-
-    A fallback for models that forget the call. Nothing in MCP can require a
-    tool call to happen - see DESIGN.md - but an agent that will end its turn on
-    a tool result will not end it on a tool *error*: an error is the one signal
-    every client treats as unfinished business rather than as an answer. A model
-    that reliably calls converse() never sees this and is unaffected; a
-    forgetful one gets the shove it needs.
-
-    It is a deliberate lie about a call that succeeded. Two things keep it
-    honest enough to live with. It only fires when the user actually spoke and a
-    reply is genuinely outstanding, so an idle poll is still a plain success.
-    And `service.force_a_reply` switches it off, for a client that counts
-    consecutive errors and gives up rather than pressing on.
-    """
-    body = pydantic_core.to_json(payload, fallback=str, indent=2).decode()
-    return CallToolResult(content=[TextContent(type="text", text=body)], is_error=True)
 
 
 def age_seconds(item: dict, now: datetime | None = None) -> float | None:
@@ -361,22 +339,18 @@ def build_server(
             # is one cheap round trip and the next call goes through - which is
             # what keeps a room with a television in it from wedging.
             asked = "asked" if looks_like_a_question(missed) else "said"
-            # An error whatever `force_a_reply` says, because this one is not a
-            # white lie: the call was asked to listen and refused.
-            return as_error(
-                {
-                    "spoke": False,
-                    "heard": [],
-                    "error": (
-                        f'They {asked} "{missed}" and nothing has gone through the '
-                        "speakers since, so this call did not listen. Whatever you were "
-                        "about to type, or just typed, put it in "
-                        'converse(say=..., then="listen") - that speaks it AND listens, '
-                        "so replying properly costs you nothing. If it really was not "
-                        "for you, call this again and it will go through."
-                    ),
-                }
-            )
+            return {
+                "spoke": False,
+                "heard": [],
+                "error": (
+                    f'They {asked} "{missed}" and nothing has gone through the '
+                    "speakers since, so this call did not listen. Whatever you were "
+                    "about to type, or just typed, put it in "
+                    'converse(say=..., then="listen") - that speaks it AND listens, '
+                    "so replying properly costs you nothing. If it really was not "
+                    "for you, call this again and it will go through."
+                ),
+            }
 
         if spoken:
             try:
@@ -406,12 +380,7 @@ def build_server(
         # until it finishes, so listening from here costs nothing extra.
         result = listen(config.service.max_wait_seconds)
         if spoken:
-            result = {"spoke": True, "said": spoken, **result}
-        # Nothing heard means nothing is owed, so an idle poll stays a plain
-        # success. That is most of them, which keeps the error rare enough to
-        # still mean something when it does fire.
-        if config.service.force_a_reply and result.get("heard"):
-            return as_error(result)
+            return {"spoke": True, "said": spoken, **result}
         return result
 
     @server.tool(
@@ -544,6 +513,19 @@ def build_server(
                 "clicking it will be refused. Drive this one with the keyboard: "
                 "type_text with no target types wherever the caret already is, and "
                 "press_keys sends shortcuts."
+            )
+            return payload
+
+        # 25 elements and none of them usable: an application that has just
+        # been launched has not finished building its tree. Ten seconds later the
+        # same window scanned 1741 elements to 124 targets.
+        if not scan.targets and scan.considered:
+            payload["still_loading"] = True
+            payload["next_step"] = (
+                f"{scan.window!r} reports {scan.considered} elements but none of them can "
+                "be acted on yet, which is what a window looks like while it is still "
+                "building itself. Give it a moment and look again - do not conclude it "
+                "has nothing in it."
             )
             return payload
 
@@ -953,13 +935,19 @@ def _capabilities(ctx) -> str:
     call happening at all.
     """
     try:
-        reported = ctx.client_capabilities()
+        # A property, not a method. Calling it raised TypeError on every real
+        # session while the guard below quietly reported "unavailable", which is
+        # how three sessions went by without answering the one question this
+        # exists to answer.
+        reported = ctx.client_capabilities
     except Exception as exc:  # no request context, e.g. called directly in a test
         return f"unavailable ({type(exc).__name__})"
     if reported is None:
-        return "none reported"
-    named = [name for name, value in reported.model_dump().items() if value is not None]
-    return ", ".join(named) or "none"
+        return "SAMPLING=no (the client declared no capabilities at all)"
+    declared = {name for name, value in reported.model_dump().items() if value is not None}
+    sampling = "yes" if "sampling" in declared else "no"
+    others = ", ".join(sorted(declared - {"sampling"})) or "nothing else"
+    return f"SAMPLING={sampling} (also declared: {others})"
 
 
 def _initial_cursor(voice: VoiceClient) -> int:

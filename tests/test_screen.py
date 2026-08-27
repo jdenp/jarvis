@@ -423,3 +423,27 @@ def test_two_targets_are_never_a_dead_tree():
         Target(2, button("Send", top=500)),
     ]
     assert offers_nothing_clickable(pair, (0, 0, 800, 600)) is False
+
+
+def test_a_target_already_under_the_pointer_is_not_disturbed():
+    """The taskbar is always on top, so its buttons are clickable without being
+    the foreground window - and SetForegroundWindow refuses to raise it. Raising
+    first logged "could not bring Taskbar to the front" and then refused the
+    click on a button that had been perfectly clickable a moment earlier."""
+    screen, backend = make_screen(
+        [button("Spotify pinned")], title="Taskbar", hwnd=7, front=99, always_visible=True
+    )
+    screen.look("Taskbar")
+    target, _ = screen.aim(1)
+    assert backend.activations == [], "nothing was raised"
+    assert target.element.name == "Spotify pinned"
+
+
+def test_a_covered_target_is_still_raised_before_being_refused():
+    """The other half: when the point really does say the target is not visible,
+    bringing the window forward is both the diagnosis and the fix."""
+    screen, backend = make_screen([button("Send")], title="Mail", hwnd=7, front=99)
+    screen.look("Mail")
+    target, _ = screen.aim(1)
+    assert backend.activations == [7]
+    assert target.element.name == "Send"

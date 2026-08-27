@@ -49,10 +49,6 @@ Nothing rests on you remembering a loop.
 
 something that was not aimed at you.
 
-You may get a turn back marked as an error when someone has spoken. That is not a fault -
-
-it is this tool telling you the reply has not been delivered yet. Answer it and it clears.
-
 **`say=""` is refused while you owe them an answer.** Write your reply out as text, come
 
 back here with an empty `say`, and the call does not listen - nothing went through the
@@ -318,6 +314,12 @@ Two more things worth knowing:
   no target, and `press_keys`.
 - **The same refusal twice means stop.** If a refusal comes back word for word, another
   scan returns the same numbers. Change approach or say out loud that you cannot do it.
+- **`still_loading` means wait, not empty.** An application that has just been launched
+  has not finished building its tree. Spotify scanned 25 elements to 0 targets one second
+  after opening and 1741 to 124 targets ten seconds later. Give it a moment.
+- **Window titles change.** A media player retitles itself to the current track, so
+  `focus_window("Spotify")` stops matching the moment it starts playing. Match on a word
+  that will not move, or go via the Taskbar, where the pinned button keeps its name.
 - **Scrolled out of view means absent.** Offscreen controls are left out rather than
   offered at coordinates nobody can click. If what you want is not listed, `scroll` and
   look again.

@@ -97,13 +97,6 @@ stale_after_seconds = 120.0
 # its normal job everywhere else - Num Lock still flips the keypad. Any spelling
 # the keyboard library accepts works: "num lock", "numlock", "num_lock".
 hotkey = "num lock"
-# Hand speech back as a tool *error* rather than a result, so a client will not
-# let the turn end on it. A fallback for models that forget to call converse()
-# and answer in chat text instead, where nothing reaches the user. Only fires
-# when something was actually heard and a reply is outstanding - an idle poll
-# stays a plain success. Turn it off if a client counts consecutive errors and
-# gives up instead of pressing on.
-force_a_reply = true
 
 [screen]
 # Seeing the desktop and acting on it. Looking is always allowed - it reads the

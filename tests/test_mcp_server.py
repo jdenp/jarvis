@@ -572,6 +572,7 @@ def test_asking_for_capabilities_outside_a_request_does_not_break_the_tool(rig):
     from jarvis.mcp_server import _capabilities
 
     class Hostile:
+        @property
         def client_capabilities(self):
             raise RuntimeError("Context is not available outside of a request")
 
@@ -579,63 +580,14 @@ def test_asking_for_capabilities_outside_a_request_does_not_break_the_tool(rig):
     assert "what time is it" in rig[2]("converse", LISTEN), "and the tool still works"
 
 
-# ------------------------------------------------- the fallback for forgetting
-
-
-def flagged(server, args) -> bool:
-    return bool(asyncio.run(server.call_tool("converse", args)).is_error)
-
-
-def rig_with(force_a_reply: bool):
-    voice = FakeVoice()
-    config = replace(Config(), service=replace(Config().service, force_a_reply=force_a_reply))
-    return build_server(config, client=voice), voice
-
-
-def test_speech_comes_back_as_an_error_so_the_turn_cannot_end_on_it():
-    """The fallback for a model that forgets the call. Nothing in MCP can
-    require a tool call to happen, but a client that will end a turn on a tool
-    result will not end it on a tool error - an error is the one signal treated
-    as unfinished business rather than as an answer."""
-    server, _voice = rig_with(True)
-    assert flagged(server, LISTEN) is True
-
-
-def test_the_fallback_can_be_switched_off():
-    """A client that counts consecutive errors and gives up needs a way out
-    that is not a code change."""
-    server, _voice = rig_with(False)
-    assert flagged(server, LISTEN) is False
-
-
-def test_an_idle_poll_is_still_a_plain_success():
-    """Nothing heard means nothing is owed. Most polls are idle, and flagging
-    those would be crying wolf until the signal meant nothing."""
-    server, voice = rig_with(True)
-    voice.next_heard = []
-    assert flagged(server, LISTEN) is False
-
-
-def test_a_lead_in_is_still_a_plain_success():
-    """It said it was going away to work, and it did what it said."""
-    server, _voice = rig_with(True)
-    assert flagged(server, {"say": "One moment.", "then": "keep_working"}) is False
-
-
-def test_the_refusal_is_an_error_whatever_the_setting():
-    """This one is not a white lie: the call was asked to listen and refused."""
-    server, _voice = rig_with(False)
-    asyncio.run(server.call_tool("converse", LISTEN))
-    assert flagged(server, LISTEN) is True
-
-
 def test_entering_voice_mode_says_nothing():
     """Asked for explicitly: "jarvis" starts it listening, it does not answer
     back. An earlier version greeted on entry to establish the call pattern
-    before the first real reply - force_a_reply covers that transition now."""
+    before the first real reply."""
     from jarvis.mcp_server import INSTRUCTIONS
 
-    server, voice = rig_with(True)
+    voice = FakeVoice()
+    server = build_server(Config(), client=voice)
     asyncio.run(server.call_tool("converse", LISTEN))
     assert voice.said == [], "entering is silent"
     assert 'converse(say="", then="listen") at once' in INSTRUCTIONS
@@ -798,3 +750,57 @@ def test_the_same_refusal_twice_says_something_different(monkeypatch):
     assert "identical refusal" not in first
     assert "identical refusal" in second
     assert "rather than trying a third time" in second
+
+
+def test_a_window_still_building_itself_says_so():
+    """Spotify had just launched: 25 elements, none usable. Ten seconds later the
+    same window scanned 1741 elements down to 124 targets."""
+    from jarvis.config import ScreenConfig
+    from jarvis.screen import Element, Screen
+
+    scenery = [Element("", "Pane", 0, 0, 800, 600), Element("", "Image", 0, 0, 4, 4)]
+    config = replace(Config(), screen=ScreenConfig(marks_file="", focus_settle_seconds=0.0))
+    backend = FakeDesktop(scenery, title="Spotify Premium")
+    server = build_server(config, client=FakeVoice(), screen=Screen(config.screen, backend))
+
+    result = text_of(asyncio.run(server.call_tool("look_at_screen", {})))
+    assert "still_loading" in result
+    assert "still building itself" in result
+    assert "do not conclude it has nothing in it" in result
+
+
+def test_the_capability_line_leads_with_sampling():
+    """It is the one capability that decides whether the server can ever obtain
+    model output rather than wait to be called, so the log says so plainly rather
+    than listing names to be read."""
+    from mcp_types import ClientCapabilities, SamplingCapability
+
+    from jarvis.mcp_server import _capabilities
+
+    class Ctx:
+        def __init__(self, caps):
+            self._caps = caps
+
+        @property
+        def client_capabilities(self):
+            return self._caps
+
+    assert "SAMPLING=yes" in _capabilities(Ctx(ClientCapabilities(sampling=SamplingCapability())))
+    assert "SAMPLING=no" in _capabilities(Ctx(ClientCapabilities()))
+    assert "SAMPLING=no" in _capabilities(Ctx(None))
+
+
+def test_capabilities_are_read_as_a_property_not_called():
+    """Calling it raised TypeError on every real session while the guard reported
+    "unavailable", so three sessions went by without answering the one question
+    this exists to answer."""
+    from jarvis.mcp_server import _capabilities
+
+    class Ctx:
+        called = False
+
+        @property
+        def client_capabilities(self):
+            return None
+
+    assert "SAMPLING=no" in _capabilities(Ctx())

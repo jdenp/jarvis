@@ -170,18 +170,14 @@ to have answered. `then="keep_working"` speaks and returns at once for a holding
 before slow work. Both arguments are required; the schema rejects the call before the tool
 body runs.
 
-Two tools became one after two live sessions where the agent listened, wrote its reply into
-its own chat text and ended the turn without speaking. **A required argument constrains a
-call that happens; it cannot cause a call to happen.** So there is one lever that is not
-persuasion: `service.force_a_reply` (on by default) hands speech back as a tool *error*
-rather than a result, because a client that will end a turn on a result will not end it on
-an error. A model that reliably calls `converse()` never sees it - it is a fallback for
-ones that forget.
+Two tools became one after two live sessions where the agent listened, wrote its reply
+into its own chat text and ended the turn without speaking. The limit is worth knowing
+before you rely on it: **a required argument constrains a call that happens, it cannot
+cause a call to happen.** Nothing in MCP can - elicitation and `InputRequiredResult` route
+to the human, and Cline declares no `sampling` capability, so the server can never obtain
+model output. Three softer attempts were built and removed as jank; what they were and why
+they failed is in [`DESIGN.md`](DESIGN.md).
 
-It only fires when something was actually heard and a reply is outstanding, so an idle
-poll stays a plain success. Turn it off if your client counts consecutive errors and gives
-up. [`DESIGN.md`](DESIGN.md) has the post-mortem, including why sampling would be the real
-fix and what it would cost on a single-slot llama-server.
 Anything else drives the same service through the CLI:
 
 ```powershell

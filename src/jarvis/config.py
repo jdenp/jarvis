@@ -116,13 +116,6 @@ class ServiceConfig:
     # being a key nothing else wants; the cost is that pausing also flips the
     # numeric keypad, which is the same keypress doing both things.
     hotkey: str = "num lock"
-    # Hand speech back as a tool *error* rather than a result, so a client will
-    # not let the turn end on it. A fallback for models that forget to call
-    # converse() and answer in chat text instead, where nothing reaches the
-    # user - see DESIGN.md on what no schema can enforce. Only fires when
-    # something was actually heard and a reply is outstanding. Turn it off if a
-    # client counts consecutive errors and gives up instead of pressing on.
-    force_a_reply: bool = True
 
 
 @dataclass(frozen=True)

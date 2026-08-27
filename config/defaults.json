@@ -37,8 +37,7 @@
     "max_wait_seconds": 55.0,
     "transcript_file": "heard.jsonl",
     "stale_after_seconds": 120.0,
-    "hotkey": "num lock",
-    "force_a_reply": true
+    "hotkey": "num lock"
   },
   "screen": {
     "control": true,

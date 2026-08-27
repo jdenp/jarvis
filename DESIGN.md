@@ -209,20 +209,35 @@ unanswered, twice. The cost is that a room with a television in it pays one boun
 utterance, which is why the message offers both ways out in the same breath rather than
 insisting on an answer: answering what nobody asked is the worse failure of the two.
 
-**The one lever that is not persuasion: hand it back as an error.** Everything above is
-an attempt to make the right call more likely. `service.force_a_reply` stops asking. A
-result that carries speech is returned as `isError: true`, because a client that will end
-a turn on a tool result will not end it on a tool error - an error is the one signal every
-client treats as unfinished business rather than as an answer. A model that reliably calls
-converse() never sees it; a forgetful one gets the shove.
+**Three attempts to force a spoken reply, all removed.** Worth writing down because each
+looked reasonable and each failed the same way, and the next idea should have to clear a
+higher bar than these did.
 
-It is a deliberate lie about a call that succeeded, so it is fenced. It fires only when
-something was actually heard and a reply is genuinely outstanding, which leaves an idle
-poll a plain success - and idle polls are most of them, so the error stays rare enough to
-mean something. The bounce is flagged regardless of the setting, because that one is not a
-lie: the call was asked to listen and refused. And the setting exists at all because this
-repo already knows clients count consecutive failures and end sessions; if that happens,
-turning it off is a config line rather than a code change.
+The first handed speech back as `isError: true` on the result that delivered it, on the
+grounds that a client which will end a turn on a result will not end it on an error. That
+much was true - the turn did not end, and the agent went and did the work. It never spoke,
+because by the time the work was finished the error was eleven results back in the context.
+It also meant lying about a call that had succeeded, on every turn of every conversation.
+
+The second attached the outstanding reply to every screen result while it was owed. A note
+on everything is wallpaper: it stops being read, and it fires on tasks that were never
+going to be slow.
+
+The third made that note one-shot and gated it on twelve seconds of silence, so an agent
+that answered promptly never saw it. Better, and still a note - which is to say still
+something the model can decline to act on, which is the entire problem.
+
+The fourth, an action budget, was written and never committed: three clicks between spoken
+lines, then the acting tools refuse until something goes through the speakers. That one is
+genuinely unignorable, because ignoring it means the task stops progressing. It was pulled
+with the others on the same judgement - a wall the agent hits mid-task is a worse experience
+than the silence it prevents, and none of the four produce the thing actually wanted, which
+is a closing report.
+
+What survives from all of it is the one refusal that is not a nag: `say=""` while a reply is
+owed is a claim to have answered, the server knows whether anything went through the
+speakers, and a false claim is refused. That is a lie being caught rather than a memory
+being prompted, which is why it keeps working.
 
 **What is genuinely left, stated plainly.** Sampling is the only mechanism in MCP that
 would truly enforce this: `sampling/createMessage` lets the server ask the client to run a
@@ -339,6 +354,19 @@ going through it attached a rotating file handler to the repository's own `logs/
 session above meant reading past "Pillow is not installed", "Unknown key 'nope'" and a
 dozen dropped-phrase warnings, none of which had happened to the user. Measured at ~3.5KB
 of noise per run, now zero.
+
+**Check the point before raising the window, not after.** The order has now been wrong in
+both directions. First it checked and then raised, so a background target failed on the
+grounds of being covered by whatever covered it. Then it raised and then checked - which
+broke the taskbar, because the taskbar is always on top and `SetForegroundWindow` refuses
+it: the attempt logged "could not bring Taskbar to the front" and the check that followed
+refused a click on a button that had been perfectly clickable a moment before.
+
+Both are fixed by checking first and treating failure as the trigger to raise, rather than
+raising unconditionally. A target already under the pointer needs nothing done to it, which
+is the common case and now also the cheap one - no activate, no settle delay. Only when the
+point says the target is not visible does the window get brought forward, and then it is
+checked again. The taskbar passes on the first check and is never touched.
 
 **Not every window has a tree, and the Start menu is one of them.** Asked to open Spotify
 and play, an agent pressed the Windows key, scanned what came up, and got one element: a

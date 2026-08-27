@@ -156,7 +156,6 @@ def test_no_config_file_means_everything_is_active():
     assert config.screen.send_image is True
     assert config.screen.marks_file, "the marked screenshot is drawn"
     assert config.audio.listen_while_speaking is True, "full duplex"
-    assert config.service.force_a_reply is True
     assert config.service.hotkey, "the toggle key is bound"
 
 

@@ -544,16 +544,24 @@ class Screen:
                 "time to change since, so look again before acting on it."
             )
 
-        # Raised before the check, not after. What sits under a point in a
-        # covered window is the window covering it, so a background target would
-        # fail the check every time on those grounds alone - and input goes to
-        # the foreground regardless of what was scanned.
+        # Check before raising anything. A target already under the pointer
+        # needs no help, and raising costs something: the taskbar is always on
+        # top and SetForegroundWindow refuses it, so the attempt logged a warning
+        # and then the check failed against a window that had been perfectly
+        # clickable a moment earlier. Only reach for the foreground when the
+        # point says the target is not visible.
+        x, y = target.element.centre
+        if confirms(target, self.backend.chain_at(x, y)):
+            return target, scan
+
+        # Not there. Either something covers it or the window is behind - and
+        # input goes to the foreground regardless of what was scanned, so this is
+        # both the diagnosis and the fix.
         if self.backend.foreground()[0] != scan.hwnd:
             if not self.backend.activate(scan.hwnd):
                 logger.warning("Could not bring %r to the front.", scan.window)
             time.sleep(self.config.focus_settle_seconds)
 
-        x, y = target.element.centre
         if not confirms(target, self.backend.chain_at(x, y)):
             raise ScreenUnavailable(
                 f"Target {number} was {target.element.label!r}, but something else is "
