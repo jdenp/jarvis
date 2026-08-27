@@ -13,15 +13,30 @@ from collections.abc import Callable
 
 logger = logging.getLogger("jarvis.hotkey")
 
-# Ignore key auto-repeat while Pause is held down.
+# Ignore key auto-repeat while the key is held down.
 _DEBOUNCE_SECONDS = 0.3
 
 
+def _canonical(name: str | None) -> str:
+    """The library's own spelling of a key name, or the name as given."""
+    if not name:
+        return ""
+    # Stripped first: the library's own normalise leaves surrounding spaces
+    # alone, and a stray one in a config file should not silently break the key.
+    tidied = name.strip().lower()
+    try:
+        from keyboard._canonical_names import normalize_name
+
+        return normalize_name(tidied)
+    except Exception:
+        return tidied
+
+
 class HotkeyListener:
-    """Listens for the Pause key and calls back into the service."""
+    """Listens for one key and calls back into the service."""
 
     def __init__(
-        self, on_pause: Callable[[], bool], on_resume: Callable[[], None], key: str = "end"
+        self, on_pause: Callable[[], bool], on_resume: Callable[[], None], key: str = "num lock"
     ) -> None:
         self._key = key
         self._on_pause = on_pause
@@ -42,9 +57,15 @@ class HotkeyListener:
             )
             return
 
+        # hook_key accepts "numlock", "num_lock" and "num lock" alike, but the
+        # events it delivers are named canonically - so comparing against the
+        # configured spelling registers a hotkey that then never fires. Normalise
+        # once here and any accepted spelling works.
+        wanted = _canonical(self._key)
+
         def _handler(event) -> None:
             # Some keys share a scan code, so match on the key name
-            if event.event_type != "down" or event.name != self._key:
+            if event.event_type != "down" or _canonical(event.name) != wanted:
                 return
             now = time.monotonic()
             if now - self._last_fired < _DEBOUNCE_SECONDS:

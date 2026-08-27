@@ -36,12 +36,13 @@ is the brain.
   accessibility nodes and 54 of them are things you can act on. It names a number and a
   label it expects to find there; if the label no longer matches, nothing is pressed. Off
   by default, see [Screen control](#screen-control)
-- **Hotkey shortcut.** Press End to stop listening without touching the agent. The
+- **Hotkey shortcut.** Press Num Lock to stop listening without touching the agent. The
   microphone stops being read, so nothing is transcribed, logged or written to
   `heard.jsonl` until you press it again - not merely withheld from the agent. Install
   with `uv sync --extra hotkey` first. Change the key with `service.hotkey`, or set it to
   `""` to disable. The hook is global and does not swallow the keypress, so End still
-  works normally in other apps - but it toggles JARVIS wherever you press it.
+  works normally in other apps - so Num Lock still flips the numeric keypad, and it
+  toggles JARVIS wherever you press it.
 
 ## Requirements
 
@@ -405,7 +406,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 288 tests, no hardware, model or network needed
+uv run pytest        # 298 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

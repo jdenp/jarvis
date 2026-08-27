@@ -108,8 +108,11 @@ class ServiceConfig:
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
     # Key that toggles transcription. Empty disables it. Avoid keys you type
-    # with - the hook is global and does not swallow the keypress.
-    hotkey: str = "end"
+    # with - the hook is global and does not swallow the keypress, so whatever
+    # is chosen still does its normal job everywhere else. Num Lock earns it by
+    # being a key nothing else wants; the cost is that pausing also flips the
+    # numeric keypad, which is the same keypress doing both things.
+    hotkey: str = "num lock"
     # Hand speech back as a tool *error* rather than a result, so a client will
     # not let the turn end on it. A fallback for models that forget to call
     # converse() and answer in chat text instead, where nothing reaches the

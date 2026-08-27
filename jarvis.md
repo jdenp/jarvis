@@ -213,7 +213,7 @@ They cannot see your screen, so silence looks like a crash.
 
 ## If they go quiet for a long time
 
-They may have paused it. The End key stops JARVIS reading the microphone at all - nothing
+They may have paused it. The Num Lock key stops JARVIS reading the microphone at all - nothing
 
 is transcribed and nothing is queued, so a pause looks exactly like a silent room, and
 

@@ -354,7 +354,8 @@ def test_the_pause_tool_no_longer_claims_the_microphone_keeps_running(rig):
     pause = next(t for t in asyncio.run(server.list_tools()) if t.name == "pause_transcription")
     assert "keeps running" not in pause.description
     assert "microphone stops being read" in pause.description
-    assert "end key" in pause.description, "the configured key, not a hardcoded Pause"
+    key = Config().service.hotkey
+    assert f"{key} key" in pause.description, "the configured key, not a hardcoded one"
 
 
 def test_a_real_answer_then_a_quiet_room_is_not_punished(rig):

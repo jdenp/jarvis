@@ -93,8 +93,10 @@ transcript_file = "heard.jsonl"
 # request. 0 disables the flag.
 stale_after_seconds = 120.0
 # Key that stops and starts listening, from anywhere. Empty disables it. The hook
-# is global and does not swallow the keypress, so avoid keys you type with.
-hotkey = "end"
+# is global and does not swallow the keypress, so whatever is chosen still does
+# its normal job everywhere else - Num Lock still flips the keypad. Any spelling
+# the keyboard library accepts works: "num lock", "numlock", "num_lock".
+hotkey = "num lock"
 # Hand speech back as a tool *error* rather than a result, so a client will not
 # let the turn end on it. A fallback for models that forget to call converse()
 # and answer in chat text instead, where nothing reaches the user. Only fires
