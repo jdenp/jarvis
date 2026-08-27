@@ -93,15 +93,25 @@ class VoiceService:
         self._hotkey.start()
 
     def pause(self) -> bool:
-        """Pause transcription. Returns True if was not already paused."""
+        """Stop listening. Returns True if it was not already paused.
+
+        The microphone stops being read, so a paused JARVIS spends no CPU on
+        transcription and writes nothing to the log or the transcript file. The
+        transcript gate stays as the second line: a phrase captured just before
+        the key was pressed can still be mid-transcription when it lands.
+        """
         if self.transcript.paused:
             return False
         self.transcript.pause()
+        if self.microphone is not None:
+            self.microphone.pause()
         return True
 
     def resume(self) -> None:
-        """Resume transcription."""
+        """Start listening again."""
         self.transcript.resume()
+        if self.microphone is not None:
+            self.microphone.resume()
 
     # ------------------------------------------------------------------ speak
 

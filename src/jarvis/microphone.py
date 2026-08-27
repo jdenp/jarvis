@@ -79,6 +79,8 @@ class Microphone:
         self._source: sr.Microphone | None = None
         self._queue: queue.Queue[sr.AudioData] = queue.Queue(maxsize=16)
         self._muted = threading.Event()
+        # Separate from _muted, which the echo gate owns and clears on its own.
+        self._paused = threading.Event()
         self._deaf_until = 0.0
         self._running = threading.Event()
         self._thread: threading.Thread | None = None
@@ -209,9 +211,12 @@ class Microphone:
     def _accepting(self) -> bool:
         """Whether audio arriving right now is wanted.
 
-        Checked per buffer, so JARVIS's own voice is dropped as it is recorded.
+        Checked per buffer, so JARVIS's own voice is dropped as it is recorded,
+        and so a pause costs no transcription rather than merely hiding it.
         """
-        return not self._muted.is_set() and time.monotonic() >= self._deaf_until
+        if self._muted.is_set() or self._paused.is_set():
+            return False
+        return time.monotonic() >= self._deaf_until
 
     def _deliver(self, frames: deque[bytes], source) -> None:
         audio = sr.AudioData(b"".join(frames), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
@@ -239,6 +244,25 @@ class Microphone:
         self._deaf_until = time.monotonic() + self.config.echo_guard_seconds
         self.drain()
         self._muted.clear()
+
+    def pause(self) -> None:
+        """Stop reading the microphone until resumed.
+
+        Its own flag rather than mute(): a reply finishing calls unmute(), and
+        that must not undo a pause the user asked for. Queued phrases go too -
+        one arriving a second after the key is pressed is the surprise this is
+        here to remove.
+        """
+        self._paused.set()
+        self.drain()
+
+    def resume(self) -> None:
+        """Start reading the microphone again."""
+        self._paused.clear()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused.is_set()
 
     def drain(self) -> None:
         """Discard any queued phrases."""

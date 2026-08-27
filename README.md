@@ -29,11 +29,12 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
-- **Hotkey shortcut.** Press End to toggle transcription without touching the agent.
-  Install with `uv sync --extra hotkey` first. Change the key with `service.hotkey`,
-  or set it to `""` to disable. The hook is global and does not swallow the keypress,
-  so End still works normally in other apps - but it toggles JARVIS wherever you
-  press it.
+- **Hotkey shortcut.** Press End to stop listening without touching the agent. The
+  microphone stops being read, so nothing is transcribed, logged or written to
+  `heard.jsonl` until you press it again - not merely withheld from the agent. Install
+  with `uv sync --extra hotkey` first. Change the key with `service.hotkey`, or set it to
+  `""` to disable. The hook is global and does not swallow the keypress, so End still
+  works normally in other apps - but it toggles JARVIS wherever you press it.
 
 ## Requirements
 
@@ -262,6 +263,7 @@ whatever `JARVIS_CONFIG` points at.
 | `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
+| `hotkey.py` | The global key that stops and starts listening |
 | `reap.py` | Clearing MCP servers that outlived their client |
 | `echo.py` | Recognising JARVIS's own voice coming back |
 | `config.py` | Defaults, TOML, environment |
@@ -277,7 +279,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 183 tests, no hardware, model or network needed
+uv run pytest        # 189 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

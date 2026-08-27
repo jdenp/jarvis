@@ -210,6 +210,18 @@ They cannot see your screen, so silence looks like a crash.
 
   crash. "I cannot reach the search just now, sir" takes a second.
 
+## If they go quiet for a long time
+
+They may have paused it. The End key stops JARVIS reading the microphone at all - nothing
+
+is transcribed and nothing is queued, so a pause looks exactly like a silent room, and
+
+anything said during it is gone rather than waiting. Keep calling `stay_silent`; it returns
+
+the moment they press it again. Do not assume a crash, and do not go and start a second
+
+service.
+
 ## Tools
 
 | Tool | |
@@ -223,6 +235,10 @@ They cannot see your screen, so silence looks like a crash.
 | `stay_silent(because=...)` | Blocks until they speak, without speaking first |
 
 | `check_for_speech()` | Does not block. Anything said since you last looked |
+
+| `pause_transcription()` | Stops reading the microphone entirely. Nothing is heard until resumed |
+
+| `resume_transcription()` | Starts reading it again |
 
 | `voice_status()` | Whether the microphone is live |
 

@@ -303,10 +303,20 @@ def test_pause_transcription_tool(rig):
 
 
 def test_resume_transcription_tool(rig):
-    _, voice, raw = rig
+    _, _voice, raw = rig
     result = raw("resume_transcription")
     parsed = json.loads(result)
     assert "paused" in parsed
+
+
+def test_the_pause_tool_no_longer_claims_the_microphone_keeps_running(rig):
+    """It used to say so, and it was true - paused only withheld utterances from
+    the agent while still capturing, transcribing and logging them."""
+    server, _voice, _raw = rig
+    pause = next(t for t in asyncio.run(server.list_tools()) if t.name == "pause_transcription")
+    assert "keeps running" not in pause.description
+    assert "microphone stops being read" in pause.description
+    assert "end key" in pause.description, "the configured key, not a hardcoded Pause"
 
 
 def test_stay_silent_will_not_run_without_a_reason(rig):

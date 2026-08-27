@@ -257,6 +257,28 @@ There is also a floor under the calibrated energy threshold. A quiet room calibr
 single digits, which is sensitive enough to hear the speakers at all, and no amount of gating
 helps if the mic is straining to pick up its own output.
 
+**Pausing stops the capture, not the delivery.** `Transcript.pause()` only kept utterances out
+of the ring and out of `/heard`. Everything upstream carried on: the phrase was captured, a
+Whisper inference was paid for, `[id] text` was logged to the console, and `_append_to_file`
+wrote it to `heard.jsonl` regardless. So a paused JARVIS still transcribed you to disk, which
+is the opposite of what the key press looks like it does.
+
+The gate belongs in `_accepting()` in `microphone.py`, next to the echo gate, where it is
+checked per buffer - nothing is queued, so nothing is transcribed, logged or written. It needs
+its own flag rather than reusing `mute()`: a reply ending calls `unmute()`, and one shared
+flag would have a finished sentence quietly lift a pause the user asked for. `pause()` also
+drains the queue, since a phrase arriving a second after the key is pressed is exactly the
+surprise being removed.
+
+`Transcript.pause()` stays as the second line. A phrase captured just before the key was
+pressed can still be mid-transcription when it lands, and that one is genuinely pre-pause
+audio, so it is recorded but not delivered.
+
+Note what this does not do: the audio device stays open, so the operating system still shows
+the microphone as in use. Closing and reopening it on a hotkey means re-acquiring a device
+that may be busy, and re-calibrating in energy mode. If the OS indicator is the point rather
+than the transcript, that is the change to make, and it is a bigger one.
+
 **Load the Whisper model once, and prove the device works before trusting it.**
 speech_recognition's `recognize_faster_whisper` builds a fresh `WhisperModel` on every call,
 so using it means reloading weights from disk per utterance. Worse, `WhisperModel.transcribe`

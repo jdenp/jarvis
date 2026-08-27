@@ -142,6 +142,42 @@ def test_audio_recorded_while_muted_is_dropped():
     assert run(mic, "#" * 20 + SILENCE) == []
 
 
+def test_audio_recorded_while_paused_is_never_captured():
+    """Paused used to gate only delivery, so the phrase was still recorded,
+    still transcribed and still written to heard.jsonl."""
+    mic = make_mic()
+    mic.pause()
+    assert run(mic, "#" * 20 + SILENCE) == []
+
+
+def test_resuming_starts_capturing_again():
+    mic = make_mic()
+    mic.pause()
+    mic.resume()
+    assert len(run(mic, "#" * 20 + SILENCE)) == 1
+
+
+def test_pausing_drops_a_phrase_already_waiting():
+    """A phrase landing a second after the key is pressed is the surprise this
+    is meant to remove."""
+    mic = make_mic()
+    assert len(run(mic, "#" * 20 + SILENCE)) == 1  # something is queued
+    run(mic, "#" * 20 + SILENCE)
+    mic.pause()
+    assert mic.listen(timeout=0) is None
+
+
+def test_unmuting_after_a_reply_does_not_lift_a_pause():
+    """say() ends in unmute(). One shared flag would have a finished reply
+    quietly start listening again."""
+    mic = make_mic(echo_guard_seconds=0.0)
+    mic.pause()
+    mic.mute()
+    mic.unmute()
+    assert mic.paused is True
+    assert run(mic, "#" * 20 + SILENCE) == []
+
+
 def test_the_echo_guard_drops_audio_recorded_just_after_speaking():
     mic = make_mic(echo_guard_seconds=30.0)
     mic.mute()

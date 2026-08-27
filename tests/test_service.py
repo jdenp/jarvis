@@ -20,6 +20,7 @@ class FakeMicrophone:
         self.muted = False
         self.mute_calls = 0
         self.started = False
+        self.paused = False
 
     def start(self) -> None:
         self.started = True
@@ -34,6 +35,12 @@ class FakeMicrophone:
 
     def unmute(self) -> None:
         self.muted = False
+
+    def pause(self) -> None:
+        self.paused = True
+
+    def resume(self) -> None:
+        self.paused = False
 
     def stop(self) -> None:
         self.started = False
@@ -275,6 +282,31 @@ def test_pause_stops_recording():
     assert service.transcript.paused is True
     service.transcript.add("paused utterance")
     assert [item.text for item in service.transcript.since(0)] == []
+
+
+def test_pause_stops_the_microphone_not_just_the_delivery():
+    """Gating only the transcript still captured, still ran Whisper, still
+    logged the utterance and still wrote it to heard.jsonl. Paused has to mean
+    the microphone is not being read."""
+    service, microphone, _ = make_service()
+    service.pause()
+    assert microphone.paused is True
+    service.resume()
+    assert microphone.paused is False
+
+
+def test_speaking_while_paused_does_not_resume_listening():
+    """say() ends with unmute(). Sharing one flag would have a finished reply
+    silently undo a pause the user asked for."""
+    service, microphone, _ = make_service()
+    service.pause()
+    service.say("Still here, sir.")
+    for _ in range(50):
+        if not microphone.muted:
+            break
+        time.sleep(0.05)
+    assert microphone.muted is False, "the echo gate released as usual"
+    assert microphone.paused is True, "but the pause stands"
 
 
 def test_resume_resumes_recording():

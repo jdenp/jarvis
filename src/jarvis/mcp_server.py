@@ -387,35 +387,37 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
 
     @server.tool(
         name="pause_transcription",
-        title="Pause transcription",
+        title="Stop listening",
         description=(
-            "Pause transcription so new utterances are not recorded. The microphone "
-            "keeps running but the transcript ignores what comes in. Press the Pause "
-            "key on your keyboard to toggle this from anywhere. Call again to resume."
+            "Stop listening. The microphone stops being read, so nothing is "
+            "transcribed, logged or recorded until it is resumed - not merely "
+            "withheld from you. Press the "
+            f"{config.service.hotkey} key to toggle this from anywhere. "
+            "Call resume_transcription to start listening again."
         ),
     )
     def pause_transcription() -> dict:
         try:
-            result = voice.pause()
-            logger.info("Transcription paused.")
-            return {"paused": True, "message": "Transcription paused."}
+            voice.pause()
+            logger.info("Listening paused.")
+            return {"paused": True, "message": "Listening paused."}
         except ServiceUnavailable as exc:
             logger.warning("Pause failed - %s", exc)
             return {"error": str(exc), "paused": False}
 
     @server.tool(
         name="resume_transcription",
-        title="Resume transcription",
+        title="Start listening again",
         description=(
-            "Resume recording utterances after a pause. The transcript will again "
-            "capture everything the user says."
+            "Start reading the microphone again after a pause. Nothing said "
+            "during the pause is recoverable - it was never captured."
         ),
     )
     def resume_transcription() -> dict:
         try:
             voice.resume()
-            logger.info("Transcription resumed.")
-            return {"paused": False, "message": "Transcription resumed."}
+            logger.info("Listening resumed.")
+            return {"paused": False, "message": "Listening resumed."}
         except ServiceUnavailable as exc:
             logger.warning("Resume failed - %s", exc)
             return {"error": str(exc), "paused": True}
