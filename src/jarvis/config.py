@@ -100,7 +100,7 @@ class ServiceConfig:
 
     host: str = "127.0.0.1"
     port: int = 8770
-    # Longest a stay_silent call may block. Keep it under the agent's own
+    # Longest a single converse() call may block. Keep it under the agent's own
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
@@ -110,6 +110,13 @@ class ServiceConfig:
     # Key that toggles transcription. Empty disables it. Avoid keys you type
     # with - the hook is global and does not swallow the keypress.
     hotkey: str = "end"
+    # Hand speech back as a tool *error* rather than a result, so a client will
+    # not let the turn end on it. A fallback for models that forget to call
+    # converse() and answer in chat text instead, where nothing reaches the
+    # user - see DESIGN.md on what no schema can enforce. Only fires when
+    # something was actually heard and a reply is outstanding. Turn it off if a
+    # client counts consecutive errors and gives up instead of pressing on.
+    force_a_reply: bool = True
 
 
 @dataclass(frozen=True)

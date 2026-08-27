@@ -27,7 +27,7 @@ and everything else - the CLI and the MCP server both - is a loopback HTTP clien
 
 `GET /heard?since=N&wait=55` returns immediately if there is anything after `N`, and
 otherwise blocks on a `threading.Condition` that `Transcript.add` notifies. An agent listens
-once - `say(..., then="listen")` or `stay_silent` - and it returns the instant a sentence
+once - `converse()` - and it returns the instant a sentence
 lands. No polling, no timer, no tokens spent asking "anything yet?".
 
 Ids are monotonic and survive restarts - `Transcript._resume` reads the last id out of the
@@ -113,7 +113,7 @@ called within a couple of seconds, so a slow answer did not sound like a crash. 
 one place JARVIS decided *what* to say, and it is gone.
 
 Two attempts to keep it are worth not repeating. Letting the agent supply the phrase through
-`say(text, hold=...)` works mechanically but asks the wrong thing of a small model:
+a `hold=...` argument works mechanically but asks the wrong thing of a small model:
 composing a follow-up that lands ten seconds later, with no context to attach it to, is a
 judgement to make while it should be thinking about the actual question. And leaving the
 canned timer in alongside an agent that now speaks first means two holding lines in a row
@@ -131,191 +131,125 @@ has to be JARVIS talking, which is the thing being removed.
 **The loop is closed by the tool, not by the agent's memory.** Moving the lead-in rule into
 the result fixed the silence before slow work, and left the other half untouched: the agent
 answered, then ended its turn, hanging up on someone still sitting at the microphone.
-Instructions could not reach it. `jarvis.md`, the server instructions and the `say()` result
+Instructions could not reach it. `jarvis.md`, the server instructions and the tool result
 all said "always go straight back to listening", two of them in capitals, and it
 happened anyway - because it is a thing to remember at the end of a turn, and the end of a
 turn is exactly where a model stops remembering.
 
-So `say()` does it instead. It takes a required `then`: `then="listen"` speaks and then
+So the tool does it instead. It takes a required `then`: `then="listen"` speaks and then
 performs the blocking read itself, returning the utterance in the same result, and
 `then="keep_working"` speaks and returns at once for the lead-in. Answering *is* listening,
 so there is no second call to forget. The argument has no default, so the schema rejects a
 call that omits it - the model is made to state which of the two it is doing, and the fork
 is one the lead-in rule already demanded, so it costs no judgement that was not already owed.
 
-`stay_silent` covers what is left: entering the conversation, and listening again after
-deciding to stay silent. Called with a question still unanswered it bounces once - returns
-immediately without listening, naming what went unanswered - and clears the debt on the way
-out, so the next call goes through whichever way the agent decides. That last part is the
-whole difference from the version this repo already tried and removed, which blocked until
-`say()` was called and deadlocked against an agent that had correctly kept quiet. One cheap
-round trip is a cost worth paying; a hang is not.
+**Two tools became one, after two live sessions said so.** The first version kept a split:
+`say(text, then=...)` to speak, `stay_silent(because=...)` to listen without speaking, with
+`because` an enum whose `already_spoke_my_reply` value the server could check against what
+had actually gone through the speakers. That much worked, and the checkable claim survives
+today in a different form.
 
-That left one failure, and the first live session found it immediately: the agent heard
-"Hello", wrote "Hello sir. How can I help?" into its own reply text, and called
-`stay_silent`. Nothing was spoken. Closing the loop after `say()` does nothing about an
-agent that never reaches `say()`, and the listening tool was the escape hatch -
-argumentless, and indistinguishable from a correct decision to keep quiet.
+What did not work was the split itself. Twice, in a fresh session, the agent called the
+listening tool, got "Hey Jarvis" back, wrote "Hey there! What's up?" into its own reply text
+and ended its turn. Nothing was spoken either time. The lesson is narrow and worth stating
+plainly: **a required argument constrains a call that happens; it cannot cause a call to
+happen.** Everything downstream of "the model decided to use the tool" was already closed,
+and the failure was upstream of it.
 
-**Silence has to be justified, and one of the justifications is checkable.**
-`stay_silent` now takes a required `because`, one of
-`starting_to_listen`, `not_aimed_at_me`, `sounded_cut_off`, `already_spoke_my_reply`. The
-first three are judgements only the agent can make and are always honoured. The fourth is a
-claim about the world, and the server knows whether it is true: `unanswered` holds the last
-utterance heard and is cleared only by `say(..., then="listen")`, so a claim to have replied
-with nothing behind it is refused, unlistened, and sent back to `say()`.
+Diagnosing the second one turned up two contributing causes and one that was neither.
 
-That value has to be in the list. An agent that has written its reply out believes it
-answered, so `already_spoke_my_reply` is the honest thing for it to say - and it is exactly
-the belief that needs contradicting. Take it out and the agent picks one of the unfalsifiable
-three instead, and nothing catches anything.
+The one that was neither: a copy of `jarvis.md` in the client's rules directory, three days
+stale, still naming `wait_for_speech` and showing a bare `say(answer)`. Fixing it did not
+fix the failure, which is how the split was ruled out rather than the prose. It is written
+up separately below because it is a real trap regardless.
 
-It also cannot wedge a session, which is the constraint every previous attempt failed: the
-refusal is conditional on the reason, so `not_aimed_at_me` always goes through. The escape is
-in the enum rather than in a retry counter, and an agent that really was being talked over
-gets past in one call. A lead-in does not settle the debt either - `then="keep_working"` was
-the agent's own statement that this was not the answer, so "let me have a look" followed by
-silence is still caught.
+The two that were: the result. For a two word greeting the model received fourteen lines, of
+which eight were a `detail` block repeating the text with an id and a timestamp that nothing
+consumed, sitting between the words and the instruction. And the instruction opened with a
+question - "Can you answer right now, from what you know?" - which a model answers in prose,
+because answering questions in prose is the single strongest thing it knows how to do. It
+then closed on the name of the tool that does not speak. This repo had already learned that
+a small model picks whichever clause it read last; the clause it read last was wrong.
 
-What is left unenforceable is narrower than it was: an agent that writes its reply as text
-and then honestly reports `not_aimed_at_me` still gets through. That is a lie rather than a
-lapse, and a lie is a much harder thing for a model to do by accident than forgetting. Rule 1
-stays shouted in the instructions for the rest.
+**So: one tool, and the result is an instruction and nothing else.** `converse(say, then)`
+speaks and then listens. `say=""` listens without speaking. Both arguments required. The
+result is `heard` plus one imperative that opens and closes on `EMIT converse()`, six lines
+instead of fourteen.
 
-**Name the decision, not the mechanism.** These two tools were `say` and `wait_for_speech`,
-and the second name stopped being true the moment `say(..., then="listen")` became the
-ordinary way to hear someone. It read as the canonical listening primitive while actually
-being the minority path, which is the opposite of what the split is for. `stay_silent` names
-the choice instead, so the pair is the two things you can do with a turn - speak, or do not -
-and `nothing_to_say_because` collapses to `because` now the tool name carries the rest.
+The argument for consolidating is not that it enforces anything - it does not, and nothing
+in MCP can. It is that the second call is now *identical in shape to the first*. Under the
+split, a model that had just listened had to notice it needed a different tool with
+different arguments, at the end of a turn, which is exactly where a model stops noticing
+things. Now there is one tool, its only interesting argument is the thing to say, and
+and entering voice mode is `converse(say="", then="listen")`, the same call with nothing
+to say.
 
-`say` was left alone on the same reasoning. It undersells what it does, but it does not
-misdirect, `then` already names the second half, and `converse(text, then="keep_working")`
-would contradict itself. It also matches `jarvis say` and `POST /say`, and rule 1 - the one
-thing no schema can enforce - leans on it being a short blunt verb.
+An earlier version had the entry speak - `say="Yes sir?"` - on the grounds that it
+establishes the pattern from call one, so the first *reply* is not also the first time the
+tool is used with content. That was reverted on request, and it costs less than it would
+have: `force_a_reply` below now catches exactly that transition, which is the work the
+greeting was doing. Entering voice mode is silent again, which is what someone who has just
+asked for it expects.
 
-Folding the two into one tool was considered and rejected. It needs `text` optional, which
-makes "state a reason for silence" a conditional requirement, and a flat JSON Schema cannot
-express that. The check would drop back into the function body, which is precisely the
-enforcement being bought here.
+**The checkable claim survives, and got broader.** `say=""` while a reply is owed is the
+claim to have answered, and it is refusable on the same evidence as before: `unanswered`
+holds the last utterance heard and is cleared only by actually speaking. It is better than
+the enum it replaces, because it is the behaviour itself rather than a self-report - there
+is no unfalsifiable value to pick instead.
 
-Where the rule lives decides whether it fires. Stated only in the instructions and in
-`jarvis.md`, it was ignored: both are read once, a long way back, while the choice is made
-the instant a listen returns. That result carried "do the work, then call say() with
-the answer" - the opposite - and the nearer text won every time. The fork now sits in the
-result itself, and neither loop diagram teaches work-then-speak any more.
+It bounces once rather than refusing outright. Returning immediately without listening,
+naming what went unanswered, and clearing the debt on the way out, so the next call goes
+through whichever way the agent decides. That is the whole difference from the version this
+repo tried first, which blocked until something was spoken and deadlocked against an agent
+that had correctly kept quiet. One cheap round trip is a cost worth paying; a hang is not.
 
-**A pause is measured in frames that are not speech, not in quiet ones.** Loudness cannot
-tell a footstep from a word, so any tolerance rule is guessing. `vad.py` runs Silero, a 1.2MB
-network that scores each 32ms frame, and the whole predicate in `_run` is that one boolean -
-which is the only reason swapping it was a small change.
+It now chases anything heard, not only what parses as a question. `looks_like_a_question`
+guarded the old bounce, and "Hey Jarvis" is not a question - it is precisely what went
+unanswered, twice. The cost is that a room with a television in it pays one bounce per
+utterance, which is why the message offers both ways out in the same breath rather than
+insisting on an answer: answering what nobody asked is the worse failure of the two.
 
-It earns its place on measurements rather than reputation. Thumps as loud as speech score
-0.006 and never cross the 0.5 cutoff; the same sentence 24dB quieter scores the same as the
-original, so it also removes the need to raise your voice at a desk mic. Cost is 62us per
-32ms frame on a 7700X - 514x real time, 0.19% of one core - and no VRAM, which matters here
-because the GPU has ~127MB spare with the local model loaded. onnxruntime and the model both
-arrive with faster-whisper, so it adds no dependency.
-`scripts/measure-noise-rejection.py` shows the difference it makes: with footsteps twice a
-second the loudness rule still copes, and between 3 and 5 a second the phrase never ends at
-all, while Silero delivers the same 4.10s every time.
+**The one lever that is not persuasion: hand it back as an error.** Everything above is
+an attempt to make the right call more likely. `service.force_a_reply` stops asking. A
+result that carries speech is returned as `isError: true`, because a client that will end
+a turn on a tool result will not end it on a tool error - an error is the one signal every
+client treats as unfinished business rather than as an answer. A model that reliably calls
+converse() never sees it; a forgetful one gets the shove.
 
-Two things it does not fix. A television with people talking on it is speech by any honest
-measure, and only speaker identification would help. And Silero is level-independent, which
-cuts both ways: a voice in the next room counts too.
+It is a deliberate lie about a call that succeeded, so it is fenced. It fires only when
+something was actually heard and a reply is genuinely outstanding, which leaves an idle
+poll a plain success - and idle polls are most of them, so the error stays rare enough to
+mean something. The bounce is flagged regardless of the setting, because that one is not a
+lie: the call was asked to listen and refused. And the setting exists at all because this
+repo already knows clients count consecutive failures and end sessions; if that happens,
+turning it off is a config line rather than a code change.
 
-**Swapping the predicate quietly moved two other settings.** `min_speech_seconds` guards
-against a click being taken for a phrase, and it used to be met by room tone alone - so at
-0.3s it was no test at all. Counting real speech made it a real test, and "No." and "Stop."
-were dropped without trace. It is 0.15s now, and losing "stop" is the kind of failure worth
-a test of its own. Silero also needs hysteresis, which its own implementation has and this
-did not: speech starts at `vad_threshold` and holds until `vad_threshold - vad_hysteresis`,
-so a quiet consonant mid word is not a pause. Any predicate swapped in here has to be checked
-against both, because neither is visible in the loop that uses them.
+**What is genuinely left, stated plainly.** Sampling is the only mechanism in MCP that
+would truly enforce this: `sampling/createMessage` lets the server ask the client to run a
+completion, so `converse()` could obtain the reply itself and speak it without ever
+returning - no turn boundary for the agent to end. It was not built, for two reasons.
+Whether a given client advertises `sampling` is unknown until it connects, which is why
+capabilities are now logged on the first tool call. And on a single-slot llama-server it
+would thrash the KV cache: an 80k agent prompt and a 500 token sampling prompt evicting
+each other means reprocessing the agent's prompt every turn. It also reintroduces JARVIS
+composing speech, which is the thing removed further up this file.
 
-One trap worth knowing: `sr.Microphone(sample_rate=None)` - the default - opens at the
-*device's* rate, 44100 on this mic, and Silero only accepts 512 samples of 16 kHz. Nothing
-errors; the frames are simply not the length it thinks, and the scores are junk. The rate is
-passed explicitly now, and `_run` warns if a source turns up at anything else. The tell was a
-probe reading 517 frames in 6s where 188 were due - exactly 44100/16000.
+Elicitation and `InputRequiredResult` do not help - both route to the human, not to the
+model. Absent sampling, an agent that ends its turn with prose and calls nothing at all is
+reachable only by the error flag, and that is a client behaviour rather than a guarantee.
 
-`EnergyDetector` is kept, as `audio.vad = "energy"` and as the automatic fallback if
-onnxruntime will not load. It is also the only thing `calibration_seconds`,
-`min_energy_threshold` and `dynamic_energy_threshold` still affect - in silero mode there is
-no threshold to calibrate, and startup skips it.
+**Name the decision, not the mechanism.** The pair used to be `say` and `wait_for_speech`,
+and the second name stopped being true the moment `then="listen"` became the ordinary way to
+hear someone: it read as the canonical listening primitive while actually being the minority
+path. `stay_silent` fixed that by naming the choice rather than the mechanism.
 
-Reading the device directly also makes the echo gate trivial. `listen_in_background` only
-hands a phrase over once it *ends*, so a mute flag checked on delivery says nothing about
-when the audio was recorded - JARVIS speaks, the listener is mid-phrase recording it,
-`unmute()` drains an empty queue, and only then does the phrase arrive, unmuted and full of
-JARVIS's own voice. Gating each buffer as it is read needs no such reasoning. `EchoGuard` in
-`echo.py` is the second line of defence, comparing new transcripts against what was recently
-spoken - hearing yourself is lossy and usually clips the start, so it matches on containment
-or a similarity ratio rather than equality.
-
-There is also a floor under the calibrated energy threshold. A quiet room calibrates to
-single digits, which is sensitive enough to hear the speakers at all, and no amount of gating
-helps if the mic is straining to pick up its own output.
-
-**Pausing stops the capture, not the delivery.** `Transcript.pause()` only kept utterances out
-of the ring and out of `/heard`. Everything upstream carried on: the phrase was captured, a
-Whisper inference was paid for, `[id] text` was logged to the console, and `_append_to_file`
-wrote it to `heard.jsonl` regardless. So a paused JARVIS still transcribed you to disk, which
-is the opposite of what the key press looks like it does.
-
-The gate belongs in `_accepting()` in `microphone.py`, next to the echo gate, where it is
-checked per buffer - nothing is queued, so nothing is transcribed, logged or written. It needs
-its own flag rather than reusing `mute()`: a reply ending calls `unmute()`, and one shared
-flag would have a finished sentence quietly lift a pause the user asked for. `pause()` also
-drains the queue, since a phrase arriving a second after the key is pressed is exactly the
-surprise being removed.
-
-`Transcript.pause()` stays as the second line. A phrase captured just before the key was
-pressed can still be mid-transcription when it lands, and that one is genuinely pre-pause
-audio, so it is recorded but not delivered.
-
-Note what this does not do: the audio device stays open, so the operating system still shows
-the microphone as in use. Closing and reopening it on a hotkey means re-acquiring a device
-that may be busy, and re-calibrating in energy mode. If the OS indicator is the point rather
-than the transcript, that is the change to make, and it is a bigger one.
-
-**Load the Whisper model once, and prove the device works before trusting it.**
-speech_recognition's `recognize_faster_whisper` builds a fresh `WhisperModel` on every call,
-so using it means reloading weights from disk per utterance. Worse, `WhisperModel.transcribe`
-returns a *generator* - constructing a model on a broken CUDA install succeeds and the
-failure only lands on the first inference, one silent `None` per utterance forever. So
-`_load()` runs a real warm-up inference on a second of noise and falls back to CPU if that
-throws. A machine with a GPU but no CUDA runtime DLLs (`cublas64_12.dll` and friends) hits
-exactly this, and the fallback is what makes it work there at all. `base.en` on CPU
-transcribes a short phrase in under 0.3s.
-
-**Transcription cost is non-linear in utterance length, and that is a CPU problem.**
-Measured with `small.en`: 5.5s of speech takes 0.99s on CPU and 0.16s on CUDA, but 22s of
-speech takes 12.06s on CPU against 3.12s on CUDA. A short sentence is fine either way; a
-long one is not. The penalty lands exactly when someone has explained something at length
-and is most expecting an answer, so on CPU it reads as the assistant being erratic rather
-than slow. If the delay ever needs chasing, measure against utterance length before
-touching anything else.
-
-**Build TTS backends on the thread that uses them.** Both SAPI (COM apartment affinity) and
-pygame hold thread-affine resources. `SpeechEngine` takes a factory and calls it inside the
-worker. Building on the main thread and calling from the worker gets you silence or a hang.
-
-**Cancel SAPI from the thread that owns it, not from the caller.** `speak()` hands SAPI the
-text asynchronously and polls `WaitUntilDone`, checking a flag between polls and issuing the
-purge itself; `stop()` makes no COM call at all. It used to speak synchronously and cancel with
-a purge from whichever thread called `interrupt()`, on the belief that a purge cuts a
-synchronous `Speak` short from outside. It does not. The voice lives in the apartment that
-created it, so a call from another thread has to be marshalled in, and that cannot happen while
-the worker is blocked inside `Speak` - the purge is delivered only once the utterance it was
-cancelling has ended, and it blocks the caller until then. Measured: `interrupt()` returned
-after 5.02s on a 4s utterance, against 0.000s and a cut at 1.12s afterwards. `close()` was
-paying that cost on every shutdown.
-
-**Count pending utterances, do not flag idleness.** `SpeechEngine` tracks a count under a
-`Condition` rather than setting an idle `Event`. A flag races: the worker can see an empty
-queue and mark itself idle in the window between `say()` incrementing and `say()` enqueueing,
-so `wait()` returns while an utterance is still to come.
+`converse` finishes the job, and this is a change of mind on the record. Asked directly
+whether the two should collapse into one call by that name, the answer here was no - `say`
+was short and blunt, rule 1 leaned on that, and `converse(text, then="keep_working")` looked
+self-contradictory. Two failed sessions later, the objection was about wording and the
+problem was about how many decisions a model makes at the end of a turn. `then="keep_working"`
+is a conversation with a pause in it, which is not a contradiction, and one tool that always
+looks the same beats two that are each individually well named.
 
 **The accessibility tree is not a prompt.** Handing the whole thing to a model does not
 work and the numbers say why: one Teams window is 810 nodes, Outlook in a browser 833,
@@ -337,9 +271,9 @@ debugging a misclick, and `screen.send_image` will send it to a model that can r
 target, text)` call. It is worse here, because the schema can then only say "text is
 sometimes required" - where `click(target, expecting)` and `type_text(target, expecting,
 text, then)` each state exactly what their own call needs, and a missing argument is
-rejected before the tool body runs. Same reasoning as `say(text, then=...)`.
+rejected before the tool body runs. Same reasoning as `converse(say, then)`.
 
-**`expecting` is checked, the way `already_spoke_my_reply` is.** A target number is
+**`expecting` is checked, the way an empty `say` is.** A target number is
 worthless on its own: a number from a scan taken before the list scrolled still resolves
 to a perfectly good coordinate, and that is how automation presses delete on the wrong
 row. So clicking requires the label as well, and refuses if the two disagree. The check
@@ -438,7 +372,7 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   because without AEC the microphone hears the speakers and the only defence is the text
   comparison in `echo.py`. Real AEC would make barge-in workable
 - Nothing tells the agent that speech arrived while it was busy. It only finds out when it
-  next calls `stay_silent`. An MCP notification could improve that, if clients honour it
+  next calls `converse`. An MCP notification could improve that, if clients honour it
 - Nothing fills the silence if the agent forgets to speak before slow work. That is
   deliberate - see above - but it does mean a forgetful agent sounds broken
 - Screen control has no undo and no dry run. `expecting` catches the wrong target but

@@ -10,6 +10,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Literal
 
+# At module level rather than deferred: the SDK resolves tool annotations from
+# module globals, so a `ctx: Context` parameter cannot see a local import. The
+# CLI only imports this module for the `mcp` command, so nothing else pays.
+import pydantic_core
+from mcp.server.mcpserver import Context, MCPServer
+from mcp_types import CallToolResult, TextContent
+
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
 from .screen import Screen, ScreenUnavailable, means_the_same
@@ -21,49 +28,49 @@ A microphone and a voice on the user's desktop.
 
 OFF BY DEFAULT. Being connected does not mean voice is wanted. Do not call these
 tools or start the service until asked. "jarvis" on its own means start listening
-now - stay_silent(because="starting_to_listen") at once, no text reply, nothing
-else first. So do
+now - converse(say="", then="listen") at once. Silently: no greeting, no text
+reply, nothing else first. So do
 "listen", "use voice", "talk to me". It ends when they say so or go back to typing.
 
-THE LOOP IS THE TOOL, NOT YOUR MEMORY. say() takes a required `then`:
+ONE TOOL DOES THE WHOLE LOOP: converse(). It speaks, then blocks and returns
+what they say next. Every turn of the conversation is one call to it.
 
-    say(answer,  then="listen")        speaks, then blocks and returns their reply
-    say(lead_in, then="keep_working")  speaks and returns at once, so you can work
+    converse(say="Ten thousand.",  then="listen")       speak, then hear the reply
+    converse(say="One moment.",    then="keep_working")  speak, return now, go work
+    converse(say="",               then="listen")        say nothing, just listen
 
-Answering and listening again are therefore ONE CALL. You cannot answer and then
-forget to listen - say() has already done it, and their next words are in the
-result you are reading.
+There is no separate listen tool to forget, and no second call to drop: the reply
+you are about to read came back from the same call that spoke. Every turn looks
+exactly like the last one, including the first.
 
-stay_silent is the other thing you can do with a turn: say nothing. It listens
-the same way, minus the speaking, and it takes a required `because`:
-
-    starting_to_listen | not_aimed_at_me | sounded_cut_off | already_spoke_my_reply
-
-The last one is checked against what actually went through the speakers. Write
-your reply as text, come here claiming you answered, and the call is refused.
+say="" while you owe them an answer is refused. You cannot claim you replied when
+nothing went through the speakers.
 
 THREE RULES:
 
-1. ANSWERING IS CALLING say(). NOTHING ELSE REACHES THEM!!
+1. ANSWERING IS CALLING converse(). NOTHING ELSE REACHES THEM!!
 
    They are LISTENING, NOT READING. They cannot see your chat, your thinking or
    your task result. Text you write goes NOWHERE.
 
    *** DECIDING TO SAY IT IS NOT SAYING IT! *** If you catch yourself thinking
-   "I should reply via say()" - STOP. Do not then write the reply out. EMIT THE
-   TOOL CALL. Writing the words instead of calling say() is the single most
-   common failure with these tools and is IDENTICAL TO IGNORING THEM.
+   "I should greet them back" or "I should reply" - that thought is not the
+   reply. Do not write it out. EMIT converse(). Writing the words instead of
+   calling converse() is the single most common failure with these tools and is
+   IDENTICAL TO IGNORING THEM. It happens most on the easy ones: a greeting
+   feels too small to need a tool, and it needs one exactly as much as anything
+   else does.
 
-   The moment you know what to tell them, your very next tool call is say().
+   The moment you know what to tell them, your very next output is converse().
    Not prose. Not one more search. If you have composed a sentence for the user,
-   it belongs in say(), not in your reply text - you may only write it out AFTER
-   the tool call has gone. Say it when a tool fails too: four failed searches
-   then silence reads as a crash.
+   it belongs in converse(say=...), and you may only write it out AFTER the call
+   has gone. Say it when a tool fails too: four failed searches then silence
+   reads as a crash.
 
 2. Silence is a valid reply. No wake word, so you hear everything - other people,
    videos, thinking aloud. Act only on what was aimed at you; for anything else
-   stay_silent(because="not_aimed_at_me"). Answering what nobody asked is
-   worse than missing one.
+   converse(say="", then="listen"). Answering what nobody asked is worse than
+   missing one.
 
 3. If it sounds cut off, listen again - do not ask them to repeat it. A phrase
    ends after a fixed silence, not when the speaker finishes, so a mid sentence
@@ -77,10 +84,10 @@ question that picks `then`:
 
    CAN I ANSWER THIS RIGHT NOW, FROM WHAT I ALREADY KNOW?
 
-   YES -> say(the answer, then="listen"). Done, and you are listening again.
+   YES -> converse(say=the answer, then="listen"). Done, and listening again.
    NO, it needs a search, a file, a command, anything at all ->
-        say("Let me have a look, sir.", then="keep_working")  <- before you start
-        ...then do the work, then say(the real answer, then="listen").
+        converse(say="Let me have a look, sir.", then="keep_working")  <- first
+        ...then the work, then converse(say=the answer, then="listen").
 
 That one line is all they need. Guess wrong towards speaking: they cannot see
 your screen, and silence is indistinguishable from a crash.
@@ -94,8 +101,8 @@ long paths. Say "sir" as a tendency not a rule - an acknowledgement, the end of 
 short answer, a greeting; once per reply at most, underdo it. Otherwise plain and
 unhurried, no theatrics.
 
-Either tool returning nothing heard means they have not spoken yet. Call
-stay_silent(because="already_spoke_my_reply") again."""
+Nothing heard means they have not spoken yet, not that anything is wrong.
+converse(say="", then="listen") again."""
 
 
 # Appended only when screen.control is on, because until it is there is nothing
@@ -114,7 +121,8 @@ refused rather than landing on whatever took its place. Look again after anythin
 you do: acting changes the numbers.
 
 This is the user's real pointer on their real desktop. Say what you are about to
-do before you do it, and say what happened after."""
+do before you do it, and say what happened after - and saying means converse(),
+same as everything else."""
 
 
 QUESTION_OPENERS = (
@@ -123,29 +131,45 @@ QUESTION_OPENERS = (
     "will", "would", "should", "shall", "have", "has", "am",
 )  # fmt: skip
 
-# Why a listen is not a say(). Naming it is the point: an agent that has just
-# written its reply out as prose has no honest answer here but
-# "already_spoke_my_reply", and that is the one the server can check.
-SilenceReason = Literal[
-    "starting_to_listen",
-    "not_aimed_at_me",
-    "sounded_cut_off",
-    "already_spoke_my_reply",
-]
-
-# Read at the moment the model picks its next tool call, so it says what to call
-# and little else. Length was the problem: the decision used to sit in the middle
-# of five competing clauses, and `detail` came after it, so the last thing read
-# before deciding was a copy of `heard` with timestamps. next_step goes last now.
-ANSWER_OR_STAY_QUIET = (
-    "Can you answer right now, from what you know? "
-    'say(it, then="listen") - that speaks AND listens, so their reply comes back here. '
-    'Needs a search, a file, a command? say(one line, then="keep_working") FIRST, in '
-    "your own words, so they know you heard: let me take a look, one moment. Then the "
-    'work, however many tool calls it takes, and say(the answer, then="listen"). '
-    "NOTHING YOU WRITE REACHES THEM, ONLY say(). "
-    "Not for you, or cut off mid sentence? stay_silent, and say why."
+# The last thing read before the model picks its next output, so it is an
+# instruction and nothing else. Three things were wrong with the version before
+# it: `detail` sat between this and the decision, it opened with a question -
+# which a model answers in prose, because that is what questions are for - and
+# it ended on the name of the tool that does not speak. It now opens and closes
+# on the same imperative, and there is nothing else in the result to compete.
+REPLY_WITH_CONVERSE = (
+    "Your next output is a tool call, not prose. They are LISTENING, NOT READING: "
+    "anything you type is discarded unread, including a greeting."
+    + "\n"
+    + '  converse(say="the answer", then="listen")        you can answer now'
+    + "\n"
+    + '  converse(say="one moment, sir", then="keep_working")  it needs a look first'
+    + "\n"
+    + '  converse(say="", then="listen")                  it was not aimed at you'
+    + "\n"
+    + "Short and easy is still a tool call. Do not write the reply out. "
+    "EMIT converse()."
 )
+
+
+def as_error(payload: dict) -> CallToolResult:
+    """The same payload, flagged so the client will not let the turn end on it.
+
+    A fallback for models that forget the call. Nothing in MCP can require a
+    tool call to happen - see DESIGN.md - but an agent that will end its turn on
+    a tool result will not end it on a tool *error*: an error is the one signal
+    every client treats as unfinished business rather than as an answer. A model
+    that reliably calls converse() never sees this and is unaffected; a
+    forgetful one gets the shove it needs.
+
+    It is a deliberate lie about a call that succeeded. Two things keep it
+    honest enough to live with. It only fires when the user actually spoke and a
+    reply is genuinely outstanding, so an idle poll is still a plain success.
+    And `service.force_a_reply` switches it off, for a client that counts
+    consecutive errors and gives up rather than pressing on.
+    """
+    body = pydantic_core.to_json(payload, fallback=str, indent=2).decode()
+    return CallToolResult(content=[TextContent(type="text", text=body)], is_error=True)
 
 
 def age_seconds(item: dict, now: datetime | None = None) -> float | None:
@@ -162,8 +186,9 @@ def age_seconds(item: dict, now: datetime | None = None) -> float | None:
 def looks_like_a_question(text: str) -> bool:
     """Whether an utterance was plainly asking for an answer.
 
-    Only questions are chased up when no reply follows - most silence is
-    correct, so anything less clear-cut is left alone.
+    It used to decide whether an unanswered utterance was chased at all, which
+    let "Hey Jarvis" through - so everything is chased now and this only picks
+    the wording, asked against said.
     """
     stripped = text.strip().lower()
     if not stripped:
@@ -179,9 +204,7 @@ def build_server(
     client: VoiceClient | None = None,
     screen: Screen | None = None,
 ):
-    """Construct the MCP server. Import is deferred so the CLI stays fast."""
-    from mcp.server.mcpserver import MCPServer
-
+    """Construct the MCP server."""
     from . import __version__, hands
 
     config = config or Config.load()
@@ -195,6 +218,7 @@ def build_server(
     quiet_calls = 0
     first_listen = True
     complained_about_marks = False
+    logged_capabilities = False
 
     server = MCPServer(
         name="jarvis",
@@ -204,7 +228,7 @@ def build_server(
     )
 
     def listen(wait: float) -> dict:
-        """One turn of listening, shared by stay_silent and say(then="listen")."""
+        """The listening half of converse(), and the whole of it when say is empty."""
         nonlocal cursor, unanswered, quiet_calls, first_listen
 
         # "Start listening" means from now, not from whenever the client
@@ -237,8 +261,9 @@ def build_server(
                 "waited_seconds": waited,
                 "next_step": (
                     f"Not an error - the user has simply been quiet for {waited}s. "
-                    "This is the expected idle result. Call stay_silent again; "
-                    "it will return the moment they speak."
+                    "This is the expected idle result. Call "
+                    'converse(say="", then="listen") again; it returns the moment '
+                    "they speak."
                 ),
             }
         quiet_calls = 0
@@ -255,80 +280,132 @@ def build_server(
 
         spoken_text = [item["text"] for item in heard]
         unanswered = spoken_text[-1]
-        payload = {"heard": spoken_text, "detail": heard}
+        # No `detail`. It was eight lines of id and timestamp for a two word
+        # greeting, sitting between the words and the instruction, and nothing
+        # ever read it - the one thing it carried that mattered is below.
+        payload = {"heard": spoken_text}
         stale_after = config.service.stale_after_seconds
         if stale_after > 0 and newest_age is not None and newest_age > stale_after:
             payload["stale"] = (
                 f"This was said {int(newest_age)}s ago, while nobody was listening. "
                 "Treat it as a leftover rather than a live request: unless it plainly "
-                "still needs doing, keep quiet and call stay_silent again."
+                'still needs doing, keep quiet - converse(say="", then="listen").'
             )
-        payload["next_step"] = ANSWER_OR_STAY_QUIET
+        payload["next_step"] = REPLY_WITH_CONVERSE
         return payload
 
     @server.tool(
-        name="stay_silent",
-        title="Say nothing, and listen for what comes next",
+        name="converse",
+        title="Speak, and hear what they say next",
         description=(
-            "Decide to say nothing, and block until the user speaks. Listens exactly "
-            'as say(text, then="listen") does, minus the speaking. Two uses and no '
-            "others: entering the conversation, and listening again after judging that "
-            "a reply was not wanted. IT IS NOT HOW YOU ANSWER.\n\n"
-            "`because` is required. Choosing this over say() leaves them sitting in "
-            "silence, and only a few things make that right:\n"
-            "  starting_to_listen     entering voice mode; nothing said yet\n"
-            "  not_aimed_at_me        heard, but not addressed to you - stay quiet\n"
-            "  sounded_cut_off        the rest of the sentence is still coming\n"
-            "  already_spoke_my_reply you have called say() and want to hear more\n\n"
-            "That last one is checked. Writing your reply as text and then coming "
-            "here is the failure this argument exists to catch - nothing you write "
-            "reaches them, so the call is refused and you are sent back to say().\n\n"
-            "Waits as long as it can - there is no timeout to tune. Nothing heard "
-            "means the client's own limit was reached, not the user's patience: call "
-            "it again. There is no wake word, so some of what comes back will not be "
-            "for you."
+            "One turn of the conversation. Speaks `say` aloud, then blocks until the "
+            "user speaks and returns what they said. Speaking and listening are the "
+            "same call, so there is no second call to forget and no other tool to "
+            "choose - every turn of a voice session is this one, including the "
+            "first.\n\n"
+            "`say` is required and it is the whole point. The user is LISTENING, NOT "
+            "READING: text you write into your reply is discarded unread, so a reply "
+            "that is not in `say` was never delivered. That is true of short easy "
+            "ones too - a greeting feels too small to spend a tool call on and needs "
+            "one exactly as much as anything else.\n\n"
+            'say="" listens without speaking. Two honest uses: entering voice mode, '
+            "and hearing something that was not aimed at you - there is no wake word, "
+            "so some of what comes back is other people, videos, or thinking aloud. "
+            "It is refused if you owe them an answer, because then it is a claim to "
+            "have replied when nothing went through the speakers.\n\n"
+            '`then` is the other decision. then="listen" means this IS the reply; it '
+            'waits for what comes next. then="keep_working" means a holding line '
+            "before a search, a file or a command, and returns at once so you can get "
+            "on with it, however many tool calls that takes, and the real answer "
+            "follows in the next converse(). Compose that line in your own words - one "
+            "fixed phrase every time sounds like a machine. Guess wrong towards "
+            "speaking: they cannot see your screen, and silence is indistinguishable "
+            "from a crash.\n\n"
+            "Read aloud by a synthesiser, so keep it short and plain: no markdown, "
+            "lists or emoji, they get pronounced. Waits as long as it can and there is "
+            "no timeout to tune; nothing heard means the client's own limit was "
+            "reached, not the user's patience."
         ),
     )
-    def stay_silent(because: SilenceReason) -> dict:
-        # No timeout argument on purpose. Given one, models pick a small number
-        # and give up while the user is still deciding what to say.
-        nonlocal unanswered
+    def converse(say: str, then: Literal["listen", "keep_working"], ctx: Context):
+        nonlocal unanswered, logged_capabilities
+        spoken = say.strip()
 
-        # The one claim here that is checkable, and the only hard refusal: it did
-        # not speak, so whatever it thinks it replied went nowhere. Every other
-        # reason still goes through, so this cannot deadlock - the way out is in
-        # the enum rather than in a retry counter.
-        if unanswered is not None and because == "already_spoke_my_reply":
-            return {
-                "heard": [],
-                "listening": False,
-                "next_step": (
-                    f'You have not called say() since they said "{unanswered}", so '
-                    "nothing you wrote was heard and this call did not listen. Take the "
-                    'words you just wrote and pass them to say(text, then="listen") - '
-                    "that speaks them AND listens, so you lose nothing by doing it "
-                    "properly. If they really were not talking to you, come back with "
-                    "not_aimed_at_me and this will go through."
-                ),
-            }
+        # Once per session, because it decides what is even possible here. A
+        # client advertising `sampling` can be asked to run a completion, which
+        # is the only mechanism in MCP that lets the server obtain model output
+        # rather than wait to be called - see DESIGN.md on what cannot be
+        # enforced. Without it there is no way to make a reply happen.
+        if not logged_capabilities:
+            logged_capabilities = True
+            logger.info("Client capabilities: %s", _capabilities(ctx))
 
-        # Bounced, not blocked. Refusing outright deadlocks a session against an
-        # agent that has correctly decided to keep quiet, so this costs one cheap
-        # round trip and the next call goes through either way.
-        if unanswered is not None and looks_like_a_question(unanswered):
+        # The one refusable claim, and the reason `say` is a string rather than
+        # an enum of excuses: an empty one while a reply is owed IS the claim to
+        # have answered, and it is checkable against what actually went through
+        # the speakers. Bounced rather than blocked - the second call goes
+        # through either way, so an agent that has correctly decided to keep
+        # quiet cannot be wedged.
+        if not spoken and unanswered is not None:
             missed, unanswered = unanswered, None
+            # Any unanswered utterance, not only the ones that parse as
+            # questions. "Hey Jarvis" is not a question and is exactly what went
+            # unanswered in practice. It self-clears, so the cost of being wrong
+            # is one cheap round trip and the next call goes through - which is
+            # what keeps a room with a television in it from wedging.
+            asked = "asked" if looks_like_a_question(missed) else "said"
+            # An error whatever `force_a_reply` says, because this one is not a
+            # white lie: the call was asked to listen and refused.
+            return as_error(
+                {
+                    "spoke": False,
+                    "heard": [],
+                    "error": (
+                        f'They {asked} "{missed}" and nothing has gone through the '
+                        "speakers since, so this call did not listen. Whatever you were "
+                        "about to type, or just typed, put it in "
+                        'converse(say=..., then="listen") - that speaks it AND listens, '
+                        "so replying properly costs you nothing. If it really was not "
+                        "for you, call this again and it will go through."
+                    ),
+                }
+            )
+
+        if spoken:
+            try:
+                voice.say(spoken)
+            except ServiceUnavailable as exc:
+                logger.warning("Say failed - %s", exc)
+                return {"spoke": False, "error": str(exc)}
+
+        if then == "keep_working":
+            # The reply is still owed. By its own declaration this line was not
+            # it, so a lead-in followed by silence is still caught.
+            logger.info("Spoke a lead-in, not listening yet.")
             return {
-                "heard": [],
-                "listening": False,
+                "spoke": bool(spoken),
+                "said": spoken,
                 "next_step": (
-                    f'You were asked "{missed}" and never spoke an answer, so this call '
-                    'did not listen. Worked one out? say(it, then="listen") now - that '
-                    "speaks and listens in one go, so answering costs you nothing. Still "
-                    "sure it was not for you, or that it was cut off? Call stay_silent "
-                    "again and it will go through."
+                    "Spoken, and NOT listening - you have just told them you would go "
+                    "and look, so go and do it now. However many tool calls it takes, "
+                    'then converse(say=the answer, then="listen").'
                 ),
             }
-        return listen(config.service.max_wait_seconds)
+
+        if spoken:
+            unanswered = None
+            logger.info("Spoke, now listening for the reply.")
+        # Speech plays on the service's own thread with the microphone muted
+        # until it finishes, so listening from here costs nothing extra.
+        result = listen(config.service.max_wait_seconds)
+        if spoken:
+            result = {"spoke": True, "said": spoken, **result}
+        # Nothing heard means nothing is owed, so an idle poll stays a plain
+        # success. That is most of them, which keeps the error rare enough to
+        # still mean something when it does fire.
+        if config.service.force_a_reply and result.get("heard"):
+            return as_error(result)
+        return result
 
     @server.tool(
         name="check_for_speech",
@@ -363,53 +440,6 @@ def build_server(
             ),
             "detail": heard,
         }
-
-    @server.tool(
-        name="say",
-        title="Speak to the user, and listen for the reply",
-        description=(
-            "Speak text aloud through the user's speakers. Every answer and every "
-            "outcome goes through here - the user is listening, not reading, so a "
-            "reply you only write down never reaches them. "
-            "`then` is required, and it asks what you were deciding anyway: is this "
-            "the reply, or a holding line before some work? "
-            'then="listen" means this IS the reply. It speaks, then blocks for what '
-            "they say next and returns it, exactly as stay_silent would, so the "
-            'conversation carries on by itself. then="keep_working" means a lead-in '
-            "before a search, a file or a command. It returns at once so you can get "
-            'on with it, and the real answer follows with then="listen". '
-            "Keep it short and plain: no markdown, lists or emoji, they get read out "
-            "literally. The microphone is muted while speaking, so JARVIS does not "
-            "transcribe itself."
-        ),
-    )
-    def say(text: str, then: Literal["listen", "keep_working"]) -> dict:
-        nonlocal unanswered
-        try:
-            voice.say(text)
-        except ServiceUnavailable as exc:
-            logger.warning("Say failed - %s", exc)
-            return {"error": str(exc), "spoken": False}
-        if then == "keep_working":
-            # The reply is still owed. By its own declaration this line was not
-            # it, so a lead-in followed by silence is still caught.
-            logger.info("Spoke a lead-in, not listening yet.")
-            return {
-                "spoken": True,
-                "text": text,
-                "next_step": (
-                    "Spoken, and NOT listening - you have just told them you would go "
-                    "and look, so go and do it now. However many tool calls it takes, "
-                    'then say(the answer, then="listen").'
-                ),
-            }
-        unanswered = None
-        # Speech plays on the service's own thread and the microphone stays muted
-        # until it finishes, so listening from here costs nothing extra - and it
-        # cannot hear anyone who replies before JARVIS has stopped talking, which
-        # was equally true of say() followed by stay_silent.
-        logger.info("Spoke, now listening for the reply.")
-        return {"spoken": True, "text": text, **listen(config.service.max_wait_seconds)}
 
     @server.tool(
         name="pause_transcription",
@@ -603,7 +633,7 @@ def build_server(
         described["screenshot"] = str(path)
         described["next_step"] = (
             "The picture is attached. Describe what the user needs from it and say it "
-            'with say(..., then="listen") - they cannot see your reply text. To act on '
+            'with converse(say=..., then="listen") - they cannot see your reply text. To act on '
             "anything in it, call look_at_screen and use the numbers."
         )
         from mcp.server.mcpserver.utilities.types import Image
@@ -767,6 +797,25 @@ def build_server(
             return {"error": str(exc), "listening": False}
 
     return server
+
+
+def _capabilities(ctx) -> str:
+    """What the client says it can do, or why we could not ask.
+
+    `sampling` is the one that matters: a client advertising it can be asked to
+    run a completion, which is the only way in MCP for the server to obtain
+    model output rather than sit and wait to be called again. Everything else
+    here is enforcement of calls that happen; that would be enforcement of a
+    call happening at all.
+    """
+    try:
+        reported = ctx.client_capabilities()
+    except Exception as exc:  # no request context, e.g. called directly in a test
+        return f"unavailable ({type(exc).__name__})"
+    if reported is None:
+        return "none reported"
+    named = [name for name, value in reported.model_dump().items() if value is not None]
+    return ", ".join(named) or "none"
 
 
 def _initial_cursor(voice: VoiceClient) -> int:

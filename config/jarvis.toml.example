@@ -85,8 +85,8 @@ volume = 1.0
 # is no auth, so do not bind this to anything routable.
 host = "127.0.0.1"
 port = 8770
-# Longest a single stay_silent may block. Keep it under the agent's own tool
-# timeout (Cline's is around 60s) so the agent re-calls rather than erroring.
+# Longest a single converse() call may block. Keep it under the agent's own
+# tool timeout (Cline's is around 60s) so the agent re-calls rather than erroring.
 max_wait_seconds = 55.0
 transcript_file = "heard.jsonl"
 # Past this, an utterance is flagged to the agent as backlog rather than a live
@@ -95,6 +95,13 @@ stale_after_seconds = 120.0
 # Key that stops and starts listening, from anywhere. Empty disables it. The hook
 # is global and does not swallow the keypress, so avoid keys you type with.
 hotkey = "end"
+# Hand speech back as a tool *error* rather than a result, so a client will not
+# let the turn end on it. A fallback for models that forget to call converse()
+# and answer in chat text instead, where nothing reaches the user. Only fires
+# when something was actually heard and a reply is outstanding - an idle poll
+# stays a plain success. Turn it off if a client counts consecutive errors and
+# gives up instead of pressing on.
+force_a_reply = true
 
 [screen]
 # Seeing the desktop and acting on it. Looking is always allowed - it reads the

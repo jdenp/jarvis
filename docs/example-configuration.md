@@ -99,7 +99,7 @@ compacted.
 Compaction is the fragile part of a voice session. It runs as a hub command against a timeout
 hardcoded at 30 seconds, with no setting or environment variable behind it. In
 `hub-daemon.log` the calls that land take 21-32ms, so when one fails at 30s the command was
-never serviced rather than slow - and a `stay_silent` long poll holding a tool call open
+never serviced rather than slow - and a `converse()` long poll holding a tool call open
 for up to `max_wait_seconds` is the obvious suspect. Compacting less often is the cheap
 mitigation.
 
