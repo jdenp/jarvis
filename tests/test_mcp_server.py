@@ -1,7 +1,9 @@
 """The agent-facing tools.
 
-Staying silent is a correct outcome, so an unanswered utterance is reported as a
-note and never as a refusal.
+The loop lives in the tools, not in the agent's memory: say() takes a required
+`then`, and `then="listen"` does the listening itself. Staying silent is still a
+correct outcome, so nothing here can deadlock an agent that has chosen to keep
+quiet - the most an unanswered question costs is a single bounced call.
 """
 
 from __future__ import annotations
@@ -14,6 +16,10 @@ import pytest
 
 from jarvis.config import Config
 from jarvis.mcp_server import build_server
+
+# stay_silent has to say why it is not speaking. These are the honest ones.
+SILENT = {"because": "not_aimed_at_me"}
+CLAIMS_ANSWERED = {"because": "already_spoke_my_reply"}
 
 
 class FakeVoice:
@@ -55,9 +61,9 @@ def rig():
 
 def test_speech_comes_back_with_the_judgement_call_attached(rig):
     _, _voice, raw = rig
-    result = raw("wait_for_speech")
+    result = raw("stay_silent", SILENT)
     assert "what time is it" in result
-    assert "Can you answer right now? say() it." in result, "the decision, first"
+    assert "Can you answer right now" in result, "the decision, first"
 
 
 def test_the_lead_in_rule_is_at_the_decision_point(rig):
@@ -65,8 +71,8 @@ def test_the_lead_in_rule_is_at_the_decision_point(rig):
     long way back - while this result said "do the work, then call say() with the
     answer". The nearer text won, so the agent worked in silence instead."""
     _, _voice, raw = rig
-    result = raw("wait_for_speech")
-    assert "say one short line FIRST" in result, "before the work, not after"
+    result = raw("stay_silent", SILENT)
+    assert "keep_working" in result and "FIRST" in result, "before the work, not after"
     assert "in your own words" in result, "composed, not recited - one fixed line sounds robotic"
     assert "however many tool calls it takes" in result, "the work is not one call"
     assert "Do the work, then" not in result, "the contradiction is gone"
@@ -76,63 +82,110 @@ def test_the_instruction_is_short_and_read_last(rig):
     """A small model given five competing clauses picks whichever it read last, and
     `detail` used to be after this one."""
     _, _voice, raw = rig
-    result = raw("wait_for_speech")
+    result = raw("stay_silent", SILENT)
     start = result.index("Can you answer right now")
-    end = result.index("wait_for_speech again.", start)
+    end = result.index("stay_silent, and say why.", start)
     assert end - start < 480, f"the instruction spans {end - start} characters"
     assert result.rindex("next_step") > result.rindex("detail")
 
 
-def test_staying_silent_is_not_refused(rig):
+def test_say_will_not_run_without_saying_what_happens_next(rig):
+    """The whole point. Remembering to listen again was the agent's job and it
+    forgot; now the argument is required, so a call that omits it never runs."""
+    server, voice, _raw = rig
+    with pytest.raises(Exception, match="then"):
+        asyncio.run(server.call_tool("say", {"text": "Half past two, sir."}))
+    assert voice.said == [], "nothing was spoken either"
+
+
+def test_only_the_two_endings_are_accepted(rig):
+    server, _voice, _raw = rig
+    with pytest.raises(Exception, match="listen"):
+        asyncio.run(server.call_tool("say", {"text": "Right.", "then": "finish"}))
+
+
+def test_answering_speaks_and_listens_in_one_call(rig):
+    """The loop closes inside the tool. There is no second call to forget."""
+    _, voice, raw = rig
+    voice.next_heard = [{"text": "and what about tomorrow", "id": 2}]
+    result = raw("say", {"text": "Half past two, sir.", "then": "listen"})
+    assert voice.said == ["Half past two, sir."]
+    assert "spoken" in result
+    assert "and what about tomorrow" in result, "their reply, in the same result"
+
+
+def test_a_lead_in_speaks_and_gets_out_of_the_way(rig):
+    """The other half of the fork: a holding line must not block on the reply,
+    or the work never starts."""
+    _, voice, raw = rig
+    result = raw("say", {"text": "Let me have a look, sir.", "then": "keep_working"})
+    assert voice.said == ["Let me have a look, sir."]
+    assert "what time is it" not in result, "it did not listen"
+    assert "NOT listening" in result and "go and do it now" in result
+
+
+def test_a_lead_in_points_back_at_listening_afterwards(rig):
+    _, _voice, raw = rig
+    result = raw("say", {"text": "One moment.", "then": "keep_working"})
+    assert "then=" in result and "listen" in result
+
+
+def test_staying_silent_is_never_blocked_for_long(rig):
     """The old behaviour blocked until say() was called. With no wake word that
     is wrong - most utterances deserve no reply, and refusing deadlocked the
-    session against an agent that had correctly decided to keep quiet."""
+    session against an agent that had correctly decided to keep quiet. One
+    bounce, then it goes through."""
     _, _voice, raw = rig
-    raw("wait_for_speech")
-    second = raw("wait_for_speech")
-    assert "refused" not in second
-    assert "what time is it" in second, "still listening, not blocked"
+    raw("stay_silent", SILENT)  # "what time is it" - a question, now owed an answer
+    bounced = raw("stay_silent", SILENT)
+    assert "did not listen" in bounced
+    assert "what time is it" in raw("stay_silent", SILENT), "still listening, not blocked"
 
 
-def test_silence_is_never_chased_up(rig):
-    """A run of background chatter should not accumulate reminders - nagging an
-    agent that is correctly keeping quiet only pushes it into replying."""
+def test_an_unanswered_question_bounces_the_next_listen(rig):
+    """The failure this guards: the agent works out an answer, then listens again
+    instead of speaking, and the user hears nothing. A note in the payload was
+    ignorable; a call that does not listen is not."""
     _, _voice, raw = rig
-    for _ in range(4):
-        assert "did not reply" not in raw("wait_for_speech")
-
-
-def test_an_unanswered_question_is_raised_once(rig):
-    """The failure this guards: the agent works out an answer, then calls
-    wait_for_speech instead of say, and the user hears nothing."""
-    _, _voice, raw = rig
-    raw("wait_for_speech")  # "what time is it" - a question
-    second = raw("wait_for_speech")
-    assert "never spoke an answer" in second
-    third = raw("wait_for_speech")
-    assert "never spoke an answer" in third, "still outstanding, still raised"
+    raw("stay_silent", SILENT)
+    bounced = raw("stay_silent", SILENT)
+    assert "never spoke an answer" in bounced
+    assert "listening" in bounced, "and it says so, rather than looking like an error"
+    assert "did not listen" in bounced, "the call really was skipped"
+    assert "say(it," in bounced, "the way out is offered, not just the complaint"
 
 
 def test_answering_clears_it(rig):
+    _, voice, raw = rig
+    raw("stay_silent", SILENT)  # "what time is it"
+    voice.next_heard = [{"text": "right, thanks", "id": 2}]
+    raw("say", {"text": "Half past two, sir.", "then": "listen"})
+    assert "never spoke an answer" not in raw("stay_silent", SILENT)
+
+
+def test_a_lead_in_does_not_settle_it(rig):
+    """A "let me have a look" is not an answer, and the tool was told as much by
+    `then`. A lead-in followed by silence is the worst outcome of the lot."""
     _, _voice, raw = rig
-    raw("wait_for_speech")
-    raw("say", {"text": "Half past two, sir."})
-    assert "never spoke an answer" not in raw("wait_for_speech")
+    raw("stay_silent", SILENT)
+    raw("say", {"text": "Let me check, sir.", "then": "keep_working"})
+    assert "never spoke an answer" in raw("stay_silent", SILENT)
 
 
-def test_silence_after_a_non_question_is_never_raised(rig):
+def test_a_lead_in_is_not_an_answer_to_claim(rig):
+    _, _voice, raw = rig
+    raw("stay_silent", SILENT)
+    raw("say", {"text": "Let me check, sir.", "then": "keep_working"})
+    assert "have not called say()" in raw("stay_silent", CLAIMS_ANSWERED)
+
+
+def test_silence_after_a_non_question_is_never_chased(rig):
     """Most silence is correct. Chasing it pushes the agent into answering
     things nobody asked."""
     _, voice, raw = rig
     voice.next_heard = [{"text": "and the other thing"}]
-    raw("wait_for_speech")
-    assert "never spoke an answer" not in raw("wait_for_speech")
-
-
-def test_say_still_reaches_the_service(rig):
-    _, voice, raw = rig
-    assert "spoken" in raw("say", {"text": "Right you are."})
-    assert voice.said == ["Right you are."]
+    for _ in range(4):
+        assert "never spoke an answer" not in raw("stay_silent", SILENT)
 
 
 def test_idle_returns_are_not_identical(rig):
@@ -141,7 +194,7 @@ def test_idle_returns_are_not_identical(rig):
     _, voice, raw = rig
     voice.next_heard = []
 
-    results = [raw("wait_for_speech") for _ in range(3)]
+    results = [raw("stay_silent", SILENT) for _ in range(3)]
     assert all("Not an error" in r for r in results)
     assert len(set(results)) == 3, "each idle result differs from the last"
     assert "waited_seconds" in results[0]
@@ -150,15 +203,25 @@ def test_idle_returns_are_not_identical(rig):
 def test_the_idle_counter_resets_once_something_is_said(rig):
     _, voice, raw = rig
     voice.next_heard = []
-    raw("wait_for_speech")
-    raw("wait_for_speech")
+    raw("stay_silent", SILENT)
+    raw("stay_silent", SILENT)
 
     voice.next_heard = [{"text": "right, carry on", "id": 9}]
-    assert "waited_seconds" not in raw("wait_for_speech")
+    assert "waited_seconds" not in raw("stay_silent", SILENT)
 
     voice.next_heard = []
-    first_idle_again = raw("wait_for_speech")
+    first_idle_again = raw("stay_silent", SILENT)
     assert '"waited_seconds": 240' in first_idle_again or "waited_seconds" in first_idle_again
+
+
+def test_a_quiet_answer_still_returns_something_useful(rig):
+    """say(then="listen") into a quiet room must read as idle, not as a failure."""
+    _, voice, raw = rig
+    voice.next_heard = []
+    result = raw("say", {"text": "Ten thousand.", "then": "listen"})
+    assert voice.said == ["Ten thousand."]
+    assert "spoken" in result
+    assert "Not an error" in result
 
 
 def test_backlog_from_before_the_first_listen_is_skipped():
@@ -180,15 +243,15 @@ def test_backlog_from_before_the_first_listen_is_skipped():
 
     voice = DriftingVoice()
     server = build_server(Config(), client=voice)
-    voice.cursor = 7  # spoken between launch and the first wait_for_speech
+    voice.cursor = 7  # spoken between launch and the first stay_silent
 
-    asyncio.run(server.call_tool("wait_for_speech", {}))
+    asyncio.run(server.call_tool("stay_silent", SILENT))
     assert asked_from == [7], "listening starts from now, not from launch"
 
     # After that, nothing is skipped: a queued utterance is one spoken while the
     # agent was busy, which is exactly what it must not miss.
     voice.cursor = 12
-    asyncio.run(server.call_tool("wait_for_speech", {}))
+    asyncio.run(server.call_tool("say", {"text": "Right you are.", "then": "listen"}))
     assert asked_from[1] == 7
 
 
@@ -200,7 +263,7 @@ def _heard_at(text: str, ago: float) -> dict:
 def test_an_old_utterance_is_flagged_as_a_leftover(rig):
     _, voice, raw = rig
     voice.next_heard = [_heard_at("thank you", ago=1200)]
-    result = raw("wait_for_speech")
+    result = raw("stay_silent", SILENT)
     assert "stale" in result
     assert "1200s ago" in result
     assert "said_seconds_ago" in result
@@ -209,17 +272,26 @@ def test_an_old_utterance_is_flagged_as_a_leftover(rig):
 def test_something_just_said_is_not_flagged(rig):
     _, voice, raw = rig
     voice.next_heard = [_heard_at("what time is it", ago=2)]
-    result = raw("wait_for_speech")
+    result = raw("stay_silent", SILENT)
     assert "stale" not in result
     assert "said_seconds_ago" in result
 
 
-def test_speaking_does_not_end_the_conversation(rig):
-    """Ending the turn after say() looks like walking off mid sentence."""
+def test_a_reply_heard_by_say_carries_the_same_notes(rig):
+    """listen() is one function, so nothing is only true of stay_silent."""
+    _, voice, raw = rig
+    voice.next_heard = [_heard_at("are you still there", ago=1200)]
+    result = raw("say", {"text": "Done, sir.", "then": "listen"})
+    assert "stale" in result
+    assert "Can you answer right now" in result
+
+
+def test_mid_task_speech_is_acknowledged_without_blocking(rig):
+    """check_for_speech is for a working agent, so the say() it recommends must
+    be the one that returns straight away."""
     _, _voice, raw = rig
-    result = raw("say", {"text": "Half past two, sir."})
-    assert "wait_for_speech" in result
-    assert "do NOT finish the task" in result
+    result = raw("check_for_speech")
+    assert "keep_working" in result
 
 
 def test_pause_transcription_tool(rig):
@@ -235,3 +307,52 @@ def test_resume_transcription_tool(rig):
     result = raw("resume_transcription")
     parsed = json.loads(result)
     assert "paused" in parsed
+
+
+def test_stay_silent_will_not_run_without_a_reason(rig):
+    """Listening instead of speaking is a decision to leave them in silence. The
+    schema makes it a stated one."""
+    server, _voice, _raw = rig
+    with pytest.raises(Exception, match="because"):
+        asyncio.run(server.call_tool("stay_silent", {}))
+
+
+def test_writing_the_reply_out_and_claiming_you_said_it_is_refused(rig):
+    """Observed in a real session: heard "Hello", wrote "Hello sir. How can I
+    help?" into the chat, then called stay_silent. Nothing was spoken and the
+    user heard nothing. It is the one claim the server can check."""
+    _, voice, raw = rig
+    voice.next_heard = [{"text": "Hello", "id": 1}]
+    raw("stay_silent", SILENT)
+    refused = raw("stay_silent", CLAIMS_ANSWERED)
+    assert "have not called say()" in refused
+    assert "listening" in refused, "and it did not listen"
+    assert voice.said == []
+
+
+def test_the_refusal_hands_back_the_call_to_make(rig):
+    _, voice, raw = rig
+    voice.next_heard = [{"text": "Hello", "id": 1}]
+    raw("stay_silent", SILENT)
+    refused = raw("stay_silent", CLAIMS_ANSWERED)
+    assert "then=" in refused and "listen" in refused
+    assert "not_aimed_at_me" in refused, "the honest way out, if it really was not for them"
+
+
+def test_the_refusal_is_not_a_deadlock(rig):
+    """Every other reason still goes through, so the escape is in the enum rather
+    than in a retry counter. Nothing here can wedge a session."""
+    _, voice, raw = rig
+    voice.next_heard = [{"text": "Hello", "id": 1}]
+    raw("stay_silent", SILENT)
+    raw("stay_silent", CLAIMS_ANSWERED)
+    assert "Hello" in raw("stay_silent", SILENT), "still listening"
+
+
+def test_the_claim_is_accepted_once_it_is_true(rig):
+    """A quiet room after a real answer is the case this must not punish."""
+    _, voice, raw = rig
+    raw("stay_silent", SILENT)
+    voice.next_heard = []
+    raw("say", {"text": "Half past two, sir.", "then": "listen"})
+    assert "have not called say()" not in raw("stay_silent", CLAIMS_ANSWERED)

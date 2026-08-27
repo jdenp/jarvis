@@ -22,6 +22,20 @@ def test_shipped_defaults_match_the_code():
     )
 
 
+def test_the_two_versions_have_not_drifted():
+    """`pyproject.toml` builds the package, `__init__.py` is what the MCP server
+    advertises to a client. They had reached 0.6.13 and 0.6.10 respectively.
+    """
+    import tomllib
+
+    from jarvis import __version__
+
+    pyproject = tomllib.loads((project_root() / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == __version__, (
+        "pyproject.toml and src/jarvis/__init__.py disagree about the version"
+    )
+
+
 def test_as_dict_is_json_serialisable():
     blob = json.dumps(Config().as_dict())
     assert json.loads(blob) == Config().as_dict()

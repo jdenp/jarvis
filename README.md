@@ -14,8 +14,8 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
   one. Nothing leaves the machine, and JARVIS prints a line at startup saying so.
 - Runs on CPU with no setup, or on the GPU for much quicker transcription. See
   [Speech recognition](#speech-recognition).
-- **Blocking reads, not polling.** `wait_for_speech` returns the instant you finish a
-  sentence, so an agent waits on it rather than asking repeatedly.
+- **Blocking reads, not polling.** Listening returns the instant you finish a sentence,
+  so an agent waits on it rather than asking repeatedly.
 - MCP server, so Cline and friends see the microphone as tools they can call
 - A plain CLI for everything else
 - **Speech detection, not loudness.** A footstep is as loud as a word, and under a
@@ -106,10 +106,18 @@ change.
 I recommend Cline for this - it handles the voice loop well, respects the blocking read
 pattern, and doesn't poll. The MCP tools map cleanly to the JARVIS model of ears + mouth
 with the agent as brain. If you are using something else, the loopback HTTP API at
-`http://127.0.0.1:53535` covers everything the MCP tools do.
+`http://127.0.0.1:8770` covers everything the MCP tools do.
 
-Four tools appear: `wait_for_speech()`, `check_for_speech()`, `say(text)` and
-`voice_status()`.
+Six tools appear: `say(text, then=...)`, `stay_silent(because=...)`, `check_for_speech()`,
+`pause_transcription()`, `resume_transcription()` and `voice_status()`.
+
+The two required arguments exist because the written instructions could not hold the loop
+together. `then="listen"` speaks and then blocks for the reply in the same call, so
+answering and listening cannot come apart; `then="keep_working"` speaks and returns at once
+for a holding line before slow work. `because` makes an agent state why it is listening
+instead of speaking, and one of the four reasons is a claim the service checks against
+whether anything actually went through the speakers. Neither can be omitted: the schema
+rejects the call before the tool body runs, so a `say` without `then` does not speak.
 Anything else drives the same service through the CLI:
 
 ```powershell
@@ -123,9 +131,9 @@ while ($true) {
 Two things worth knowing before you build on it:
 
 - **Nothing preempts an agent mid-turn.** If it is thirty seconds into a build, your speech
-  waits until it next calls `wait_for_speech`. Cooperative, not preemptive, and no transport
+  waits until it next listens. Cooperative, not preemptive, and no transport
   changes that.
-- **A quiet session returns empty results.** `wait_for_speech` blocks for
+- **A quiet session returns empty results.** A listen blocks for
   `service.max_wait_seconds` (55s by default) and returns nothing if you have not spoken.
   Some clients count repeated identical results as a stuck loop and end the session, so if
   yours allows a long tool timeout, raise `max_wait_seconds` to match and it will return
@@ -245,7 +253,7 @@ whatever `JARVIS_CONFIG` points at.
 
 | Module | Role |
 | --- | --- |
-| `cli.py` | Argument parsing, wiring, the `serve` / `say` / `next` / `mcp` commands |
+| `cli.py` | Argument parsing, wiring, the `serve` / `say` / `next` / `status` / `config` / `mcp` commands |
 | `service.py` | Owns the hardware, serves loopback HTTP |
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, shared by the CLI and MCP |
@@ -269,7 +277,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 155 tests, no hardware, model or network needed
+uv run pytest        # 183 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

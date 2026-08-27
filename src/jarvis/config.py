@@ -100,7 +100,7 @@ class ServiceConfig:
 
     host: str = "127.0.0.1"
     port: int = 8770
-    # Longest a wait_for_speech call may block. Keep it under the agent's own
+    # Longest a stay_silent call may block. Keep it under the agent's own
     # tool timeout so the agent re-calls rather than erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"

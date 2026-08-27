@@ -26,9 +26,9 @@ and everything else - the CLI and the MCP server both - is a loopback HTTP clien
 ## The interrupt is a blocking read
 
 `GET /heard?since=N&wait=55` returns immediately if there is anything after `N`, and
-otherwise blocks on a `threading.Condition` that `Transcript.add` notifies. An agent calls
-`wait_for_speech` once and it returns the instant a sentence lands. No polling, no timer, no
-tokens spent asking "anything yet?".
+otherwise blocks on a `threading.Condition` that `Transcript.add` notifies. An agent listens
+once - `say(..., then="listen")` or `stay_silent` - and it returns the instant a sentence
+lands. No polling, no timer, no tokens spent asking "anything yet?".
 
 Ids are monotonic and survive restarts - `Transcript._resume` reads the last id out of the
 JSONL rather than replaying it - so a client holding a cursor never misses or repeats an
@@ -128,9 +128,80 @@ Note the constraint that shaped this: an agent only acts *between* tool calls, s
 told to it can make it speak from *inside* a slow one. Anything that tries to fill that gap
 has to be JARVIS talking, which is the thing being removed.
 
+**The loop is closed by the tool, not by the agent's memory.** Moving the lead-in rule into
+the result fixed the silence before slow work, and left the other half untouched: the agent
+answered, then ended its turn, hanging up on someone still sitting at the microphone.
+Instructions could not reach it. `jarvis.md`, the server instructions and the `say()` result
+all said "always go straight back to listening", two of them in capitals, and it
+happened anyway - because it is a thing to remember at the end of a turn, and the end of a
+turn is exactly where a model stops remembering.
+
+So `say()` does it instead. It takes a required `then`: `then="listen"` speaks and then
+performs the blocking read itself, returning the utterance in the same result, and
+`then="keep_working"` speaks and returns at once for the lead-in. Answering *is* listening,
+so there is no second call to forget. The argument has no default, so the schema rejects a
+call that omits it - the model is made to state which of the two it is doing, and the fork
+is one the lead-in rule already demanded, so it costs no judgement that was not already owed.
+
+`stay_silent` covers what is left: entering the conversation, and listening again after
+deciding to stay silent. Called with a question still unanswered it bounces once - returns
+immediately without listening, naming what went unanswered - and clears the debt on the way
+out, so the next call goes through whichever way the agent decides. That last part is the
+whole difference from the version this repo already tried and removed, which blocked until
+`say()` was called and deadlocked against an agent that had correctly kept quiet. One cheap
+round trip is a cost worth paying; a hang is not.
+
+That left one failure, and the first live session found it immediately: the agent heard
+"Hello", wrote "Hello sir. How can I help?" into its own reply text, and called
+`stay_silent`. Nothing was spoken. Closing the loop after `say()` does nothing about an
+agent that never reaches `say()`, and the listening tool was the escape hatch -
+argumentless, and indistinguishable from a correct decision to keep quiet.
+
+**Silence has to be justified, and one of the justifications is checkable.**
+`stay_silent` now takes a required `because`, one of
+`starting_to_listen`, `not_aimed_at_me`, `sounded_cut_off`, `already_spoke_my_reply`. The
+first three are judgements only the agent can make and are always honoured. The fourth is a
+claim about the world, and the server knows whether it is true: `unanswered` holds the last
+utterance heard and is cleared only by `say(..., then="listen")`, so a claim to have replied
+with nothing behind it is refused, unlistened, and sent back to `say()`.
+
+That value has to be in the list. An agent that has written its reply out believes it
+answered, so `already_spoke_my_reply` is the honest thing for it to say - and it is exactly
+the belief that needs contradicting. Take it out and the agent picks one of the unfalsifiable
+three instead, and nothing catches anything.
+
+It also cannot wedge a session, which is the constraint every previous attempt failed: the
+refusal is conditional on the reason, so `not_aimed_at_me` always goes through. The escape is
+in the enum rather than in a retry counter, and an agent that really was being talked over
+gets past in one call. A lead-in does not settle the debt either - `then="keep_working"` was
+the agent's own statement that this was not the answer, so "let me have a look" followed by
+silence is still caught.
+
+What is left unenforceable is narrower than it was: an agent that writes its reply as text
+and then honestly reports `not_aimed_at_me` still gets through. That is a lie rather than a
+lapse, and a lie is a much harder thing for a model to do by accident than forgetting. Rule 1
+stays shouted in the instructions for the rest.
+
+**Name the decision, not the mechanism.** These two tools were `say` and `wait_for_speech`,
+and the second name stopped being true the moment `say(..., then="listen")` became the
+ordinary way to hear someone. It read as the canonical listening primitive while actually
+being the minority path, which is the opposite of what the split is for. `stay_silent` names
+the choice instead, so the pair is the two things you can do with a turn - speak, or do not -
+and `nothing_to_say_because` collapses to `because` now the tool name carries the rest.
+
+`say` was left alone on the same reasoning. It undersells what it does, but it does not
+misdirect, `then` already names the second half, and `converse(text, then="keep_working")`
+would contradict itself. It also matches `jarvis say` and `POST /say`, and rule 1 - the one
+thing no schema can enforce - leans on it being a short blunt verb.
+
+Folding the two into one tool was considered and rejected. It needs `text` optional, which
+makes "state a reason for silence" a conditional requirement, and a flat JSON Schema cannot
+express that. The check would drop back into the function body, which is precisely the
+enforcement being bought here.
+
 Where the rule lives decides whether it fires. Stated only in the instructions and in
 `jarvis.md`, it was ignored: both are read once, a long way back, while the choice is made
-the instant `wait_for_speech` returns. That result carried "do the work, then call say() with
+the instant a listen returns. That result carried "do the work, then call say() with
 the answer" - the opposite - and the nearer text won every time. The fork now sits in the
 result itself, and neither loop diagram teaches work-then-speak any more.
 
@@ -243,6 +314,6 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   because without AEC the microphone hears the speakers and the only defence is the text
   comparison in `echo.py`. Real AEC would make barge-in workable
 - Nothing tells the agent that speech arrived while it was busy. It only finds out when it
-  next calls `wait_for_speech`. An MCP notification could improve that, if clients honour it
+  next calls `stay_silent`. An MCP notification could improve that, if clients honour it
 - Nothing fills the silence if the agent forgets to speak before slow work. That is
   deliberate - see above - but it does mean a forgetful agent sounds broken
