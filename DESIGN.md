@@ -347,10 +347,22 @@ reads a tab strip: `Close, after "Gutenberg / Alpha - GitLab"`. Only repeats are
 on a unique label it is noise. The placing runs before the `matching` filter, or a search
 for "close" strips out every neighbour it needed.
 
-**Looking is free, acting is opt in.** `look_at_screen` reads a tree and touches nothing,
-so it is always registered. Everything that moves the pointer waits on `screen.control`,
-and until it is set the look result says how to turn it on. The line is easy to explain:
-it can always tell you what is on screen, and can only touch it if you said so.
+**Looking is free, and acting is on by default - which it was not at first.** The split
+still holds: `look_at_screen` and `screenshot` read and touch nothing, so they are always
+registered, while everything that moves the pointer sits behind `screen.control`. What
+changed is the default.
+
+Off was the obvious choice and it was wrong. Three reasons, in ascending order of how much
+they cost. The point of the feature is to act, so the interesting half was disabled out of
+the box. An agent cannot discover the flag on its own; the best it can do is relay a message
+asking the user to set it, which it did, correctly, and which nobody read. And the failure
+mode is indistinguishable from the feature being broken - a live session spent four calls
+refusing to touch a minimised window while `focus_window`, the tool that would have restored
+it, was not registered at all. The diagnosis of that session initially blamed the refusal's
+wording, and the wording was only half of it.
+
+The flag stays, and the off path stays tested, because a read-only mode is a genuinely
+useful thing to be able to ask for. It is just no longer what you get without asking.
 
 **Real input rather than UI Automation patterns.** `Invoke()` is tidier where a control
 supports it, but coverage is patchy - much of what a browser or an Electron app draws has

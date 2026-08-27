@@ -13,7 +13,7 @@
     "pause_threshold": 1.2,
     "pause_quiet_fraction": 0.85,
     "echo_guard_seconds": 0.5,
-    "listen_while_speaking": false
+    "listen_while_speaking": true
   },
   "stt": {
     "backend": "whisper",
@@ -41,17 +41,17 @@
     "force_a_reply": true
   },
   "screen": {
-    "control": false,
+    "control": true,
     "max_targets": 200,
     "max_scan_age_seconds": 60.0,
     "min_target_pixels": 6,
     "label_chars": 80,
     "click_settle_seconds": 0.05,
     "focus_settle_seconds": 0.35,
-    "send_image": false,
+    "send_image": true,
     "screenshot_file": "screen.png",
     "screenshot_max_width": 1600,
-    "marks_file": ""
+    "marks_file": "marks.png"
   },
   "log_level": "INFO"
 }

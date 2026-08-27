@@ -493,6 +493,7 @@ def build_server(
                 scan,
                 desktop.backend.window_rect(scan.hwnd),
                 config.log_dir / config.screen.marks_file,
+                config.screen.screenshot_max_width,
             )
             return str(path)
         except (OSError, RuntimeError) as exc:
@@ -666,7 +667,7 @@ def build_server(
             if with_numbers and not whole_desk:
                 scan = desktop.look(window)
                 bounds = desktop.backend.window_rect(scan.hwnd)
-                path = marks.draw(scan, bounds, target)
+                path = marks.draw(scan, bounds, target, config.screen.screenshot_max_width)
                 described = scan.as_dict(config.screen.label_chars)
             else:
                 if whole_desk:

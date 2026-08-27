@@ -62,9 +62,12 @@ class AudioConfig:
     pause_quiet_fraction: float = 0.85
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
-    # Half duplex by default. On, it allows barging in, but without echo
-    # cancellation only echo.py stops JARVIS answering itself. Headphones only.
-    listen_while_speaking: bool = False
+    # Full duplex: the microphone stays open while JARVIS talks, so you can cut
+    # it off mid sentence. There is no acoustic echo cancellation here, so on
+    # speakers it hears its own voice and the only thing between that and JARVIS
+    # answering itself is the text comparison in echo.py. Headphones make it
+    # free. If it starts replying to itself, this is the setting.
+    listen_while_speaking: bool = True
 
 
 @dataclass(frozen=True)
@@ -127,11 +130,18 @@ class ScreenConfig:
     """Seeing the desktop, and acting on it.
 
     Looking is always allowed; it reads the accessibility tree and touches
-    nothing. Acting moves the real pointer and types on the real keyboard, so
-    it stays off until it is switched on.
+    nothing. Acting moves the real pointer and types on the real keyboard, which
+    is why this is a switch at all.
     """
 
-    control: bool = False
+    # On. It was off, on the argument that moving someone's pointer should be
+    # opted into - but the whole point of the feature is to act, an agent cannot
+    # discover the flag on its own, and the failure when it is off looks exactly
+    # like the feature being broken: a live session spent four calls refusing to
+    # touch a minimised window without the tool that would have restored it.
+    # Set it false to get the read-only half back; look_at_screen and screenshot
+    # never depended on it.
+    control: bool = True
     # Most targets offered at once. 60 was chosen on the theory that a long list
     # makes a model guess; measured against real applications it was far worse
     # than that - Spotify has 166 real targets and Outlook in a browser 177, so
@@ -151,9 +161,12 @@ class ScreenConfig:
     # After raising a window, before scanning it. Restoring is animated, and an
     # element measured mid animation reports where it was, not where it lands.
     focus_settle_seconds: float = 0.35
-    # Send the marked screenshot to the agent alongside the list. Off: without
-    # a vision model loaded it is a megabyte of cost for something unreadable.
-    send_image: bool = False
+    # Send the marked screenshot to the agent alongside the list, so a model that
+    # can read images gets the picture and the numbers together. Shrunk to
+    # screenshot_max_width first. It costs whatever the image costs on a model
+    # that cannot see it - without --mmproj or its equivalent loaded, that is
+    # payload for nothing, and this is the setting to turn off.
+    send_image: bool = True
     # Where `screenshot` writes, under logs/. Overwritten each time - it is the
     # latest picture, not an album.
     screenshot_file: str = "screen.png"
@@ -161,11 +174,12 @@ class ScreenConfig:
     # whole desk across two monitors is 4880px and 665KB, which is worth
     # narrowing before it goes anywhere.
     screenshot_max_width: int = 1600
-    # Where the marked screenshot goes when one is asked for, under logs/. Empty
-    # means never draw one for the agent's own scans - a full screen grab is
-    # ~0.5s and the picture is for a human. `jarvis look --marks` ignores this
-    # and always writes one. Needs: uv sync --extra screen
-    marks_file: str = ""
+    # Where the marked screenshot goes, under logs/, overwritten each scan. It is
+    # what send_image transmits and what to look at when a click goes somewhere
+    # unexpected. Costs a full screen grab, about half a second, on every scan -
+    # set it to "" for the text-only path and the latency back. `jarvis look
+    # --marks` writes one regardless.
+    marks_file: str = "marks.png"
 
 
 @dataclass(frozen=True)

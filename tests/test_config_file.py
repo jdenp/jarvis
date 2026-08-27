@@ -146,3 +146,29 @@ def test_a_genuine_typo_is_still_rejected(tmp_path):
     path.write_text(json.dumps({"stt": {"whisper_modle": "small.en"}}))
     with pytest.raises(ValueError, match="whisper_modle"):
         Config.load(path=path, environ={})
+
+
+def test_no_config_file_means_everything_is_active():
+    """Plug and play: a fresh clone with no config file gets the whole feature
+    set. Nothing worth having should need a file to be created first."""
+    config = Config.load(path=None, environ={})
+    assert config.screen.control is True, "clicking and typing, not only looking"
+    assert config.screen.send_image is True
+    assert config.screen.marks_file, "the marked screenshot is drawn"
+    assert config.audio.listen_while_speaking is True, "full duplex"
+    assert config.service.force_a_reply is True
+    assert config.service.hotkey, "the toggle key is bound"
+
+
+def test_the_annotated_example_says_exactly_what_the_defaults_are():
+    """`config/jarvis.toml.example` is hand-written prose around real values, so
+    it drifts. Copying it must be a no-op: if it disagrees with the defaults then
+    one of the two is lying about what you get.
+
+    The two options TOML cannot express are absent from it and keep their
+    defaults, which is why this compares equal rather than key by key.
+    """
+    example = project_root() / "config" / "jarvis.toml.example"
+    assert Config.load(path=example, environ={}) == Config(), (
+        "config/jarvis.toml.example no longer matches the built-in defaults"
+    )

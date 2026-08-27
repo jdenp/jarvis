@@ -65,6 +65,16 @@ class FakeSpeech:
         pass
 
 
+def half_duplex(**overrides) -> tuple[VoiceService, FakeMicrophone, FakeSpeech]:
+    """A service that mutes while speaking.
+
+    Full duplex is the default now, so anything testing the echo gate has to ask
+    for the mode it is testing rather than inheriting it.
+    """
+    audio = replace(Config().audio, listen_while_speaking=False, **overrides)
+    return make_service(audio=audio)
+
+
 def make_service(**config_overrides) -> tuple[VoiceService, FakeMicrophone, FakeSpeech]:
     config = replace(Config(), **config_overrides)
     microphone = FakeMicrophone()
@@ -83,7 +93,7 @@ def make_service(**config_overrides) -> tuple[VoiceService, FakeMicrophone, Fake
 
 
 def test_say_mutes_the_microphone_while_speaking():
-    service, microphone, speech = make_service()
+    service, microphone, speech = half_duplex()
     service.say("Opening it now.")
     assert speech.said == ["Opening it now."]
     assert speech.muted_while_speaking == [True], "mic must be muted at the moment of speaking"
@@ -228,7 +238,7 @@ def test_say_returns_before_the_speech_finishes():
 
 
 def test_the_microphone_is_muted_for_the_whole_of_a_reply():
-    service, microphone, speech = make_service()
+    service, microphone, speech = half_duplex()
     playing = threading.Event()
     speech.wait = lambda timeout=None: playing.wait(timeout=5)
 
@@ -248,7 +258,7 @@ def test_the_microphone_is_muted_for_the_whole_of_a_reply():
 def test_overlapping_replies_do_not_unmute_early():
     """Two replies in flight: the first finishing must not open the microphone
     while the second is still playing."""
-    service, microphone, speech = make_service()
+    service, microphone, speech = half_duplex()
     drained = threading.Event()
     speech.wait = lambda timeout=None: drained.wait(timeout=5)
 
@@ -324,3 +334,20 @@ def test_status_includes_paused():
     status = service.status()
     assert "paused" in status
     assert status["paused"] is False
+
+
+def test_full_duplex_is_the_default_now():
+    """So you can cut JARVIS off mid sentence. It costs the echo guard: on
+    speakers the microphone hears its own voice and only echo.py stands between
+    that and JARVIS answering itself."""
+    service, microphone, speech = make_service()
+    assert service.config.audio.listen_while_speaking is True
+    service.say("Talking over myself.")
+    assert microphone.muted is False, "never muted"
+    assert speech.said == ["Talking over myself."]
+
+
+def test_half_duplex_is_still_available_on_request():
+    service, _microphone, speech = half_duplex()
+    service.say("Opening it now.")
+    assert speech.muted_while_speaking == [True]

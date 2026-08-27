@@ -252,8 +252,9 @@ service.
 
 ## Seeing the screen
 
-Only if screen control is switched on - `screen.control` in `config/jarvis.json`. Without
-it you get `look_at_screen` and nothing else, and its result says so.
+On unless `screen.control` has been turned off. If it has, you get `look_at_screen` and
+`screenshot` and nothing that acts - the result of a look says so, and there is nothing you
+can do about it but tell the user.
 
 `look_at_screen()` numbers everything clickable in a window and gives you the numbers.
 Not the accessibility tree, and not pixels: one Teams window is 810 nodes and 54 of them

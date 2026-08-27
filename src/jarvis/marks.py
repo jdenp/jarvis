@@ -71,8 +71,12 @@ def capture(bounds: tuple[int, int, int, int] | None, path: Path, max_width: int
     return path
 
 
-def draw(scan: Scan, bounds: tuple[int, int, int, int], path: Path) -> Path:
-    """Grab the window, box and number every target, and save it."""
+def draw(scan: Scan, bounds: tuple[int, int, int, int], path: Path, max_width: int = 0) -> Path:
+    """Grab the window, box and number every target, and save it.
+
+    Drawn at full size and shrunk afterwards, so the boxes are placed against
+    real coordinates and the numbers stay legible.
+    """
     grab, draw_on, font_from = _pillow()
     whole = grab.grab(all_screens=True)
     shot = whole.crop(crop_box(bounds, _virtual_origin())).convert("RGB")
@@ -94,9 +98,10 @@ def draw(scan: Scan, bounds: tuple[int, int, int, int], path: Path) -> Path:
         canvas.rectangle((left, badge_top, left + width, badge_top + BADGE_HEIGHT), fill=colour)
         canvas.text((left + 3, badge_top + 2), caption, fill=(255, 255, 255), font=font)
 
+    shot = _shrink(shot, max_width)
     path.parent.mkdir(parents=True, exist_ok=True)
     shot.save(path, "PNG", optimize=True)
-    logger.info("Marked %d targets onto %s", len(scan.targets), path)
+    logger.info("Marked %d targets onto %s (%dx%d)", len(scan.targets), path, *shot.size)
     return path
 
 

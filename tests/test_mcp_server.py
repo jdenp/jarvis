@@ -696,3 +696,21 @@ def test_a_filter_that_found_almost_nothing_says_to_widen_it():
     result = screen_text(server, "look_at_screen", {"matching": "reply"})
     assert "narrowed this to 1" in result
     assert "without matching" in result
+
+
+def test_acting_is_on_by_default():
+    """It was off, on the argument that moving someone's pointer should be opted
+    into. An agent cannot discover the flag, and the failure when it is off looks
+    exactly like the feature being broken."""
+    assert Config().screen.control is True
+    names = {t.name for t in asyncio.run(build_server(Config(), client=FakeVoice()).list_tools())}
+    assert {"click", "type_text", "scroll", "press_keys", "focus_window"} <= names
+
+
+def test_the_read_only_half_is_still_available_on_request():
+    """A read-only mode is a useful thing to be able to ask for. It is just no
+    longer what you get without asking."""
+    server, _backend = screen_rig(False)
+    names = {t.name for t in asyncio.run(server.list_tools())}
+    assert {"look_at_screen", "screenshot"} <= names
+    assert not {"click", "type_text", "scroll", "press_keys", "focus_window"} & names

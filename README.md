@@ -53,7 +53,29 @@ is the brain.
 
 ```powershell
 uv sync
-copy config\jarvis.toml.example config\jarvis.toml   # optional, all values have defaults
+```
+
+That is the whole setup. **Every feature is on by default and no config file is needed.**
+The defaults live in the dataclasses in `config.py`, `Config.load()` returns them when it
+finds no file, and `config/defaults.json` is generated from them so you can read exactly
+what you are getting. Out of the box:
+
+| | |
+| --- | --- |
+| voice | `converse()`, and speech handed back as an error if a turn would end unanswered |
+| screen control | clicking, typing, scrolling and keys, not only looking |
+| the marked screenshot | drawn every scan, and sent to the agent as an image |
+| full duplex | the microphone stays open while JARVIS talks, so you can cut it off |
+| Num Lock | stops and starts listening from anywhere |
+
+Two of those cost something and are the first to turn off if they bite. The marked
+screenshot adds a full screen grab, about half a second, to every scan, and sending it is
+payload for nothing on a model that cannot read images. Full duplex has no acoustic echo
+cancellation behind it, so on speakers JARVIS can hear itself - headphones make it free,
+and `audio.listen_while_speaking = false` makes it go away.
+
+```powershell
+copy config\jarvis.toml.example config\jarvis.toml   # only if you want to change something
 ```
 
 The first run downloads the Whisper model (`base.en`, about 150 MB) and caches it. After
@@ -230,15 +252,23 @@ of the two, particularly on names and accents.
 
 ## Screen control
 
-Off by default. Looking at the screen is always available - it reads the accessibility
-tree and touches nothing. Clicking moves your real pointer and types on your real
-keyboard, so it waits to be asked:
+On by default. Looking at the screen reads the accessibility tree and touches nothing;
+clicking moves your real pointer and types on your real keyboard. If you want the
+read-only half:
 
 ```json
-{ "screen": { "control": true } }
+{ "screen": { "control": false } }
 ```
 
-Restart the MCP server after changing it; the tools are registered at startup.
+That leaves `look_at_screen` and `screenshot`, and drops `focus_window`, `click`,
+`type_text`, `scroll` and `press_keys`. Restart the MCP server after changing it either
+way; the tools are registered at startup.
+
+It was off by default to begin with, on the argument that moving someone's pointer should
+be opted into. That was wrong in practice: an agent cannot discover the flag on its own,
+and the failure when it is off is indistinguishable from the feature being broken - one
+session spent four calls refusing to touch a minimised window while the tool that would
+have restored it was not registered.
 
 **The problem this solves.** Handing an agent the whole accessibility tree does not work.
 A Teams window is 810 nodes, almost all of them panes, groups and static text, and a
@@ -414,7 +444,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 303 tests, no hardware, model or network needed
+uv run pytest        # 309 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

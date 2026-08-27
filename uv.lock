@@ -741,6 +741,7 @@ dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "numpy" },
+    { name = "pillow" },
     { name = "psutil" },
     { name = "pyaudio" },
     { name = "speechrecognition" },
@@ -757,9 +758,6 @@ edge = [
 ]
 hotkey = [
     { name = "keyboard" },
-]
-screen = [
-    { name = "pillow" },
 ]
 
 [package.dev-dependencies]
@@ -779,7 +777,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "nvidia-cublas-cu12", marker = "extra == 'cuda'", specifier = ">=12.4" },
     { name = "nvidia-cudnn-cu12", marker = "extra == 'cuda'", specifier = ">=9,<10" },
-    { name = "pillow", marker = "extra == 'screen'", specifier = ">=10.0" },
+    { name = "pillow", specifier = ">=10.0" },
     { name = "psutil", specifier = ">=6.0" },
     { name = "pyaudio", specifier = ">=0.2.14" },
     { name = "pygame", marker = "extra == 'edge'", specifier = ">=2.6" },
