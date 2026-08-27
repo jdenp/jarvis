@@ -22,18 +22,32 @@ def test_shipped_defaults_match_the_code():
     )
 
 
-def test_the_two_versions_have_not_drifted():
-    """`pyproject.toml` builds the package, `__init__.py` is what the MCP server
-    advertises to a client. They had reached 0.6.13 and 0.6.10 respectively.
-    """
+def test_the_version_is_read_from_pyproject():
+    """It used to be written out in both places and they drifted to 0.6.13 and
+    0.6.10 - three releases advertising the wrong number to every client."""
     import tomllib
 
     from jarvis import __version__
 
     pyproject = tomllib.loads((project_root() / "pyproject.toml").read_text(encoding="utf-8"))
-    assert pyproject["project"]["version"] == __version__, (
-        "pyproject.toml and src/jarvis/__init__.py disagree about the version"
-    )
+    assert pyproject["project"]["version"] == __version__
+
+
+def test_a_bumped_pyproject_is_picked_up_without_reinstalling(tmp_path):
+    """Editable installs record the version at sync time, so reading the
+    metadata instead would go stale on every bump until the next `uv sync`."""
+    from jarvis import _version_in
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "9.9.9"\n')
+    assert _version_in(tmp_path) == "9.9.9"
+
+
+def test_a_checkout_without_a_pyproject_falls_through(tmp_path):
+    from jarvis import _version_in
+
+    assert _version_in(tmp_path) is None
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "jarvis"\n')
+    assert _version_in(tmp_path) is None, "no version key is the same as no file"
 
 
 def test_as_dict_is_json_serialisable():
