@@ -97,17 +97,18 @@ stale_after_seconds = 120.0
 # its normal job everywhere else - Num Lock still flips the keypad. Any spelling
 # the keyboard library accepts works: "num lock", "numlock", "num_lock".
 hotkey = "num lock"
-# Read the connected agent's own prose off disk and speak it, when it wrote an
-# answer as text instead of calling converse(). Nothing else works: the schema
-# shapes a call that happens and cannot cause one, so four attempts to make an
-# agent remember to speak were built and removed. This one needs no cooperation
-# from it - see DESIGN.md. It depends on another program's on-disk format, which
-# is why it is a switch.
+# Read Cline's own prose off disk and speak it, when it wrote an answer as text
+# instead of calling converse(). Nothing else works: the schema shapes a call
+# that happens and cannot cause one, so four attempts to make an agent remember
+# to speak were built and removed. This one needs no cooperation from it.
+# Cline only - the transcript format is Cline's, and a file without its envelope
+# is left alone rather than guessed at. See DESIGN.md.
 overhear = true
-# Where that agent writes its conversation, one directory per session. Empty
-# means Cline's own location under ~/.cline. Point it elsewhere for a client
-# that writes the same shape.
-agent_transcripts = ""
+# Where Cline keeps its session transcripts. Empty means its own location under
+# ~/.cline. Overriding it covers a portable install or a version that moves the
+# directory; it does not make this work with another client, which needs a reader
+# for their format rather than a different path.
+cline_sessions = ""
 overhear_poll_seconds = 1.0    # one stat(), and only while a reply is owed
 # Longest overheard line that gets read out. Past this it was written for a
 # reader rather than a listener, and reading it aloud is worse than silence.

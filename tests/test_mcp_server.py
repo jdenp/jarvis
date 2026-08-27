@@ -804,3 +804,117 @@ def test_capabilities_are_read_as_a_property_not_called():
             return None
 
     assert "SAMPLING=no" in _capabilities(Ctx())
+
+
+def cline_session(root, name, prose):
+    """A Cline transcript with the given assistant prose, envelope and all."""
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.messages.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sessionId": name,
+                "agent": "lead",
+                "origin": {"source": "cli", "version": "3.0.58"},
+                "messages": [
+                    {"role": "assistant", "content": [{"type": "text", "text": line}]}
+                    for line in prose
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def overhearing_server(tmp_path, voice):
+    config = replace(
+        Config(),
+        service=replace(
+            Config().service,
+            cline_sessions=str(tmp_path),
+            overhear=True,
+            overhear_poll_seconds=0.05,
+        ),
+    )
+    return build_server(config, client=voice)
+
+
+def test_prose_the_agent_typed_gets_spoken(tmp_path):
+    """The whole point. Four attempts to make the agent remember are recorded in
+    DESIGN.md as failures; this asks it for nothing."""
+    import time
+
+    voice = FakeVoice()
+    cline_session(tmp_path, "s1", ["from an earlier turn"])
+    server = overhearing_server(tmp_path, voice)
+
+    asyncio.run(server.call_tool("converse", LISTEN))  # a reply now falls due
+    time.sleep(0.2)
+    assert voice.said == [], "nothing from before the request"
+
+    cline_session(tmp_path, "s1", ["from an earlier turn", "Half past two, sir."])
+    time.sleep(0.3)
+    assert voice.said == ["Half past two, sir."]
+
+
+def test_overheard_words_are_not_said_a_second_time(tmp_path):
+    """If JARVIS read it out and the agent then passes the same words to
+    converse(), they are already delivered. Saying them twice is the only way
+    overhearing could make things worse."""
+    import time
+
+    answer = "Spotify is open and playing, sir."
+    voice = FakeVoice()
+    cline_session(tmp_path, "s1", [])
+    server = overhearing_server(tmp_path, voice)
+
+    asyncio.run(server.call_tool("converse", LISTEN))
+    cline_session(tmp_path, "s1", [answer])
+    time.sleep(0.3)
+    assert voice.said == [answer], "overheard and spoken once"
+
+    voice.next_heard = []
+    asyncio.run(server.call_tool("converse", {"say": answer, "then": "listen"}))
+    assert voice.said == [answer], "and not again when the agent says the same thing"
+
+
+def test_a_different_reply_is_still_spoken(tmp_path):
+    """The guard is for a repeat, not for everything after an overheard line."""
+    import time
+
+    voice = FakeVoice()
+    cline_session(tmp_path, "s1", [])
+    server = overhearing_server(tmp_path, voice)
+
+    asyncio.run(server.call_tool("converse", LISTEN))
+    cline_session(tmp_path, "s1", ["Looking into it now, sir."])
+    time.sleep(0.3)
+
+    voice.next_heard = []
+    asyncio.run(server.call_tool("converse", {"say": "It is half past two.", "then": "listen"}))
+    assert voice.said == ["Looking into it now, sir.", "It is half past two."]
+
+
+def test_the_refusal_stops_once_jarvis_has_spoken_for_it(tmp_path):
+    """say="" while a reply is owed is normally a false claim to have answered.
+    Once JARVIS has read the prose out, the reply really was delivered."""
+    import time
+
+    voice = FakeVoice()
+    cline_session(tmp_path, "s1", [])
+    server = overhearing_server(tmp_path, voice)
+
+    asyncio.run(server.call_tool("converse", LISTEN))
+    cline_session(tmp_path, "s1", ["All done, sir."])
+    time.sleep(0.3)
+
+    assert "did not listen" not in text_of(asyncio.run(server.call_tool("converse", LISTEN)))
+
+
+def test_the_transcript_directory_comes_from_config(tmp_path):
+    """Cline only, but not hardcoded to one path - a portable install or a
+    version that moves the directory still works."""
+    config = replace(Config(), service=replace(Config().service, cline_sessions=str(tmp_path)))
+    assert config.service.cline_sessions == str(tmp_path)
+    assert Config().service.cline_sessions == "", "empty means Cline's own location"

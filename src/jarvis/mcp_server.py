@@ -20,6 +20,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
+from .echo import sounds_like
 from .overhear import Overheard, default_sessions_dir
 from .screen import (
     Screen,
@@ -208,6 +209,10 @@ def build_server(
     # reply is then delivered, even though the agent never called anything, so
     # the refusal below has nothing left to catch.
     spoke_for_it = False
+    # The last few lines read aloud on the agent's behalf. If it then passes
+    # the same words to converse(), they are already delivered and saying
+    # them again is the only way this feature could make things worse.
+    overheard_lines: list[str] = []
     complained_about_marks = False
     logged_capabilities = False
     last_scan: tuple[str, tuple[str, ...]] | None = None
@@ -236,6 +241,8 @@ def build_server(
                     logger.info("Overheard and speaking: %r", line[:80])
                     voice.say(line)
                     spoke_for_it = True
+                    overheard_lines.append(line)
+                    del overheard_lines[:-4]
             except ServiceUnavailable as exc:
                 logger.warning("Could not speak overheard prose - %s", exc)
             except Exception:
@@ -245,8 +252,8 @@ def build_server(
     watcher = None
     if config.service.overhear:
         root = (
-            Path(config.service.agent_transcripts)
-            if config.service.agent_transcripts
+            Path(config.service.cline_sessions)
+            if config.service.cline_sessions
             else default_sessions_dir()
         )
         watcher = Overheard(root, config.service.overhear_max_chars)
@@ -405,7 +412,12 @@ def build_server(
                 ),
             }
 
-        if spoken:
+        already_said = any(sounds_like(spoken, line) for line in overheard_lines)
+        if spoken and already_said:
+            # Overheard and read out a moment ago. Deliver nothing, but carry on
+            # into the listen, because the reply itself did reach them.
+            logger.info("Not repeating what was already overheard: %r", spoken[:60])
+        elif spoken:
             try:
                 voice.say(spoken)
             except ServiceUnavailable as exc:

@@ -110,17 +110,18 @@ class ServiceConfig:
     # Past this, an utterance is flagged as backlog rather than a live
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
-    # Read the connected agent's own prose off disk and speak it, when it wrote
-    # an answer as text instead of calling converse(). Nothing else works: the
-    # schema shapes a call that happens and cannot cause one, so four attempts
-    # to make an agent remember to speak were built and removed. This one needs
-    # no cooperation from it. See DESIGN.md - it depends on another program's
-    # on-disk format, which is why it is a switch.
+    # Read Cline's own prose off disk and speak it, when it wrote an answer as
+    # text instead of calling converse(). Nothing else works: the schema shapes a
+    # call that happens and cannot cause one, so four attempts to make an agent
+    # remember to speak were built and removed. This one needs no cooperation
+    # from it. Cline only - the transcript format is Cline's, and a file without
+    # its envelope is left alone rather than guessed at. See DESIGN.md.
     overhear: bool = True
-    # Where the connected agent writes its conversation, one directory per
-    # session. Empty means Cline's own location under ~/.cline. Point it
-    # elsewhere for another client that writes the same shape.
-    agent_transcripts: str = ""
+    # Where Cline keeps its session transcripts. Empty means its own location
+    # under ~/.cline. Overriding it covers a portable install or a version that
+    # moves the directory; it does not make this work with another client, which
+    # needs a reader for their format rather than a different path.
+    cline_sessions: str = ""
     # How often that transcript is checked, and only while a reply is owed - so
     # one stat() a second while somebody is actually waiting, and none otherwise.
     overhear_poll_seconds: float = 1.0

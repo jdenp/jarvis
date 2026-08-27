@@ -19,6 +19,20 @@ sampling is deprecated and Cline never offered it anyway.
 
 Jank, unarguably: it depends on another program's on-disk format. Hence
 `service.overhear`, and hence everything here failing quietly rather than loudly.
+
+**This reads Cline, and only Cline.** The layout is its own - one directory per
+session under `~/.cline/data/sessions`, holding `<id>.messages.json` beside
+`<id>.json` - and so is the envelope, which carries `origin.source`, an `agent`
+name and Cline's own version string. A transcript without that envelope is left
+alone rather than guessed at, because the alternative is reading somebody's
+half-understood file out loud.
+
+Adapting it to another client is a small job and a real one: the content shape
+inside `messages` is the ordinary Anthropic API shape - parts typed `text`,
+`thinking`, `tool_use` - so anything storing raw API messages needs only a new
+reader, and `looks_like_cline` plus `transcripts` are the seam. What it cannot be
+adapted to is a client that never writes the conversation down. There has to be a
+transcript to overhear.
 """
 
 from __future__ import annotations
@@ -39,6 +53,20 @@ NOT_FOR_SPEAKING = ("```", "<function")
 # At the start of any line, the same. Checked per line rather than as a substring
 # so that a heading on the very first line is caught as well as a later one.
 NOT_AT_A_LINE_START = ("#", "- ", "* ", "|", ">")
+
+
+def looks_like_cline(blob: dict) -> bool:
+    """Whether this is a transcript in the format this module understands.
+
+    Cline stamps its own envelope on: an `origin` with a source and its version,
+    and a session id. Checked so that a file which merely happens to sit in the
+    configured directory is left alone. Reading a format nobody has verified out
+    loud is a worse failure than staying quiet.
+    """
+    if not isinstance(blob, dict) or not isinstance(blob.get("messages"), list):
+        return False
+    origin = blob.get("origin")
+    return isinstance(origin, dict) and "source" in origin and bool(blob.get("sessionId"))
 
 
 def transcripts(root: Path) -> list[Path]:
@@ -137,7 +165,8 @@ class Overheard:
         self.root = root
         self.limit = limit
         self._seen: dict[Path, int] = {}
-        self._stamps: dict[Path, float] = {}
+        self._stamps: dict[Path, tuple[float, int]] = {}
+        self._complained = False
 
     def catch_up(self) -> None:
         """Mark everything already written as read, without speaking any of it.
@@ -150,7 +179,7 @@ class Overheard:
         if path is None:
             return
         blob = self._read(path)
-        if blob is not None:
+        if blob is not None and looks_like_cline(blob):
             self._seen[path] = len(assistant_prose(blob))
 
     def anything_new(self) -> list[str]:
@@ -159,15 +188,29 @@ class Overheard:
         if path is None:
             return []
         try:
-            stamp = path.stat().st_mtime
+            stat = path.stat()
         except OSError:
             return []
+        # Size as well as time. Windows timestamps are coarse enough that two
+        # rewrites inside the same tick share an mtime, and the client rewrites
+        # the whole file every message - so mtime alone loses one.
+        stamp = (stat.st_mtime, stat.st_size)
         if self._stamps.get(path) == stamp:
             return []
         self._stamps[path] = stamp
 
         blob = self._read(path)
         if blob is None:
+            return []
+        if not looks_like_cline(blob):
+            if not self._complained:
+                self._complained = True
+                logger.warning(
+                    "%s is not in the format this understands - Cline's, with an origin "
+                    "and a session id. Staying quiet rather than reading it out. See "
+                    "overhear.py if you want to teach it another client's transcript.",
+                    path,
+                )
             return []
         prose = assistant_prose(blob)
         already = self._seen.get(path, 0)
@@ -191,8 +234,8 @@ def default_sessions_dir() -> Path:
     """Where Cline keeps its transcripts: one directory per session, each holding
     `<session-id>.messages.json`.
 
-    Only this one location is known, so `service.agent_transcripts` exists to
-    point somewhere else. Any client writing a session per directory with the
-    same message shape would work; the format is not ours and may move.
+    `service.cline_sessions` overrides it, for a portable install or a version
+    that moves the directory. It does not make this work with another client -
+    that needs a reader for their format, not a different path.
     """
     return Path.home() / ".cline" / "data" / "sessions"

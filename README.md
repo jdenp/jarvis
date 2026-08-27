@@ -115,6 +115,14 @@ it. Logs rotate in `logs/jarvis.log`; everything heard is appended to `logs/hear
 
 ## Connecting an agent
 
+> **Built for the Cline CLI, and only tested there.** Not because it is the best agent
+> available - because it is a lightweight one, and the hardware is the constraint here. A
+> 12 GB card running a 35B model locally leaves very little room, so the agent has to be
+> cheap to have around. Everything except `overhear.py` is plain MCP and should work with
+> any client; overhearing reads Cline's own transcript format and is bound to it
+> deliberately. Open to a better agent when one fits the budget, and the seam to adapt is
+> documented in [Screen control](#screen-control) and `overhear.py`.
+
 Hand the agent [`jarvis.md`](jarvis.md) as context - it explains the tools, how to speak
 well, and the limits worth knowing. For Cline that means
 `Documents\Cline\Rules\jarvis.md`, and **a copy there is a thing that goes stale**:
@@ -190,11 +198,25 @@ against it retroactively and it recovers all of them:
 'Done - Spotify's open and Katy Perry's "Harleys In Hawaii" is playing now.'
 ```
 
-Unarguably jank: it depends on another program's on-disk format, which is why it is
-`service.overhear` and why `service.agent_transcripts` can point somewhere else. Prose
-written for a reader is left alone rather than read out - code fences, tables, headings,
-anything over `overhear_max_chars` - and emphasis and emoji are stripped from what is
-spoken, because SAPI reads `**947**` as "asterisk asterisk nine four seven".
+**Cline only, and by construction.** The layout is Cline's own - one directory per session
+under `~/.cline/data/sessions` holding `<id>.messages.json` - and so is the envelope, which
+carries `origin.source`, an `agent` name and Cline's version string. A file without that
+envelope is left alone and logged once rather than guessed at, because reading somebody's
+half-understood format out loud is a worse failure than staying quiet.
+
+Adapting it to another client is a small job and a real one. The content inside `messages`
+is the ordinary Anthropic API shape - parts typed `text`, `thinking`, `tool_use` - so
+anything that stores raw API messages needs only a new reader, and `looks_like_cline` plus
+`transcripts` in `overhear.py` are the seam. `service.cline_sessions` moves the path, which
+covers a portable install; it does not make another client work. And nothing can be done
+for a client that never writes the conversation down - there has to be a transcript to
+overhear.
+
+Prose written for a reader is left alone rather than read out - code fences, tables,
+headings, numbered lists, anything over `overhear_max_chars`. Emphasis and emoji are
+stripped from what survives, because SAPI reads `**947**` as "asterisk asterisk nine four
+seven". And if the agent then passes the same words to `converse()`, they are not said
+twice.
 
 Anything else drives the same service through the CLI:
 
@@ -463,7 +485,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 346 tests, no hardware, model or network needed
+uv run pytest        # 360 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

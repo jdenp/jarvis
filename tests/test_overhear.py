@@ -28,14 +28,21 @@ LEAD_IN = "Spotify is open. Let me press play to start music."
 ANSWER = "Done - Spotify's open and Katy Perry's \"Harleys In Hawaii\" is playing now."
 
 
-def session(tmp_path, name, messages, *, age=0.0):
-    """One session directory, shaped as Cline writes them."""
+def session(tmp_path, name, messages, *, age=0.0, envelope=True):
+    """One session directory, shaped as Cline writes them.
+
+    The envelope is what marks a transcript as Cline's, and what this refuses to
+    read without - `origin` with a source, and a session id.
+    """
     folder = tmp_path / name
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{name}.messages.json"
-    path.write_text(
-        json.dumps({"version": 1, "sessionId": name, "messages": messages}), encoding="utf-8"
-    )
+    blob = {"version": 1, "messages": messages}
+    if envelope:
+        blob["sessionId"] = name
+        blob["agent"] = "lead"
+        blob["origin"] = {"source": "cli", "mode": "user", "sessionId": name, "version": "3.0.58"}
+    path.write_text(json.dumps(blob), encoding="utf-8")
     if age:
         stamp = time.time() - age
         import os
@@ -258,3 +265,63 @@ def test_something_that_tidies_down_to_nothing_is_not_spoken(tmp_path):
     watcher.catch_up()
     session(tmp_path, "s1", [assistant(text("👍")), assistant(text(ANSWER))])
     assert watcher.anything_new() == [for_speaking(ANSWER)]
+
+
+# --------------------------------------------------- Cline's format, and only
+
+
+def test_clines_envelope_is_recognised():
+    from jarvis.overhear import looks_like_cline
+
+    assert looks_like_cline(
+        {
+            "messages": [],
+            "sessionId": "1787820869065_pvlov",
+            "agent": "lead",
+            "origin": {"source": "cli", "version": "3.0.58"},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        {},
+        {"messages": []},
+        {"messages": [], "sessionId": "x"},
+        {"messages": [], "origin": {"source": "cli"}},
+        {"messages": "not a list", "sessionId": "x", "origin": {"source": "cli"}},
+        {"messages": [], "sessionId": "x", "origin": "not a dict"},
+    ],
+)
+def test_anything_else_is_not_read(blob):
+    """Reading a format nobody has verified out loud is a worse failure than
+    staying quiet, so an unfamiliar file is left alone rather than guessed at."""
+    from jarvis.overhear import looks_like_cline
+
+    assert looks_like_cline(blob) is False
+
+
+def test_a_transcript_without_the_envelope_is_left_alone(tmp_path, caplog):
+    import logging
+
+    watcher = Overheard(tmp_path)
+    session(tmp_path, "s1", [], envelope=False)
+    watcher.catch_up()
+    session(tmp_path, "s1", [assistant(text(ANSWER))], envelope=False)
+
+    with caplog.at_level(logging.WARNING, logger="jarvis.overhear"):
+        assert watcher.anything_new() == []
+    assert "not in the format this understands" in caplog.text
+    assert "overhear.py" in caplog.text, "and where to go to teach it another one"
+
+
+def test_it_only_complains_once(tmp_path, caplog):
+    import logging
+
+    watcher = Overheard(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="jarvis.overhear"):
+        for index in range(3):
+            session(tmp_path, "s1", [assistant(text(f"line {index}"))], envelope=False)
+            watcher.anything_new()
+    assert caplog.text.count("not in the format") == 1

@@ -38,7 +38,7 @@
     "transcript_file": "heard.jsonl",
     "stale_after_seconds": 120.0,
     "overhear": true,
-    "agent_transcripts": "",
+    "cline_sessions": "",
     "overhear_poll_seconds": 1.0,
     "overhear_max_chars": 400,
     "hotkey": "num lock"

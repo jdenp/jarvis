@@ -259,12 +259,33 @@ for the eye - code fences, tables, headings, numbered lists, anything past
 emphasis and emoji from what survives, since SAPI pronounces `**947**` as "asterisk
 asterisk nine four seven".
 
-It is jank and the switch admits it. `service.overhear` turns it off and
-`service.agent_transcripts` points it elsewhere, because this depends on another program's
-on-disk format and that format is not ours: it can move without warning, and when it does
-this goes quiet rather than failing loudly. The session file is picked by modification
-time, which is a guess - the MCP server is told nothing about which session spawned it - so
-two conversations at once means it may speak the wrong one's answer.
+**Bound to Cline on purpose.** The directory layout is Cline's and so is the envelope -
+`origin.source`, an `agent` name, its own version string - so `looks_like_cline` checks for
+it and a transcript without one is left alone and logged once. The temptation is to parse
+anything with a `messages` array, and the failure mode of doing that is reading a stranger's
+file out loud. `service.cline_sessions` moves the path for a portable install; it does not
+make another client work.
+
+Which is not to say it cannot be adapted. The content inside `messages` is the ordinary
+Anthropic API shape, parts typed `text`, `thinking` and `tool_use`, so any client storing
+raw API messages needs a reader rather than a redesign, and the seam is `looks_like_cline`
+plus `transcripts`. The one thing no adapter can fix is a client that never writes the
+conversation down: there has to be a transcript to overhear.
+
+It is jank and the switch admits it. `service.overhear` turns it off, because this depends
+on someone else's on-disk format and that format can move without warning - when it does,
+this goes quiet rather than failing loudly. The session is picked by modification time,
+which is a guess: the MCP server is told nothing about which session spawned it, so two
+conversations at once means it may speak the wrong one's answer.
+
+**It delivers the reply; it does not resume the conversation.** Worth being exact, because
+the two are easy to conflate. Overheard speech goes through `say()` like anything else, so
+the echo guard remembers it and the microphone will not transcribe JARVIS hearing itself -
+that part is free. And if the agent later passes the same words to `converse()`, they are
+recognised and not spoken twice. What overhearing cannot do is make the agent listen again:
+the utterance the user speaks next lands in the transcript and waits there, and nothing
+reads it until the agent calls `converse()` of its own accord. So this turns silence into an
+answer, which is most of the value, and leaves the turn ended either way.
 
 The one thing it cannot do is listen. Speaking overheard prose delivers the reply but does
 not reopen the microphone, so the conversation stops there; `converse()` is still the only
