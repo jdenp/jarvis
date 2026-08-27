@@ -330,9 +330,13 @@ something unreadable, so that is off too.
 
 **Some of it needs no scan.** `press_keys` knows the media keys - `playpause`,
 `nexttrack`, `volumeup`, `mute` and the rest - and Windows routes those to whatever is
-playing. "Pause my music" is one call with no window to find. The shell's own windows are
-scannable too, under `Taskbar`: 39 elements down to 25 targets, one of them whatever you
-have pinned.
+playing, so "pause my music" is one call with no window to find. The shell's own windows
+are scannable too, under `Taskbar`: 39 elements down to 25 targets, one per pinned app,
+which is the sane way to launch something. And `type_text` with no target types wherever
+the caret already is - the Start menu after `press_keys("win")` reports a single element
+covering itself, so there is nothing there to click and the keyboard is the only way in.
+A scan of a window like that comes back flagged `nothing_clickable` rather than offering a
+target that cannot work.
 
 No new dependencies for the working part: UI Automation comes through `comtypes`, which
 was already here for SAPI, and input goes through `SendInput` in `ctypes`.
@@ -444,7 +448,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 309 tests, no hardware, model or network needed
+uv run pytest        # 317 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

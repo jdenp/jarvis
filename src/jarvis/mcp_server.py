@@ -19,7 +19,12 @@ from mcp_types import CallToolResult, TextContent
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
-from .screen import Screen, ScreenUnavailable, means_the_same
+from .screen import (
+    Screen,
+    ScreenUnavailable,
+    means_the_same,
+    offers_nothing_clickable,
+)
 
 logger = logging.getLogger("jarvis.mcp")
 
@@ -220,6 +225,7 @@ def build_server(
     complained_about_marks = False
     logged_capabilities = False
     last_scan: tuple[str, tuple[str, ...]] | None = None
+    last_refusal: str | None = None
 
     server = MCPServer(
         name="jarvis",
@@ -526,6 +532,21 @@ def build_server(
         if image:
             payload["marked_screenshot"] = image
 
+        # One element covering the whole window: the tree never populated, so
+        # the only "target" is the window itself and its centre is not a control.
+        # Saying so is the difference between one refusal and three.
+        if offers_nothing_clickable(scan.targets, desktop.backend.window_rect(scan.hwnd)):
+            payload["nothing_clickable"] = True
+            payload["next_step"] = (
+                f"{scan.window!r} exposes one element covering the whole window, which "
+                "means its accessibility tree never populated - the Start menu is like "
+                "this, and so are some Electron apps. That target is not a control and "
+                "clicking it will be refused. Drive this one with the keyboard: "
+                "type_text with no target types wherever the caret already is, and "
+                "press_keys sends shortcuts."
+            )
+            return payload
+
         if not config.screen.control:
             payload["next_step"] = (
                 "Looking only - clicking and typing are switched off. Tell the user to "
@@ -591,6 +612,33 @@ def build_server(
                 "to the front and scans it in one go. Do not call look_at_screen on it "
                 "again first - it will refuse again for the same reason."
             )
+        }
+
+    def refused(exc: ScreenUnavailable) -> dict:
+        """A refusal, escalated if it is the same one again.
+
+        Three identical refusals in a row, with the agent rescanning between
+        each, because the message said "look again and use the new numbers" and
+        the new numbers were the same numbers. The second time it has to say
+        something else.
+        """
+        nonlocal last_refusal
+        message = str(exc)
+        repeated = message == last_refusal
+        last_refusal = message
+        if not repeated:
+            return {"error": message, "done": None}
+        return {
+            "error": message,
+            "done": None,
+            "next_step": (
+                "This is the identical refusal to last time, so looking again will not "
+                "change it - the numbers you get back will be the same numbers. Stop "
+                "trying to click this window and use the keyboard: type_text with no "
+                "target types wherever the caret already is, and press_keys sends "
+                "shortcuts. If neither can do it, say so out loud rather than trying a "
+                "third time."
+            ),
         }
 
     def aim(target: int, expecting: str):
@@ -734,7 +782,7 @@ def build_server(
                 found, scan = aim(target, expecting)
             except ScreenUnavailable as exc:
                 logger.warning("Click refused - %s", exc)
-                return {"error": str(exc), "done": None}
+                return refused(exc)
             x, y = found.element.centre
             hands.click(
                 x, y, button=button, count=clicks, settle=config.screen.click_settle_seconds
@@ -744,38 +792,80 @@ def build_server(
 
         @server.tool(
             name="type_text",
-            title="Type into a numbered target",
+            title="Type, into a target or wherever the caret is",
             description=(
-                "Click a target to put the caret in it, then type. `then` is required "
-                "and it is the decision worth getting right: press_enter submits the "
-                "form or sends the message, leave_it types and stops. A half written "
-                "message sent early cannot be taken back.\n\n"
+                "Type text. `then` is required and it is the decision worth getting "
+                "right: press_enter submits the form or sends the message, leave_it "
+                "types and stops. A half written message sent early cannot be taken "
+                "back.\n\n"
+                "`target` is optional and there are two cases. Name one and it is "
+                "clicked first to put the caret there, with `expecting` checked against "
+                "its label exactly as click does - that is the normal way into a text "
+                "box you found in a scan. Leave it out and the text goes wherever the "
+                "keyboard focus already is, which is what you want when something has "
+                "just opened with its caret ready: the Start menu after press_keys("
+                '"win"), a dialog, a search bar that took focus on its own. It is also '
+                "the only way into a window whose scan came back `nothing_clickable`, "
+                "because there is no usable target in one of those to name.\n\n"
+                "With no target nothing can be checked first, so be sure what has focus "
+                "- look_at_screen or a screenshot will tell you what is in front. "
                 "`clear_first` selects what is already there so the text replaces it "
-                "rather than joining onto the end. `expecting` is checked against the "
-                "label, as with click. Typed as unicode, so it does not depend on the "
-                "keyboard layout, and newlines in the text are sent as enter."
+                "rather than joining onto the end. Typed as unicode, so it does not "
+                "depend on the keyboard layout, and newlines in the text are sent as "
+                "enter."
             ),
         )
         def type_text(
-            target: int,
-            expecting: str,
             text: str,
             then: Literal["press_enter", "leave_it"],
+            target: int = 0,
+            expecting: str = "",
             clear_first: bool = False,
         ) -> dict:
-            try:
-                found, scan = aim(target, expecting)
-            except ScreenUnavailable as exc:
-                logger.warning("Typing refused - %s", exc)
-                return {"error": str(exc), "done": None}
-            x, y = found.element.centre
-            hands.click(x, y, settle=config.screen.click_settle_seconds)
+            # `expecting` cannot be made conditionally required in a JSON schema,
+            # so the pairing is enforced here. Naming a target without saying
+            # what it is would be the guard quietly switched off.
+            if target and not expecting:
+                return {
+                    "error": (
+                        f"target={target} was given without `expecting`. Pass the label "
+                        "you read beside that number so it can be checked, or leave "
+                        "`target` out entirely to type wherever the caret already is."
+                    ),
+                    "done": None,
+                }
+
+            found = scan = None
+            if target:
+                try:
+                    found, scan = aim(target, expecting)
+                except ScreenUnavailable as exc:
+                    logger.warning("Typing refused - %s", exc)
+                    return refused(exc)
+                x, y = found.element.centre
+                hands.click(x, y, settle=config.screen.click_settle_seconds)
+
             if clear_first:
                 hands.press("ctrl+a")
             hands.type_text(text)
             if then == "press_enter":
                 hands.press("enter")
-            result = acted("typed and submitted" if then == "press_enter" else "typed", found, scan)
+
+            what = "typed and submitted" if then == "press_enter" else "typed"
+            if found is not None and scan is not None:
+                result = acted(what, found, scan)
+            else:
+                logger.info("%s at the keyboard focus: %r", what.capitalize(), text)
+                result = {
+                    "done": what,
+                    "into": "whatever had keyboard focus",
+                    "next_step": (
+                        "Typed blind - nothing here can confirm where it went. "
+                        "look_at_screen or screenshot to check it landed, and remember "
+                        "that anything you opened to get here is still open: "
+                        'press_keys("escape") closes a menu or dialog you are done with.'
+                    ),
+                }
             result["text"] = text
             return result
 
@@ -799,7 +889,7 @@ def build_server(
                 found, scan = aim(target, expecting)
             except ScreenUnavailable as exc:
                 logger.warning("Scroll refused - %s", exc)
-                return {"error": str(exc), "done": None}
+                return refused(exc)
             x, y = found.element.centre
             turns = max(1, min(20, notches)) * (1 if direction == "up" else -1)
             hands.scroll(x, y, turns, settle=config.screen.click_settle_seconds)
@@ -831,7 +921,10 @@ def build_server(
                 "done": "pressed",
                 "keys": keys,
                 "next_step": (
-                    "Sent to whatever had focus. Call look_at_screen to see what it did."
+                    "Sent to whatever had focus. Call look_at_screen to see what it did. "
+                    "If that opened something - the Start menu, a dialog, a context menu "
+                    '- it is still open, and press_keys("escape") is how you close it '
+                    "once you are done. Do not leave it up for the user to dismiss."
                 ),
             }
 

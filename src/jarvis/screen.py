@@ -347,6 +347,26 @@ def confirms(target: Target, chain: Sequence[Element]) -> bool:
     return False
 
 
+def offers_nothing_clickable(targets, bounds: tuple[int, int, int, int]) -> bool:
+    """Whether a scan found a window that exposes no real controls.
+
+    A UWP or Electron surface that has not activated its accessibility tree
+    reports one element: itself. That comes back as a single target whose
+    rectangle is the whole window, so its centre is not a control - it is the
+    middle of the panel, and whatever happens to be drawn there is what a click
+    would hit. The point check then refuses, correctly and forever.
+
+    Measured on the Start menu, which is one element exactly, labelled "Search
+    box". Three type_text calls were refused against it in a row while the agent
+    kept rescanning, because the scan looked like a window with one button in it.
+    """
+    if len(targets) != 1:
+        return False
+    left, top, right, bottom = bounds
+    window = max(1, (right - left) * (bottom - top))
+    return targets[0].element.area * 100 >= window * 90
+
+
 def means_the_same(claimed: str, actual: str) -> bool:
     """Whether what an agent said it was aiming at is what it is aiming at.
 

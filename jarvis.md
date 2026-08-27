@@ -282,10 +282,23 @@ if you can read images, and it gives you nothing to click. Use it when the quest
 something *looks* like - an error dialog, a chart, a layout - and `look_at_screen` for
 anything you mean to act on.
 
-**Some things need no scan at all.** `press_keys("playpause")` and its siblings -
-`nexttrack`, `prevtrack`, `stop`, `volumeup`, `volumedown`, `mute` - are routed by Windows
-to whatever is playing. Pausing or skipping music is one call with no window to find. Reach
-for those before hunting the taskbar.
+**Try these before you scan anything.** They need no window, no target and no numbers,
+and in practice they are what works:
+
+- **Music.** `press_keys("playpause")`, `nexttrack`, `prevtrack`, `stop`, `volumeup`,
+  `volumedown`, `mute`. Windows routes these to whatever is playing. Do not go hunting for
+  a play button.
+- **Launching or switching to an app.** `look_at_screen(window="Taskbar")`. Everything
+  pinned is a target there - `Spotify pinned`, `Google Chrome pinned` - so one click opens
+  or raises it. That is far better than the Start menu, which exposes almost nothing.
+- **Typing when something just opened.** `type_text` with no target types wherever the
+  caret already is. After `press_keys("win")` the search box has focus and there is
+  nothing to click.
+
+**Put back what you moved.** If you opened the Start menu, a dialog or a context menu to
+get somewhere, close it when you are done - `press_keys("escape")`. Leaving it up is
+visible to the user and blocks whatever they do next, and they should not have to tidy up
+after you.
 
 Two more things worth knowing:
 
@@ -299,6 +312,12 @@ Two more things worth knowing:
   on screen first with `focus_window` or `scroll`.
 - **A minimised window is refused, and `focus_window` is the fix.** Do not retry
   `look_at_screen` on it; it will refuse again for the same reason.
+- **`nothing_clickable` means the window has no usable tree.** Some surfaces - the Start
+  menu, a few Electron apps - report a single element covering themselves, so there is no
+  real target to name and clicking is refused. Use the keyboard on those: `type_text` with
+  no target, and `press_keys`.
+- **The same refusal twice means stop.** If a refusal comes back word for word, another
+  scan returns the same numbers. Change approach or say out loud that you cannot do it.
 - **Scrolled out of view means absent.** Offscreen controls are left out rather than
   offered at coordinates nobody can click. If what you want is not listed, `scroll` and
   look again.

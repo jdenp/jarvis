@@ -391,3 +391,35 @@ def test_an_exact_title_wins_over_one_that_merely_contains_it():
         [button("Send")], title="Taskbar (second screen)", others=[(2, "Taskbar")]
     )
     assert screen.look("Taskbar").window == "Taskbar"
+
+
+# ------------------------------------------------- a tree that never populated
+
+
+def test_a_single_full_window_target_is_not_clickable():
+    """The Start menu reports one element: itself. It arrives as a target whose
+    rectangle is the whole window, so its centre is the middle of the panel
+    rather than a control, and the point check refuses it forever."""
+    from jarvis.screen import offers_nothing_clickable
+
+    whole = [Target(1, Element("Search box", "Edit", 0, 0, 800, 600))]
+    assert offers_nothing_clickable(whole, (0, 0, 800, 600)) is True
+
+
+def test_a_real_control_that_happens_to_be_alone_is_still_clickable():
+    from jarvis.screen import offers_nothing_clickable
+
+    one_button = [Target(1, button("Send", left=300, top=500))]
+    assert offers_nothing_clickable(one_button, (0, 0, 800, 600)) is False
+
+
+def test_two_targets_are_never_a_dead_tree():
+    """The rule is about a window standing in for its own contents. Two of
+    anything means the tree populated."""
+    from jarvis.screen import offers_nothing_clickable
+
+    pair = [
+        Target(1, Element("a", "Edit", 0, 0, 800, 600)),
+        Target(2, button("Send", top=500)),
+    ]
+    assert offers_nothing_clickable(pair, (0, 0, 800, 600)) is False

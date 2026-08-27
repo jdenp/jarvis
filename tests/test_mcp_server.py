@@ -714,3 +714,87 @@ def test_the_read_only_half_is_still_available_on_request():
     names = {t.name for t in asyncio.run(server.list_tools())}
     assert {"look_at_screen", "screenshot"} <= names
     assert not {"click", "type_text", "scroll", "press_keys", "focus_window"} & names
+
+
+def test_typing_needs_no_target_when_the_caret_is_already_there(monkeypatch):
+    """The Start menu after press_keys("win"): the search box has focus and there
+    is nothing to click. target and expecting were both required, so this was
+    unrepresentable and three attempts were refused instead."""
+    from jarvis import hands
+
+    typed: list = []
+    monkeypatch.setattr(hands, "click", lambda *a, **k: typed.append("CLICK"))
+    monkeypatch.setattr(hands, "type_text", lambda text: typed.append(text))
+    monkeypatch.setattr(hands, "press", lambda keys: typed.append(f"<{keys}>"))
+
+    server, _backend = screen_rig(True)
+    result = screen_text(server, "type_text", {"text": "spotify", "then": "press_enter"})
+
+    assert typed == ["spotify", "<enter>"], "no click, because no target was named"
+    assert "keyboard focus" in result
+    assert "escape" in result, "and a reminder to close what it opened"
+
+
+def test_naming_a_target_without_saying_what_it_is_is_refused(monkeypatch):
+    """`expecting` cannot be made conditionally required in a JSON schema, so
+    leaving it out alongside a target would be the guard switched off."""
+    from jarvis import hands
+
+    monkeypatch.setattr(hands, "type_text", lambda text: pytest.fail("typed anyway"))
+    server, _backend = screen_rig(True)
+    result = screen_text(server, "type_text", {"text": "x", "then": "leave_it", "target": 1})
+    assert "without `expecting`" in result
+
+
+def test_naming_a_target_still_clicks_and_still_checks(monkeypatch):
+    from jarvis import hands
+
+    typed: list = []
+    monkeypatch.setattr(hands, "click", lambda *a, **k: typed.append("CLICK"))
+    monkeypatch.setattr(hands, "type_text", lambda text: typed.append(text))
+    monkeypatch.setattr(hands, "press", lambda keys: typed.append(f"<{keys}>"))
+
+    server, _backend = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    args = {"text": "hello", "then": "leave_it", "target": 1, "expecting": "Reply"}
+    asyncio.run(server.call_tool("type_text", args))
+    assert typed == ["CLICK", "hello"]
+
+    args["expecting"] = "Delete"
+    assert "not 'Delete'" in screen_text(server, "type_text", args)
+
+
+def test_a_window_with_a_dead_tree_says_so_instead_of_offering_it():
+    """The Start menu: one element, covering itself. It used to arrive looking
+    like a window with a single button in it."""
+    from conftest import FakeDesktop
+    from jarvis.config import ScreenConfig
+    from jarvis.screen import Element, Screen
+
+    backend = FakeDesktop(
+        [Element("Search box", "Edit", 0, 0, 800, 600)], title="Search", rect=(0, 0, 800, 600)
+    )
+    config = replace(Config(), screen=ScreenConfig(marks_file="", focus_settle_seconds=0.0))
+    server = build_server(config, client=FakeVoice(), screen=Screen(config.screen, backend))
+    result = screen_text(server, "look_at_screen")
+
+    assert "nothing_clickable" in result
+    assert "never populated" in result
+    assert "type_text with no target" in result
+
+
+def test_the_same_refusal_twice_says_something_different(monkeypatch):
+    """Three identical refusals in a row, with a rescan between each, because the
+    message said to look again and the new numbers were the same numbers."""
+    from jarvis import hands
+
+    monkeypatch.setattr(hands, "click", lambda *a, **k: None)
+    server, backend = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    backend._elements = [button("Something else")]
+
+    first = screen_text(server, "click", {"target": 1, "expecting": "Reply"})
+    second = screen_text(server, "click", {"target": 1, "expecting": "Reply"})
+    assert "identical refusal" not in first
+    assert "identical refusal" in second
+    assert "rather than trying a third time" in second

@@ -340,6 +340,35 @@ session above meant reading past "Pillow is not installed", "Unknown key 'nope'"
 dozen dropped-phrase warnings, none of which had happened to the user. Measured at ~3.5KB
 of noise per run, now zero.
 
+**Not every window has a tree, and the Start menu is one of them.** Asked to open Spotify
+and play, an agent pressed the Windows key, scanned what came up, and got one element: a
+target labelled "Search box" whose rectangle was the entire Start panel. Its centre is
+therefore not a control, so the point check refused three type_text calls in a row - each
+time correctly, each time with the same words, and each time the agent rescanned and got
+the same single target back. It got there in the end by pressing playpause, and reported
+that as having opened Spotify.
+
+Three separate things were wrong, and only the first is about the Start menu.
+
+`type_text` required a target. After the Windows key the search box already has keyboard
+focus and there is nothing to click, so "type where the caret is" was not expressible.
+`target` and `expecting` are optional now: name one and it is clicked and checked exactly
+as before, leave them out and the text goes to the focus. Naming a target without
+`expecting` is refused in the tool body, since a JSON schema cannot make one argument
+conditional on another and silently dropping the check would be worse than either.
+
+A single target covering its whole window is reported rather than offered. It means the
+accessibility tree never populated - a UWP surface or an Electron app that has not
+activated it - and no amount of scanning will produce a control. The scan comes back
+`nothing_clickable` and points at the keyboard.
+
+And a refusal repeated verbatim is useless. The message said to look again and use the new
+numbers; the new numbers were the same numbers. The second identical refusal now says so
+and names the two things that are not clicking.
+
+The general shape, which is the third time it has come up in this file: a refusal has to
+end on something different from what the caller just tried.
+
 **Placing repeated labels.** A browser offers four buttons called Close and a coarse
 position does not separate them - a tab strip is all in the same ninth of the window.
 What does separate them is the thing before them in reading order, which is how anyone
