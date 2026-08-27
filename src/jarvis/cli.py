@@ -14,7 +14,7 @@ from dataclasses import replace
 
 from . import __version__
 from .client import ServiceUnavailable, VoiceClient
-from .config import Config, find_config_file
+from .config import Config, find_config_file, project_root
 from .logging_setup import configure
 from .microphone import Microphone, MicrophoneError
 
@@ -45,7 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     sub = parser.add_subparsers(
-        dest="command", metavar="[serve | say | next | status | look | click | screenshot | mcp]"
+        dest="command",
+        metavar="[serve | say | next | status | look | click | screenshot | rules | mcp]",
     )
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
@@ -75,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument("--focus", action="store_true", help="bring the window to the front first")
     look.add_argument("--marks", action="store_true", help="write the marked screenshot too")
     look.add_argument("--json", action="store_true", help="print the raw scan")
+
+    rules = sub.add_parser("rules", help="check the agent guide the client is loading")
+    rules.add_argument("--install", action="store_true", help="copy jarvis.md over the stale one")
+    rules.add_argument("--path", help="where the client reads its rules from")
 
     shot = sub.add_parser("screenshot", help="save a picture of a window")
     shot.add_argument("window", nargs="?", default="", help="part of a window title")
@@ -319,6 +324,47 @@ def run_look(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+# Cline's global rules directory. A copy of jarvis.md lives here so the agent
+# reads it every turn, and a copy is a thing that goes stale.
+CLINE_RULES = "Documents/Cline/Rules/jarvis.md"
+
+
+def run_rules(config: Config, args: argparse.Namespace) -> int:
+    """Whether the guide the agent is actually reading is the current one.
+
+    Worth a command of its own because the failure is invisible and total: a
+    guide from before the tools were renamed names tools that do not exist, and
+    the model believes it over the schemas. Nothing in the session says so.
+    """
+    from pathlib import Path
+
+    source = project_root() / "jarvis.md"
+    installed = Path(args.path) if args.path else Path.home() / CLINE_RULES
+    current = source.read_bytes()
+
+    if args.install:
+        installed.parent.mkdir(parents=True, exist_ok=True)
+        installed.write_bytes(current)
+        print(f"Wrote {installed} from {source}")
+        print("Start a new task - the old text is still in the open one's history.")
+        return 0
+
+    if not installed.is_file():
+        print(f"No guide at {installed}. Install it with `jarvis rules --install`.")
+        return 1
+    if installed.read_bytes() == current:
+        print(f"{installed}\n  matches jarvis.md ({len(current)} bytes).")
+        return 0
+    print(
+        f"STALE: {installed} does not match {source}.\n"
+        "The agent is being told about tools that may no longer exist, every turn, "
+        "and it will believe that over the schemas.\n"
+        "Fix it with `jarvis rules --install`.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def run_screenshot(config: Config, args: argparse.Namespace) -> int:
     """A plain picture, for the times when the numbered list is not the question."""
     from pathlib import Path
@@ -408,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Clients print results for something else to read, and MCP in particular
     # must keep stdout clean - anything there is parsed as JSON-RPC.
-    if args.command in {"say", "next", "status", "config", "look", "click", "screenshot"}:
+    if args.command in {"say", "next", "status", "config", "look", "click", "screenshot", "rules"}:
         configure(config.log_dir, "WARNING")
         if args.command == "say":
             return run_say(config, args)
@@ -422,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_click(config, args)
         if args.command == "screenshot":
             return run_screenshot(config, args)
+        if args.command == "rules":
+            return run_rules(config, args)
         return run_status(config)
 
     if args.command == "mcp":

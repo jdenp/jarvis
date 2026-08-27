@@ -60,7 +60,7 @@ def test_a_character_outside_the_basic_plane_is_two():
     [("playpause", 0xB3), ("play", 0xB3), ("nexttrack", 0xB0), ("volumeup", 0xAF), ("mute", 0xAD)],
 )
 def test_the_media_keys_are_there(name, code):
-    """"Play my music" needs no window, no scan and no target - Windows routes a
+    """ "Play my music" needs no window, no scan and no target - Windows routes a
     media key to whatever it considers the current media session."""
     assert keys_for(name) == (code,)
     assert code in EXTENDED, "sent the way a real keyboard sends them"

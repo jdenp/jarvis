@@ -410,6 +410,15 @@ to a process that has not declared it understands scaling, so on a 150% display 
 lands two thirds of the way to where it was aimed. It is set on first use of the backend,
 and failing means it was already set, which is the outcome wanted anyway.
 
+**The guide is a copy, and a copy goes stale.** The one failure mode in this whole design
+that no schema can reach. `jarvis.md` gets copied into the agent's rules directory so it is
+read every turn, and once the tools are renamed that copy is actively lying - it names tools
+that do not exist and shows call shapes that were removed. The model weighs authoritative
+prose against a schema and the prose wins, so it reverts to the loop the new signatures were
+built to delete, and nothing in the transcript says why. Observed here with a guide three
+days old, still teaching `wait_for_speech()` and a bare `say(answer)`. Hence `jarvis rules`,
+which just compares the two files: cheap, and the only way the drift is visible at all.
+
 ## Swapping a component
 
 Each is a Protocol or a factory, so a replacement only has to match the shape:

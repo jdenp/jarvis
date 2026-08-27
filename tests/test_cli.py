@@ -84,3 +84,33 @@ def test_privacy_report_names_each_leak():
     assert "REMOTE" in line
     assert "your microphone audio" in line
     assert "every reply" in line
+
+
+def test_a_stale_agent_guide_is_reported(tmp_path, capsys):
+    """The failure it catches is invisible: a guide written before the tools were
+    renamed names tools that no longer exist, every turn, and the model believes
+    it over the schemas. Nothing in the session says so."""
+    from jarvis.cli import main
+
+    installed = tmp_path / "jarvis.md"
+    installed.write_text("wait_for_speech() then say(answer)", encoding="utf-8")
+    assert main(["rules", "--path", str(installed)]) == 1
+    assert "STALE" in capsys.readouterr().err
+
+
+def test_installing_the_guide_makes_it_match(tmp_path, capsys):
+    from jarvis.cli import main
+    from jarvis.config import project_root
+
+    installed = tmp_path / "nested" / "jarvis.md"
+    assert main(["rules", "--path", str(installed), "--install"]) == 0
+    assert installed.read_bytes() == (project_root() / "jarvis.md").read_bytes()
+    assert main(["rules", "--path", str(installed)]) == 0
+    assert "matches" in capsys.readouterr().out
+
+
+def test_a_missing_guide_says_how_to_install_it(tmp_path, capsys):
+    from jarvis.cli import main
+
+    assert main(["rules", "--path", str(tmp_path / "absent.md")]) == 1
+    assert "--install" in capsys.readouterr().out

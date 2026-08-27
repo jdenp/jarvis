@@ -69,6 +69,7 @@ that, transcription is offline.
 .\jarvis.ps1 look                  # number what is clickable in the window in front
 .\jarvis.ps1 click 12 --expecting Reply   # press one of those numbers
 .\jarvis.ps1 screenshot            # a picture of the window in front
+.\jarvis.ps1 rules                 # is the agent reading the current guide?
 .\jarvis.ps1 mcp                   # MCP server over stdio, for Cline and friends
 .\jarvis.ps1 --list-devices        # find your microphone
 .\jarvis.ps1 --device 1            # use a specific one
@@ -92,7 +93,21 @@ it. Logs rotate in `logs/jarvis.log`; everything heard is appended to `logs/hear
 ## Connecting an agent
 
 Hand the agent [`jarvis.md`](jarvis.md) as context - it explains the tools, how to speak
-well, and the limits worth knowing.
+well, and the limits worth knowing. For Cline that means
+`Documents\Cline\Rules\jarvis.md`, and **a copy there is a thing that goes stale**:
+
+```powershell
+.\jarvis.ps1 rules              # does the guide the agent reads match this one?
+.\jarvis.ps1 rules --install    # make it
+```
+
+Worth its own command because the failure is invisible and total. A guide written before
+the tools were renamed names tools that no longer exist, the model reads it every turn and
+believes it over the schemas, and nothing in the session says so - it just quietly goes
+back to the old loop. Measured here: a guide three days out of date was still telling the
+model to call `wait_for_speech()` and to answer with a bare `say(answer)`, so it never
+learned that `then` existed and dropped the second call. Hardlinking the file to this repo
+also works, until a `git checkout` replaces it and silently breaks the link.
 
 For Cline, add to your MCP settings:
 
