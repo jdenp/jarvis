@@ -7,7 +7,10 @@ own the microphone. DESIGN.md has the reasoning behind the blocking read.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 # At module level rather than deferred: the SDK resolves tool annotations from
@@ -17,6 +20,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
+from .overhear import Overheard, default_sessions_dir
 from .screen import (
     Screen,
     ScreenUnavailable,
@@ -200,10 +204,54 @@ def build_server(
     unanswered: str | None = None
     quiet_calls = 0
     first_listen = True
+    # Set when JARVIS has read the agent's own prose aloud on its behalf. The
+    # reply is then delivered, even though the agent never called anything, so
+    # the refusal below has nothing left to catch.
+    spoke_for_it = False
     complained_about_marks = False
     logged_capabilities = False
     last_scan: tuple[str, tuple[str, ...]] | None = None
     last_refusal: str | None = None
+
+    def overhear_forever() -> None:
+        """Read the agent's prose off disk and say it, while a reply is owed.
+
+        The last resort, and the only thing that has worked. Four attempts to
+        make the agent remember to speak are recorded in DESIGN.md; all of them
+        put words in a tool result, and a tool result is advice. This does not
+        ask the agent for anything - the client writes its whole conversation to
+        disk as it goes, so the answer it typed instead of speaking is in a file.
+
+        Polling rather than watching, because one stat() a second while somebody
+        is actually waiting is cheaper than a filesystem watcher and cannot get
+        stuck holding a handle on another program's directory.
+        """
+        nonlocal spoke_for_it
+        while True:
+            time.sleep(config.service.overhear_poll_seconds)
+            if unanswered is None:
+                continue
+            try:
+                for line in watcher.anything_new():
+                    logger.info("Overheard and speaking: %r", line[:80])
+                    voice.say(line)
+                    spoke_for_it = True
+            except ServiceUnavailable as exc:
+                logger.warning("Could not speak overheard prose - %s", exc)
+            except Exception:
+                # Someone else's file format. Never take the server down with it.
+                logger.exception("Overhearing failed; carrying on without it.")
+
+    watcher = None
+    if config.service.overhear:
+        root = (
+            Path(config.service.agent_transcripts)
+            if config.service.agent_transcripts
+            else default_sessions_dir()
+        )
+        watcher = Overheard(root, config.service.overhear_max_chars)
+        threading.Thread(target=overhear_forever, daemon=True, name="jarvis-overhear").start()
+        logger.info("Overhearing the agent's prose from %s", root)
 
     server = MCPServer(
         name="jarvis",
@@ -214,7 +262,7 @@ def build_server(
 
     def listen(wait: float) -> dict:
         """The listening half of converse(), and the whole of it when say is empty."""
-        nonlocal cursor, unanswered, quiet_calls, first_listen
+        nonlocal cursor, unanswered, quiet_calls, first_listen, spoke_for_it
 
         # "Start listening" means from now, not from whenever the client
         # launched this process. First call only, or speech queued while the
@@ -265,6 +313,11 @@ def build_server(
 
         spoken_text = [item["text"] for item in heard]
         unanswered = spoken_text[-1]
+        # Everything already in the transcript belongs to earlier turns. Reading
+        # it now would be answering a finished conversation.
+        if watcher is not None:
+            spoke_for_it = False
+            watcher.catch_up()
         # No `detail`. It was eight lines of id and timestamp for a two word
         # greeting, sitting between the words and the instruction, and nothing
         # ever read it - the one thing it carried that mattered is below.
@@ -313,7 +366,7 @@ def build_server(
         ),
     )
     def converse(say: str, then: Literal["listen", "keep_working"], ctx: Context):
-        nonlocal unanswered, logged_capabilities
+        nonlocal unanswered, logged_capabilities, spoke_for_it
         spoken = say.strip()
 
         # Once per session, because it decides what is even possible here. A
@@ -331,7 +384,7 @@ def build_server(
         # the speakers. Bounced rather than blocked - the second call goes
         # through either way, so an agent that has correctly decided to keep
         # quiet cannot be wedged.
-        if not spoken and unanswered is not None:
+        if not spoken and unanswered is not None and not spoke_for_it:
             missed, unanswered = unanswered, None
             # Any unanswered utterance, not only the ones that parse as
             # questions. "Hey Jarvis" is not a question and is exactly what went
@@ -375,6 +428,7 @@ def build_server(
 
         if spoken:
             unanswered = None
+            spoke_for_it = False
             logger.info("Spoke, now listening for the reply.")
         # Speech plays on the service's own thread with the microphone muted
         # until it finishes, so listening from here costs nothing extra.

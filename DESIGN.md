@@ -239,6 +239,39 @@ owed is a claim to have answered, the server knows whether anything went through
 speakers, and a false claim is refused. That is a lie being caught rather than a memory
 being prompted, which is why it keeps working.
 
+**What worked: stop asking the agent and read what it wrote.** Every attempt above put
+words into a tool result, and a tool result is advice. The thing they were all reaching for
+was already on disk. Cline writes its whole conversation out as it goes - assistant
+messages, thinking, tool calls - so a reply typed instead of spoken is sitting in
+`~/.cline/data/sessions/<id>/<id>.messages.json`. `overhear.py` watches for new assistant
+prose while a reply is owed and speaks it.
+
+It asks the agent for nothing, which is the entire point. No schema argument to comply
+with, no note to read, no protocol feature, no capability to advertise. It was checked
+retroactively against every failure in this repo's history and recovers all of them,
+including the two lines from the Spotify session that were written and thrown away - a
+lead-in and a closing report, both perfectly sayable.
+
+Three things it does not do, deliberately. It does not read thinking, which is verbose,
+internal and frequently about the user rather than to them. It does not read prose written
+for the eye - code fences, tables, headings, numbered lists, anything past
+`overhear_max_chars` - because reading markdown aloud is worse than silence. And it strips
+emphasis and emoji from what survives, since SAPI pronounces `**947**` as "asterisk
+asterisk nine four seven".
+
+It is jank and the switch admits it. `service.overhear` turns it off and
+`service.agent_transcripts` points it elsewhere, because this depends on another program's
+on-disk format and that format is not ours: it can move without warning, and when it does
+this goes quiet rather than failing loudly. The session file is picked by modification
+time, which is a guess - the MCP server is told nothing about which session spawned it - so
+two conversations at once means it may speak the wrong one's answer.
+
+The one thing it cannot do is listen. Speaking overheard prose delivers the reply but does
+not reopen the microphone, so the conversation stops there; `converse()` is still the only
+thing that keeps it going, and the guide says so. Which makes this a safety net rather than
+a route, and the right shape for a safety net: invisible when things work, and the
+difference between an answer and silence when they do not.
+
 **What is genuinely left, stated plainly.** Sampling is the only mechanism in MCP that
 would truly enforce this: `sampling/createMessage` lets the server ask the client to run a
 completion, so `converse()` could obtain the reply itself and speak it without ever

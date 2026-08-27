@@ -37,6 +37,10 @@
     "max_wait_seconds": 55.0,
     "transcript_file": "heard.jsonl",
     "stale_after_seconds": 120.0,
+    "overhear": true,
+    "agent_transcripts": "",
+    "overhear_poll_seconds": 1.0,
+    "overhear_max_chars": 400,
     "hotkey": "num lock"
   },
   "screen": {

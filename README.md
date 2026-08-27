@@ -171,12 +171,30 @@ before slow work. Both arguments are required; the schema rejects the call befor
 body runs.
 
 Two tools became one after two live sessions where the agent listened, wrote its reply
-into its own chat text and ended the turn without speaking. The limit is worth knowing
-before you rely on it: **a required argument constrains a call that happens, it cannot
-cause a call to happen.** Nothing in MCP can - elicitation and `InputRequiredResult` route
-to the human, and Cline declares no `sampling` capability, so the server can never obtain
-model output. Three softer attempts were built and removed as jank; what they were and why
-they failed is in [`DESIGN.md`](DESIGN.md).
+into its own chat text and ended the turn without speaking. The limit is worth knowing:
+**a required argument constrains a call that happens, it cannot cause a call to happen.**
+Nothing in MCP can - elicitation and `InputRequiredResult` route to the human, and Cline
+declares no `sampling` capability, so the server can never obtain model output. Four
+attempts to make the agent remember were built and removed as jank; they are in
+[`DESIGN.md`](DESIGN.md) so the next idea has to clear a higher bar.
+
+So JARVIS stops asking and reads it instead. Cline writes its whole conversation to disk
+as it goes, so a reply typed rather than spoken is sitting in a file - and `overhear.py`
+watches for it and says it. It needs no cooperation from the agent, no protocol feature and
+no capability anyone has to advertise. Every failure in this repo's history was checked
+against it retroactively and it recovers all of them:
+
+```
+'Hey there! What's up?'
+'Hello sir. How can I help?'
+'Done - Spotify's open and Katy Perry's "Harleys In Hawaii" is playing now.'
+```
+
+Unarguably jank: it depends on another program's on-disk format, which is why it is
+`service.overhear` and why `service.agent_transcripts` can point somewhere else. Prose
+written for a reader is left alone rather than read out - code fences, tables, headings,
+anything over `overhear_max_chars` - and emphasis and emoji are stripped from what is
+spoken, because SAPI reads `**947**` as "asterisk asterisk nine four seven".
 
 Anything else drives the same service through the CLI:
 
@@ -425,6 +443,7 @@ whatever `JARVIS_CONFIG` points at.
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
 | `hotkey.py` | The global key that stops and starts listening |
+| `overhear.py` | Reading the agent's own prose off disk and speaking what it never said |
 | `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
 | `uia.py` | UI Automation through comtypes: the only Windows-specific module |
 | `hands.py` | Synthetic clicks and keystrokes, through SendInput |
@@ -444,7 +463,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 317 tests, no hardware, model or network needed
+uv run pytest        # 346 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

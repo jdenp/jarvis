@@ -110,6 +110,24 @@ class ServiceConfig:
     # Past this, an utterance is flagged as backlog rather than a live
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
+    # Read the connected agent's own prose off disk and speak it, when it wrote
+    # an answer as text instead of calling converse(). Nothing else works: the
+    # schema shapes a call that happens and cannot cause one, so four attempts
+    # to make an agent remember to speak were built and removed. This one needs
+    # no cooperation from it. See DESIGN.md - it depends on another program's
+    # on-disk format, which is why it is a switch.
+    overhear: bool = True
+    # Where the connected agent writes its conversation, one directory per
+    # session. Empty means Cline's own location under ~/.cline. Point it
+    # elsewhere for another client that writes the same shape.
+    agent_transcripts: str = ""
+    # How often that transcript is checked, and only while a reply is owed - so
+    # one stat() a second while somebody is actually waiting, and none otherwise.
+    overhear_poll_seconds: float = 1.0
+    # Longest overheard line that gets read out. Past this the agent was writing
+    # for a reader rather than a listener - a table, a diff, a summary with
+    # headings - and reading it aloud is worse than saying nothing.
+    overhear_max_chars: int = 400
     # Key that toggles transcription. Empty disables it. Avoid keys you type
     # with - the hook is global and does not swallow the keypress, so whatever
     # is chosen still does its normal job everywhere else. Num Lock earns it by

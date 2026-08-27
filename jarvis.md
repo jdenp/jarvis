@@ -67,6 +67,12 @@ A lead-in does not settle the debt. `then="keep_working"` was you saying this is
 
 the answer, so the answer is still owed.
 
+**A reply you type may get read out anyway.** JARVIS watches your side of the transcript
+and speaks prose you wrote instead of saying. Do not lean on it: it can speak but it cannot
+listen, so the conversation stops dead there, and it stays quiet on anything that looks
+like it was written for a reader. `converse()` is still the only thing that keeps the
+conversation going.
+
 **Voice is one long conversation, not a task per sentence.** It ends when they end it. An
 
 utterance carrying a `stale` note was spoken while nobody was listening - a leftover, not
