@@ -113,6 +113,48 @@ class ServiceConfig:
 
 
 @dataclass(frozen=True)
+class ScreenConfig:
+    """Seeing the desktop, and acting on it.
+
+    Looking is always allowed; it reads the accessibility tree and touches
+    nothing. Acting moves the real pointer and types on the real keyboard, so
+    it stays off until it is switched on.
+    """
+
+    control: bool = False
+    # Most targets offered at once. Past a few dozen a model stops reading the
+    # list and starts guessing, and narrowing to one window is the better fix.
+    max_targets: int = 60
+    # Older than this and a scan is refused rather than acted on. Windows move.
+    max_scan_age_seconds: float = 60.0
+    # Anything narrower or shorter than this is a divider, not a target.
+    min_target_pixels: int = 6
+    # Longest label kept per target. A chat row carries the whole last message
+    # as its name, and sixty of those is the prompt this was meant to shrink.
+    label_chars: int = 80
+    # Between moving the pointer and pressing, so hover states settle.
+    click_settle_seconds: float = 0.05
+    # After raising a window, before scanning it. Restoring is animated, and an
+    # element measured mid animation reports where it was, not where it lands.
+    focus_settle_seconds: float = 0.35
+    # Send the marked screenshot to the agent alongside the list. Off: without
+    # a vision model loaded it is a megabyte of cost for something unreadable.
+    send_image: bool = False
+    # Where `screenshot` writes, under logs/. Overwritten each time - it is the
+    # latest picture, not an album.
+    screenshot_file: str = "screen.png"
+    # Widest a screenshot is sent at, shrunk if wider. 0 keeps it full size. The
+    # whole desk across two monitors is 4880px and 665KB, which is worth
+    # narrowing before it goes anywhere.
+    screenshot_max_width: int = 1600
+    # Where the marked screenshot goes when one is asked for, under logs/. Empty
+    # means never draw one for the agent's own scans - a full screen grab is
+    # ~0.5s and the picture is for a human. `jarvis look --marks` ignores this
+    # and always writes one. Needs: uv sync --extra screen
+    marks_file: str = ""
+
+
+@dataclass(frozen=True)
 class Config:
     """Top level configuration."""
 
@@ -120,6 +162,7 @@ class Config:
     stt: SttConfig = field(default_factory=SttConfig)
     tts: TtsConfig = field(default_factory=TtsConfig)
     service: ServiceConfig = field(default_factory=ServiceConfig)
+    screen: ScreenConfig = field(default_factory=ScreenConfig)
     log_level: str = "INFO"
 
     @property
@@ -159,7 +202,7 @@ CONFIG_FILES = (
     "jarvis.toml",
 )
 
-_SECTIONS = frozenset({"audio", "stt", "tts", "service"})
+_SECTIONS = frozenset({"audio", "stt", "tts", "service", "screen"})
 
 # Where to look, not what to set. Without this JARVIS_CONFIG=x is read as a
 # setting called "config" and startup fails on the file it was meant to load.

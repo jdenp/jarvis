@@ -44,7 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, help="port for the voice service")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
-    sub = parser.add_subparsers(dest="command", metavar="[serve | say | next | status | mcp]")
+    sub = parser.add_subparsers(
+        dest="command", metavar="[serve | say | next | status | look | click | screenshot | mcp]"
+    )
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
     serve.add_argument("--no-http", action="store_true", help="transcribe to file only, no API")
@@ -66,6 +68,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("mcp", help="run as an MCP server over stdio, for Cline and friends")
     sub.add_parser("status", help="report on the running voice service")
+
+    look = sub.add_parser("look", help="number what is clickable on screen, and save the map")
+    look.add_argument("window", nargs="?", default="", help="part of a window title")
+    look.add_argument("--matching", default="", help="only targets whose label contains this")
+    look.add_argument("--focus", action="store_true", help="bring the window to the front first")
+    look.add_argument("--marks", action="store_true", help="write the marked screenshot too")
+    look.add_argument("--json", action="store_true", help="print the raw scan")
+
+    shot = sub.add_parser("screenshot", help="save a picture of a window")
+    shot.add_argument("window", nargs="?", default="", help="part of a window title")
+    shot.add_argument("--whole-desk", action="store_true", help="every monitor, not one window")
+    shot.add_argument("--numbers", action="store_true", help="draw the target numbers on it")
+    shot.add_argument("--out", help="where to write it, instead of logs/")
+
+    press = sub.add_parser("click", help="click a number from the last `jarvis look`")
+    press.add_argument("target", type=int, help="the id printed by `jarvis look`")
+    press.add_argument(
+        "--expecting", required=True, help="the label you read next to it, checked before clicking"
+    )
+    press.add_argument("--right", action="store_true", help="right click instead of left")
+    press.add_argument("--double", action="store_true", help="double click")
 
     cfg = sub.add_parser("config", help="show the settings in effect, as JSON")
     cfg.add_argument(
@@ -251,6 +274,117 @@ def run_config(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+SCAN_FILE = "scan.json"
+
+
+def run_look(config: Config, args: argparse.Namespace) -> int:
+    """Number what is on screen and leave the map where `jarvis click` will find it."""
+    from .screen import Screen, ScreenUnavailable
+
+    screen = Screen(config.screen)
+    try:
+        scan = (
+            screen.focus(args.window, args.matching)
+            if args.focus
+            else screen.look(args.window, args.matching)
+        )
+    except ScreenUnavailable as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps(scan.as_json(), indent=2))
+    else:
+        print(f"{scan.window}  ({scan.considered} elements, {len(scan.targets)} targets)")
+        for target in scan.targets:
+            where = f"  [{target.where}]" if target.where else ""
+            print(f"{target.number:4d}  {target.element.role:11s} {target.element.label}{where}")
+        if scan.truncated:
+            print(f"\n{scan.truncated} more did not fit. Narrow it with --matching.")
+
+    screen.remember(config.log_dir / SCAN_FILE)
+    if args.marks:
+        from . import marks
+
+        try:
+            path = marks.draw(
+                scan,
+                screen.backend.window_rect(scan.hwnd),
+                config.log_dir / (config.screen.marks_file or "marks.png"),
+            )
+            print(f"\nMarked screenshot: {path}")
+        except (OSError, RuntimeError) as exc:
+            print(exc, file=sys.stderr)
+            return 2
+    return 0
+
+
+def run_screenshot(config: Config, args: argparse.Namespace) -> int:
+    """A plain picture, for the times when the numbered list is not the question."""
+    from pathlib import Path
+
+    from . import marks
+    from .screen import Screen, ScreenUnavailable
+
+    screen = Screen(config.screen)
+    out = (
+        Path(args.out)
+        if args.out
+        else config.log_dir / (config.screen.screenshot_file or "screen.png")
+    )
+    try:
+        if args.whole_desk:
+            path = marks.capture(None, out, config.screen.screenshot_max_width)
+        elif args.numbers:
+            scan = screen.look(args.window)
+            path = marks.draw(scan, screen.backend.window_rect(scan.hwnd), out)
+        else:
+            hwnd, _title = screen.find_window(args.window)
+            bounds = screen.backend.window_rect(hwnd)
+            path = marks.capture(bounds, out, config.screen.screenshot_max_width)
+    except (ScreenUnavailable, OSError, RuntimeError) as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    print(f"{path}  ({path.stat().st_size // 1024} KB)")
+    return 0
+
+
+def run_click(config: Config, args: argparse.Namespace) -> int:
+    """Click a number from the saved scan. Yours to run - `screen.control` gates
+    the agent's tools, not this."""
+    from . import hands
+    from .screen import Screen, ScreenUnavailable
+
+    screen = Screen(config.screen)
+    try:
+        screen.recall(config.log_dir / SCAN_FILE)
+        target, _scan = screen.aim(args.target)
+    except ScreenUnavailable as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
+    from .screen import means_the_same
+
+    if not means_the_same(args.expecting, target.element.label):
+        print(
+            f"Target {args.target} is {target.element.label!r}, not {args.expecting!r}. "
+            "Nothing was clicked.",
+            file=sys.stderr,
+        )
+        return 1
+
+    x, y = target.element.centre
+    hands.click(
+        x,
+        y,
+        button="right" if args.right else "left",
+        count=2 if args.double else 1,
+        settle=config.screen.click_settle_seconds,
+    )
+    print(f"Clicked {target.element.label!r} at {x},{y}")
+    return 0
+
+
 def run_status(config: Config) -> int:
     with VoiceClient(config.service) as voice:
         try:
@@ -274,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Clients print results for something else to read, and MCP in particular
     # must keep stdout clean - anything there is parsed as JSON-RPC.
-    if args.command in {"say", "next", "status", "config"}:
+    if args.command in {"say", "next", "status", "config", "look", "click", "screenshot"}:
         configure(config.log_dir, "WARNING")
         if args.command == "say":
             return run_say(config, args)
@@ -282,6 +416,12 @@ def main(argv: list[str] | None = None) -> int:
             return run_next(config, args)
         if args.command == "config":
             return run_config(config, args)
+        if args.command == "look":
+            return run_look(config, args)
+        if args.command == "click":
+            return run_click(config, args)
+        if args.command == "screenshot":
+            return run_screenshot(config, args)
         return run_status(config)
 
     if args.command == "mcp":

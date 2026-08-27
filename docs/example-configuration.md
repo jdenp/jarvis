@@ -123,60 +123,55 @@ mitigation.
 
 ## Computer use, on the same agent
 
-[open-computer-use](https://github.com/QwenLM/open-computer-use) is an MCP server that
-drives Windows through UI Automation: nine tools for listing apps, reading an app's
-accessibility tree, clicking, typing, scrolling and pressing keys. It pairs well with voice,
-because "open the settings and turn on night light" becomes something the agent can actually
-carry out rather than describe.
+This started with [open-computer-use](https://github.com/QwenLM/open-computer-use), an
+MCP server driving Windows through UI Automation. It did not work here, and the reason
+was not the transport: `get_app_state` hands the model the whole accessibility tree,
+which for anything real is hundreds of nodes of panes and static text. Qwen3.6-35B given
+the lot picked plausible wrong elements and could not reliably interact with anything.
 
-```powershell
-npm i -g @qwen-code/open-computer-use
-open-computer-use doctor        # confirms UI Automation is reachable
-open-computer-use list-apps     # proves it can see your windows
-```
-
-In `cline_mcp_settings.json`, pointing at the bundled native binary rather than the npm shim
-so Cline does not have to spawn a `.cmd`:
+JARVIS does that job itself now, filtered - see
+[Screen control](../README.md#screen-control). The tree never reaches the model; a
+numbered list of the few dozen actionable elements does. On this machine:
 
 ```json
-{
-  "open-computer-use": {
-    "command": "C:\\Users\\short\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\open-computer-use\\dist\\windows\\amd64\\open-computer-use.exe",
-    "args": [
-      "mcp"
-    ],
-    "env": {},
-    "timeout": 120
-  }
-}
+{ "screen": { "control": true } }
 ```
 
-### The screenshot problem, unresolved
+### The screenshot problem, in hindsight
 
-`get_app_state` returns the accessibility tree **and a screenshot** - measured here, a text
-block of 126 characters and a 1.39 MB base64 PNG. The endpoint above has no vision, there
-being no `--mmproj`, so that image is pure cost.
+The unresolved part used to be Cline sending a 1.39 MB base64 PNG to an endpoint with no
+vision, there being no `--mmproj` in the launcher above. Two notes on that now:
 
-The text half is all a text-only model needs: elements come back indexed and `click` takes
-an `element_index`, so nothing in the loop wants pixels. Getting Cline to drop the image is
-the unsolved part. `supportsImages` is the right flag, but in Cline 3.0.55 it belongs to a
-model entry rather than to the provider:
+- Nothing in the JARVIS loop wants pixels. Targets come back as ids and labels, so the
+  text-only endpoint is missing nothing. `logs/marks.png` is written on request, for a
+  human to look at when a click goes somewhere unexpected, and `screen.send_image` is off.
+- Vision is available if wanted: there is an `mmproj` beside each GGUF, and
+  `--mmproj <file> --no-mmproj-offload` loads it without touching VRAM - the ~860 MB of
+  projector weights stay in system RAM and encoding runs on the CPU. The cost is a CPU
+  encode per image, plus the image tokens, which are dynamic-resolution here and run to
+  four figures for a full screen. `--image-max-tokens` caps that.
 
-```js
-{ id, temperature?, maxTokens?, contextWindow?, inputPrice?, outputPrice?, supportsImages? }
-```
+For screen control specifically it still is not worth turning on. The text list carries
+exact labels and exact geometry; a vision model reading a marked screenshot is inferring
+both, and pays seconds and a thousand context tokens to do it worse. The case that would
+genuinely need pixels is an application with no usable accessibility tree at all - a
+game, a canvas, a remote desktop window - and `send_image` does not solve that one
+either, because with no targets there is nothing to number. See DESIGN.md.
 
-Setting it flat in `providers.json` beside `contextWindow` achieves nothing - Cline drops
-keys outside that file's schema the next time it saves, without complaint. Where it persists
-the per-model flag has not been worked out here yet.
+The Cline side of it was never solved. `supportsImages` is the right flag but belongs to
+a model entry rather than a provider, and setting it flat in `providers.json` achieves
+nothing - Cline drops keys outside that file's schema on the next save, without
+complaint. Where it persists the per-model flag has not been worked out here.
 
 ### Notes
 
-- `doctor` reports that UI Automation works "when this process runs in the signed-in desktop
-  session". A process in session 0 cannot drive the desktop, the same way it cannot reach an
-  audio device - so if computer use goes dead, check the session before anything else.
-- The CLI is a useful fallback and a good way to try tools by hand:
-  `open-computer-use snapshot <app>` prints the tree as plain text with no screenshot at all.
-- `get_app_state` must be called once per turn before interacting with an app.
-- Windows blocks input from a process to any window running at a higher privilege, so a
-  click on an elevated app silently does nothing while its tree still reads fine.
+- UI Automation works only from the signed-in desktop session, the same way an audio
+  device does. A process in session 0 cannot drive the desktop, so if screen control goes
+  dead, check the session before anything else.
+- Windows blocks input from an unelevated process to any window running as administrator.
+  The tree still reads perfectly and every click silently does nothing.
+- `jarvis look` and `jarvis click` are the fallback and the way to try it by hand:
+  `jarvis look "outlook" --matching reply --marks` prints the numbers and writes the
+  marked screenshot. `screen.control` gates the agent's tools, not these.
+- The scan expires after 60s and is re-checked against what is under the pointer before
+  anything is pressed, so a stale number is refused rather than clicked.

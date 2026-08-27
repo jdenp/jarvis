@@ -2,7 +2,8 @@
 
 You have a microphone and a voice on the user's desktop. They speak, you speak back.
 
-You are the brain; JARVIS is only ears and a mouth.
+You are the brain. JARVIS is ears and a mouth, and - if screen control is on - a
+pair of hands.
 
 ## When to use it
 
@@ -241,6 +242,62 @@ service.
 | `resume_transcription()` | Starts reading it again |
 
 | `voice_status()` | Whether the microphone is live |
+| `look_at_screen(window, matching)` | Numbers everything clickable. Ids and labels, never coordinates |
+| `focus_window(window)` | Brings a window to the front, then scans it |
+| `click(target, expecting)` | Clicks a number. Refused if `expecting` is not what is there |
+| `type_text(target, expecting, text, then)` | Types into it. `then="press_enter"` submits |
+| `scroll(target, expecting, direction)` | Wheels over a target, for what is out of view |
+| `press_keys(keys)` | A shortcut, to whatever has focus. `playpause` and friends need no target |
+| `screenshot(window)` | The screen as a picture, if you can read images. The fallback, not the default |
+
+## Seeing the screen
+
+Only if screen control is switched on - `screen.control` in `config/jarvis.json`. Without
+it you get `look_at_screen` and nothing else, and its result says so.
+
+`look_at_screen()` numbers everything clickable in a window and gives you the numbers.
+Not the accessibility tree, and not pixels: one Teams window is 810 nodes and 54 of them
+are things you can act on, and only those 54 come back. There is nothing to measure and
+no arithmetic to do.
+
+```
+look_at_screen()
+    ->  {"scan": 1, "window": "Mail - Outlook - Google Chrome",
+         "targets": [{"id": 12, "label": "Reply", "role": "Button"}, ...]}
+click(target=12, expecting="Reply")
+```
+
+**`expecting` is checked.** Pass the label you read beside that number. If the number now
+points at something else - the window scrolled, the list redrew, you are working from an
+older scan - the click is refused instead of landing on whatever took its place. Getting
+it wrong costs you a turn. Not saying it would cost the user a deleted message.
+
+**Look again after anything you do.** Every action redraws something, and numbers move
+with it. A stale number is refused rather than mispressed, but a refusal is still a
+wasted turn.
+
+**`screenshot` is the fallback, not the route.** It returns a picture, which only helps
+if you can read images, and it gives you nothing to click. Use it when the question is what
+something *looks* like - an error dialog, a chart, a layout - and `look_at_screen` for
+anything you mean to act on.
+
+**Some things need no scan at all.** `press_keys("playpause")` and its siblings -
+`nexttrack`, `prevtrack`, `stop`, `volumeup`, `volumedown`, `mute` - are routed by Windows
+to whatever is playing. Pausing or skipping music is one call with no window to find. Reach
+for those before hunting the taskbar.
+
+Two more things worth knowing:
+
+- **A crowded window is truncated, and says so.** Outlook in a browser has 142 real
+  targets. When `not_shown` comes back, do not guess at a number - call
+  `look_at_screen(matching="reply")` and find it by name.
+- **Scrolled out of view means absent.** Offscreen controls are left out rather than
+  offered at coordinates nobody can click. If what you want is not listed, `scroll` and
+  look again.
+
+This is the user's real pointer and real keyboard. Say what you are about to do before you
+do it, and say what happened after - `say("Opening your calendar now, sir.",
+then="keep_working")`. And confirm anything destructive out loud first.
 
 ## Running the service
 

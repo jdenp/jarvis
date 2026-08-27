@@ -12,6 +12,7 @@ from typing import Literal
 
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
+from .screen import Screen, ScreenUnavailable, means_the_same
 
 logger = logging.getLogger("jarvis.mcp")
 
@@ -97,6 +98,25 @@ Either tool returning nothing heard means they have not spoken yet. Call
 stay_silent(because="already_spoke_my_reply") again."""
 
 
+# Appended only when screen.control is on, because until it is there is nothing
+# here an agent can do. Same shape as the rest: the constraint is in the
+# signature, and this only says what the signature will not let it get wrong.
+SCREEN_INSTRUCTION = """
+
+YOU ALSO HAVE HANDS. look_at_screen numbers everything clickable in a window and
+gives you the numbers - never coordinates, and there is nothing to measure.
+
+    click(target=12, expecting="Reply")
+
+`expecting` is the label you read beside that number, and it is checked. Get it
+wrong, or use a number from a scan the screen has moved on from, and the click is
+refused rather than landing on whatever took its place. Look again after anything
+you do: acting changes the numbers.
+
+This is the user's real pointer on their real desktop. Say what you are about to
+do before you do it, and say what happened after."""
+
+
 QUESTION_OPENERS = (
     "what", "when", "where", "who", "why", "how", "which", "whose",
     "is", "are", "was", "were", "do", "does", "did", "can", "could",
@@ -154,14 +174,19 @@ def looks_like_a_question(text: str) -> bool:
     return first in QUESTION_OPENERS
 
 
-def build_server(config: Config | None = None, client: VoiceClient | None = None):
+def build_server(
+    config: Config | None = None,
+    client: VoiceClient | None = None,
+    screen: Screen | None = None,
+):
     """Construct the MCP server. Import is deferred so the CLI stays fast."""
     from mcp.server.mcpserver import MCPServer
 
-    from . import __version__
+    from . import __version__, hands
 
     config = config or Config.load()
     voice = client or VoiceClient(config.service)
+    desktop = screen or Screen(config.screen)
     cursor = _initial_cursor(voice)
     # The last thing heard. Cleared only by say(..., then="listen"), so while it
     # is set the agent owes a reply - and "I already replied" is then a claim the
@@ -169,12 +194,13 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
     unanswered: str | None = None
     quiet_calls = 0
     first_listen = True
+    complained_about_marks = False
 
     server = MCPServer(
         name="jarvis",
         title="JARVIS voice",
         version=__version__,
-        instructions=INSTRUCTIONS,
+        instructions=INSTRUCTIONS + (SCREEN_INSTRUCTION if config.screen.control else ""),
     )
 
     def listen(wait: float) -> dict:
@@ -421,6 +447,312 @@ def build_server(config: Config | None = None, client: VoiceClient | None = None
         except ServiceUnavailable as exc:
             logger.warning("Resume failed - %s", exc)
             return {"error": str(exc), "paused": True}
+
+    # ------------------------------------------------------------------ screen
+
+    def marked(scan) -> str | None:
+        """Write the numbered boxes onto a screenshot, if one was asked for."""
+        nonlocal complained_about_marks
+        if not config.screen.marks_file:
+            return None
+        try:
+            from . import marks
+
+            path = marks.draw(
+                scan,
+                desktop.backend.window_rect(scan.hwnd),
+                config.log_dir / config.screen.marks_file,
+            )
+            return str(path)
+        except (OSError, RuntimeError) as exc:
+            # Once. It fails for the same reason every scan, and a warning per
+            # look buries everything else in the log.
+            logger.log(
+                logging.WARNING if not complained_about_marks else logging.DEBUG,
+                "No marked screenshot - %s",
+                exc,
+            )
+            complained_about_marks = True
+            return None
+
+    def described(scan):
+        """One scan, as the agent sees it. Never a coordinate."""
+        payload = scan.as_dict(config.screen.label_chars)
+        others = [title for _, title in desktop.windows() if title != scan.window]
+        if others:
+            payload["other_windows"] = others[:12]
+
+        image = marked(scan)
+        if image:
+            payload["marked_screenshot"] = image
+
+        if not config.screen.control:
+            payload["next_step"] = (
+                "Looking only - clicking and typing are switched off. Tell the user to "
+                'set "screen": {"control": true} in config/jarvis.json and restart the '
+                "MCP server if they want you to act on any of this."
+            )
+        elif scan.truncated:
+            payload["next_step"] = (
+                f"{scan.truncated} more targets did not fit and are not listed. If what "
+                "you want is missing, call look_at_screen again with matching= a word "
+                "from its label rather than guessing at a number. To act, name the "
+                'number AND what you expect it to be: click(target=12, expecting="Reply").'
+            )
+        else:
+            payload["next_step"] = (
+                "Act by number, and say what you expect that number to be: "
+                'click(target=12, expecting="Reply"). The label has to match or nothing '
+                "is pressed, which is what stops a number left over from an older scan "
+                "clicking whatever has moved into its place."
+            )
+        if config.screen.send_image and image:
+            from mcp.server.mcpserver.utilities.types import Image
+
+            return [payload, Image(path=image)]
+        return payload
+
+    def aim(target: int, expecting: str):
+        """Resolve a number, having made the agent say what it is aiming at."""
+        found, scan = desktop.aim(target)
+        if not means_the_same(expecting, found.element.label):
+            raise ScreenUnavailable(
+                f"Target {target} is {found.element.label!r}, not {expecting!r}. Nothing "
+                "was pressed. Either the number is wrong or you are working from an "
+                "older scan - look at the screen again and read the ids off the new list."
+            )
+        return found, scan
+
+    def acted(what: str, found, scan) -> dict:
+        logger.info("%s target %d %r in %r", what, found.number, found.element.label, scan.window)
+        return {
+            "done": what,
+            "target": found.number,
+            "label": found.element.label,
+            "next_step": (
+                "That will have changed the screen, so every number from scan "
+                f"{scan.id} is now a guess. Call look_at_screen before the next one "
+                "unless you are certain nothing moved - a number that no longer "
+                "matches is refused rather than clicked, but a refusal costs a turn."
+            ),
+        }
+
+    @server.tool(
+        name="look_at_screen",
+        title="See what is on screen, as numbered targets",
+        description=(
+            "List everything on screen that can be clicked or typed into, numbered. "
+            "Call it before acting, and again after anything you do.\n\n"
+            "With no arguments it reads the window in front. `window` picks a "
+            "different one by any part of its title, and the result names the others "
+            "that are open. `matching` keeps only the labels containing it, which is "
+            "how you find one control in a crowded window - a browser has hundreds "
+            "and only the first few dozen are listed.\n\n"
+            "You get ids and labels, not coordinates. There is nothing to measure and "
+            "no arithmetic to do: name the number and JARVIS works out where it is. A "
+            "minimised window is refused rather than scanned, because its coordinates "
+            "are left over from wherever it was last drawn."
+        ),
+    )
+    def look_at_screen(window: str = "", matching: str = ""):
+        try:
+            return described(desktop.look(window, matching))
+        except ScreenUnavailable as exc:
+            logger.warning("Look failed - %s", exc)
+            return {"error": str(exc), "targets": []}
+
+    @server.tool(
+        name="screenshot",
+        title="See the screen as a picture",
+        description=(
+            "Take a picture of a window and return it. The fallback for when the "
+            "numbered list is not the question - an error dialog to read, a chart, "
+            "anything where seeing it is the point rather than pressing it. With no "
+            "arguments it captures the window in front; whole_desk captures every "
+            "monitor.\n\n"
+            "Prefer look_at_screen for anything you intend to act on. It is smaller, it "
+            "is exact, and it gives you numbers you can click. This gives you neither. "
+            "with_numbers=true draws the boxes from a fresh scan onto the picture, which "
+            "is the two together.\n\n"
+            "Needs a model that can read images. If yours cannot, you will get a "
+            "description of the file and nothing useful in it."
+        ),
+    )
+    def screenshot(window: str = "", whole_desk: bool = False, with_numbers: bool = False):
+        from . import marks
+
+        target = config.log_dir / (config.screen.screenshot_file or "screen.png")
+        try:
+            if with_numbers and not whole_desk:
+                scan = desktop.look(window)
+                bounds = desktop.backend.window_rect(scan.hwnd)
+                path = marks.draw(scan, bounds, target)
+                described = scan.as_dict(config.screen.label_chars)
+            else:
+                if whole_desk:
+                    bounds, where = None, "every monitor"
+                else:
+                    hwnd, where = desktop.find_window(window)
+                    bounds = desktop.backend.window_rect(hwnd)
+                path = marks.capture(bounds, target, config.screen.screenshot_max_width)
+                described = {"window": where}
+        except (ScreenUnavailable, OSError, RuntimeError) as exc:
+            logger.warning("Screenshot failed - %s", exc)
+            return {"error": str(exc)}
+
+        described["screenshot"] = str(path)
+        described["next_step"] = (
+            "The picture is attached. Describe what the user needs from it and say it "
+            'with say(..., then="listen") - they cannot see your reply text. To act on '
+            "anything in it, call look_at_screen and use the numbers."
+        )
+        from mcp.server.mcpserver.utilities.types import Image
+
+        return [described, Image(path=str(path))]
+
+    if config.screen.control:
+
+        @server.tool(
+            name="focus_window",
+            title="Bring a window to the front and look at it",
+            description=(
+                "Raise a window, restoring it if it was minimised, then scan it. Input "
+                "goes to whatever holds the foreground rather than to whatever was "
+                "scanned last, so this is what to call when the thing you want is behind "
+                "something else. Matches any part of the title."
+            ),
+        )
+        def focus_window(window: str, matching: str = ""):
+            try:
+                return described(desktop.focus(window, matching))
+            except ScreenUnavailable as exc:
+                logger.warning("Focus failed - %s", exc)
+                return {"error": str(exc), "targets": []}
+
+        @server.tool(
+            name="click",
+            title="Click a numbered target",
+            description=(
+                "Click one of the numbers from look_at_screen. Both arguments are "
+                "required and `expecting` is checked: pass the label you read next to "
+                "that number, and if the number now points at something else the click "
+                "is refused instead of landing on it. Say what you meant and a stale "
+                "number costs you a turn rather than deleting the wrong message.\n\n"
+                "The window is brought to the front first. Clicking is a real pointer "
+                "moving on a real desktop, so it is visible and it interrupts whatever "
+                "the user was doing."
+            ),
+        )
+        def click(
+            target: int,
+            expecting: str,
+            button: Literal["left", "right"] = "left",
+            clicks: Literal[1, 2] = 1,
+        ) -> dict:
+            try:
+                found, scan = aim(target, expecting)
+            except ScreenUnavailable as exc:
+                logger.warning("Click refused - %s", exc)
+                return {"error": str(exc), "done": None}
+            x, y = found.element.centre
+            hands.click(
+                x, y, button=button, count=clicks, settle=config.screen.click_settle_seconds
+            )
+            what = f"{button} click x{clicks}" if clicks > 1 else f"{button} click"
+            return acted(what, found, scan)
+
+        @server.tool(
+            name="type_text",
+            title="Type into a numbered target",
+            description=(
+                "Click a target to put the caret in it, then type. `then` is required "
+                "and it is the decision worth getting right: press_enter submits the "
+                "form or sends the message, leave_it types and stops. A half written "
+                "message sent early cannot be taken back.\n\n"
+                "`clear_first` selects what is already there so the text replaces it "
+                "rather than joining onto the end. `expecting` is checked against the "
+                "label, as with click. Typed as unicode, so it does not depend on the "
+                "keyboard layout, and newlines in the text are sent as enter."
+            ),
+        )
+        def type_text(
+            target: int,
+            expecting: str,
+            text: str,
+            then: Literal["press_enter", "leave_it"],
+            clear_first: bool = False,
+        ) -> dict:
+            try:
+                found, scan = aim(target, expecting)
+            except ScreenUnavailable as exc:
+                logger.warning("Typing refused - %s", exc)
+                return {"error": str(exc), "done": None}
+            x, y = found.element.centre
+            hands.click(x, y, settle=config.screen.click_settle_seconds)
+            if clear_first:
+                hands.press("ctrl+a")
+            hands.type_text(text)
+            if then == "press_enter":
+                hands.press("enter")
+            result = acted("typed and submitted" if then == "press_enter" else "typed", found, scan)
+            result["text"] = text
+            return result
+
+        @server.tool(
+            name="scroll",
+            title="Scroll at a numbered target",
+            description=(
+                "Wheel the pointer over a target and scroll. Use it when what you want "
+                "is not in the list because it is scrolled out of view - offscreen "
+                "elements are left out of a scan rather than offered at coordinates "
+                "nobody can click. Scan again afterwards: the numbers will have moved."
+            ),
+        )
+        def scroll(
+            target: int,
+            expecting: str,
+            direction: Literal["up", "down"],
+            notches: int = 3,
+        ) -> dict:
+            try:
+                found, scan = aim(target, expecting)
+            except ScreenUnavailable as exc:
+                logger.warning("Scroll refused - %s", exc)
+                return {"error": str(exc), "done": None}
+            x, y = found.element.centre
+            turns = max(1, min(20, notches)) * (1 if direction == "up" else -1)
+            hands.scroll(x, y, turns, settle=config.screen.click_settle_seconds)
+            return acted(f"scrolled {direction}", found, scan)
+
+        @server.tool(
+            name="press_keys",
+            title="Press a keyboard shortcut",
+            description=(
+                "Press a combination like ctrl+s, alt+f4, escape or f5. It goes to "
+                "whatever holds the keyboard focus, which is whatever you last clicked "
+                "or typed into - there is no target to name and nothing to check, so be "
+                "sure of what is in front before using it. An unknown key name is "
+                "refused rather than half pressed.\n\n"
+                "The media keys are the exception and worth reaching for first: "
+                "playpause, nexttrack, prevtrack, stop, volumeup, volumedown, mute. "
+                "Windows routes those to whatever is playing, so pausing or skipping "
+                "music needs no window, no scan and no target at all."
+            ),
+        )
+        def press_keys(keys: str) -> dict:
+            try:
+                hands.press(keys)
+            except ValueError as exc:
+                logger.warning("Keys refused - %s", exc)
+                return {"error": str(exc), "done": None}
+            logger.info("Pressed %s", keys)
+            return {
+                "done": "pressed",
+                "keys": keys,
+                "next_step": (
+                    "Sent to whatever had focus. Call look_at_screen to see what it did."
+                ),
+            }
 
     @server.tool(
         name="voice_status",

@@ -39,5 +39,18 @@
     "stale_after_seconds": 120.0,
     "hotkey": "end"
   },
+  "screen": {
+    "control": false,
+    "max_targets": 60,
+    "max_scan_age_seconds": 60.0,
+    "min_target_pixels": 6,
+    "label_chars": 80,
+    "click_settle_seconds": 0.05,
+    "focus_settle_seconds": 0.35,
+    "send_image": false,
+    "screenshot_file": "screen.png",
+    "screenshot_max_width": 1600,
+    "marks_file": ""
+  },
   "log_level": "INFO"
 }

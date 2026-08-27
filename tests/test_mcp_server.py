@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from conftest import FakeDesktop, button
 from jarvis.config import Config
 from jarvis.mcp_server import build_server
 
@@ -366,3 +368,187 @@ def test_the_claim_is_accepted_once_it_is_true(rig):
     voice.next_heard = []
     raw("say", {"text": "Half past two, sir.", "then": "listen"})
     assert "have not called say()" not in raw("stay_silent", CLAIMS_ANSWERED)
+
+
+# ---------------------------------------------------------------------- screen
+
+
+def text_of(result) -> str:
+    """The tool's own JSON, lifted out of the MCP envelope.
+
+    Dumping the whole result with default=str double-escapes every quote, so
+    anything asserting on the JSON itself has to unwrap first.
+    """
+    return "\n".join(block.text for block in result.content if getattr(block, "text", None))
+
+
+def screen_rig(control: bool, elements=None):
+    """A server with a fake desktop behind it. Marks off - drawing needs Pillow."""
+    from jarvis.config import ScreenConfig
+    from jarvis.screen import Screen
+
+    backend = FakeDesktop(
+        elements if elements is not None else [button("Reply"), button("Delete", top=40)],
+        title="Mail",
+    )
+    config = replace(
+        Config(),
+        screen=ScreenConfig(control=control, marks_file="", focus_settle_seconds=0.0),
+    )
+    server = build_server(config, client=FakeVoice(), screen=Screen(config.screen, backend))
+    return server, backend
+
+
+def test_looking_is_always_offered_and_acting_is_not(rig):
+    """Looking reads the accessibility tree and touches nothing. Clicking moves
+    the real pointer, so it waits to be switched on."""
+    off = {tool.name for tool in asyncio.run(screen_rig(False)[0].list_tools())}
+    on = {tool.name for tool in asyncio.run(screen_rig(True)[0].list_tools())}
+
+    assert "look_at_screen" in off
+    assert {"click", "type_text", "scroll", "press_keys", "focus_window"} & off == set()
+    assert {"click", "type_text", "scroll", "press_keys", "focus_window"} <= on
+
+
+def test_looking_hands_back_numbers_and_never_coordinates():
+    server, _ = screen_rig(True)
+    result = text_of(asyncio.run(server.call_tool("look_at_screen", {})))
+    assert '"id": 1' in result and "Reply" in result
+    assert "centre" not in result, "no coordinates to reason about"
+
+
+def test_the_way_to_turn_clicking_on_is_in_the_result():
+    server, _ = screen_rig(False)
+    result = text_of(asyncio.run(server.call_tool("look_at_screen", {})))
+    assert "control" in result and "jarvis.json" in result
+
+
+def test_clicking_will_not_run_without_saying_what_it_expects():
+    """The same shape as say()'s `then`: the argument the model would rather skip
+    is the one that catches the mistake, so the schema will not let it."""
+    server, _ = screen_rig(True)
+    with pytest.raises(Exception, match="expecting"):
+        asyncio.run(server.call_tool("click", {"target": 1}))
+
+
+def test_a_click_that_names_the_wrong_thing_is_refused(monkeypatch):
+    from jarvis import hands
+
+    pressed = []
+    monkeypatch.setattr(hands, "click", lambda *a, **k: pressed.append(a))
+
+    server, _ = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    result = text_of(asyncio.run(server.call_tool("click", {"target": 1, "expecting": "Delete"})))
+
+    assert "not 'Delete'" in result
+    assert pressed == [], "and nothing was clicked"
+
+
+def test_a_click_that_names_the_right_thing_goes_through(monkeypatch):
+    from jarvis import hands
+
+    pressed = []
+    monkeypatch.setattr(hands, "click", lambda *a, **k: pressed.append(a))
+
+    server, _ = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    result = text_of(asyncio.run(server.call_tool("click", {"target": 1, "expecting": "Reply"})))
+
+    assert "left click" in result
+    assert len(pressed) == 1, "one click, at the centre of target 1"
+
+
+def test_clicking_before_looking_says_to_look_first(monkeypatch):
+    from jarvis import hands
+
+    monkeypatch.setattr(hands, "click", lambda *a, **k: pytest.fail("clicked blind"))
+    server, _ = screen_rig(True)
+    result = text_of(asyncio.run(server.call_tool("click", {"target": 1, "expecting": "Reply"})))
+    assert "Nothing has been scanned" in result
+
+
+def test_a_click_says_the_numbers_are_now_stale(monkeypatch):
+    """Anything you press redraws something. Carrying on with the old numbers is
+    the next mistake, so the result says so at the point of deciding."""
+    from jarvis import hands
+
+    monkeypatch.setattr(hands, "click", lambda *a, **k: None)
+    server, _ = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    result = text_of(asyncio.run(server.call_tool("click", {"target": 1, "expecting": "Reply"})))
+    assert "look_at_screen before the next one" in result
+
+
+def test_typing_will_not_run_without_saying_whether_it_submits():
+    """press_enter sends the message. A half written one cannot be taken back,
+    so it is not something to leave to a default."""
+    server, _ = screen_rig(True)
+    with pytest.raises(Exception, match="then"):
+        asyncio.run(
+            server.call_tool("type_text", {"target": 1, "expecting": "Reply", "text": "hello"})
+        )
+
+
+def test_typing_can_submit_or_stop(monkeypatch):
+    from jarvis import hands
+
+    typed: list = []
+    monkeypatch.setattr(hands, "click", lambda *a, **k: None)
+    monkeypatch.setattr(hands, "type_text", lambda text: typed.append(text))
+    monkeypatch.setattr(hands, "press", lambda keys: typed.append(f"<{keys}>"))
+
+    server, _ = screen_rig(True)
+    asyncio.run(server.call_tool("look_at_screen", {}))
+    asyncio.run(
+        server.call_tool(
+            "type_text",
+            {"target": 1, "expecting": "Reply", "text": "on my way", "then": "leave_it"},
+        )
+    )
+    assert typed == ["on my way"], "nothing sent"
+
+    asyncio.run(
+        server.call_tool(
+            "type_text",
+            {
+                "target": 1,
+                "expecting": "Reply",
+                "text": "on my way",
+                "then": "press_enter",
+                "clear_first": True,
+            },
+        )
+    )
+    assert typed[1:] == ["<ctrl+a>", "on my way", "<enter>"], "cleared, typed, then sent"
+
+
+def test_an_unknown_key_is_refused_rather_than_half_pressed():
+    server, _ = screen_rig(True)
+    result = text_of(asyncio.run(server.call_tool("press_keys", {"keys": "ctrl+nope"})))
+    assert "nope" in result and '"done": null' in result
+
+
+def test_the_screenshot_tool_is_there_without_screen_control():
+    """A picture reads the screen and touches nothing, so it sits on the same
+    side of the line as looking."""
+    off = {tool.name for tool in asyncio.run(screen_rig(False)[0].list_tools())}
+    assert "screenshot" in off
+
+
+def test_a_screenshot_without_pillow_says_how_to_get_it(monkeypatch):
+    """The only optional dependency in the whole feature, and the failure has to
+    name it rather than surfacing an ImportError."""
+    import builtins
+
+    real = builtins.__import__
+
+    def refuse(name, *args, **kwargs):
+        if name == "PIL":
+            raise ImportError("no PIL here")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse)
+    server, _ = screen_rig(True)
+    result = text_of(asyncio.run(server.call_tool("screenshot", {})))
+    assert "uv sync --extra screen" in result

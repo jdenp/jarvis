@@ -85,7 +85,38 @@ volume = 1.0
 # is no auth, so do not bind this to anything routable.
 host = "127.0.0.1"
 port = 8770
-# Longest a single wait_for_speech may block. Keep it under the agent's own tool
+# Longest a single stay_silent may block. Keep it under the agent's own tool
 # timeout (Cline's is around 60s) so the agent re-calls rather than erroring.
 max_wait_seconds = 55.0
 transcript_file = "heard.jsonl"
+# Past this, an utterance is flagged to the agent as backlog rather than a live
+# request. 0 disables the flag.
+stale_after_seconds = 120.0
+# Key that stops and starts listening, from anywhere. Empty disables it. The hook
+# is global and does not swallow the keypress, so avoid keys you type with.
+hotkey = "end"
+
+[screen]
+# Seeing the desktop and acting on it. Looking is always allowed - it reads the
+# accessibility tree and touches nothing. Everything that moves the real pointer
+# or types on the real keyboard waits on this.
+control = false
+# Most targets offered at once. Past a few dozen a model stops reading the list
+# and starts guessing; narrowing with matching= is the better answer.
+max_targets = 60
+# Older than this and a scan is refused rather than acted on. Windows move.
+max_scan_age_seconds = 60.0
+min_target_pixels = 6          # smaller than this is a divider, not a target
+# Longest label kept per target. A chat row carries its whole last message as its
+# name, and sixty of those is the prompt this was meant to shrink.
+label_chars = 80
+click_settle_seconds = 0.05    # pointer move to press, so hover states settle
+focus_settle_seconds = 0.35    # after raising a window - restoring is animated
+# Send the marked screenshot to the agent as well as the list. Without a vision
+# model loaded it is a megabyte of cost for something unreadable.
+send_image = false
+# Where the marked screenshot goes when one is asked for, under logs/. Empty
+# means never draw one for the agent's own scans - a full screen grab is ~0.5s
+# and the picture is for a human. `jarvis look --marks` ignores this and always
+# writes one. Needs: uv sync --extra screen
+marks_file = ""

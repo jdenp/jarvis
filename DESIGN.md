@@ -317,6 +317,99 @@ paying that cost on every shutdown.
 queue and mark itself idle in the window between `say()` incrementing and `say()` enqueueing,
 so `wait()` returns while an utterance is still to come.
 
+**The accessibility tree is not a prompt.** Handing the whole thing to a model does not
+work and the numbers say why: one Teams window is 810 nodes, Outlook in a browser 833,
+and in both cases the great majority are panes, groups, static text, images and
+scrollbars. A model given the lot picks something plausible and wrong. Filtered to what
+can actually be acted on, the same windows are 54 and 142. `screen.py` does the filtering
+and `uia.py` does the COM, which is the split that lets the judgement be tested without a
+desktop - every decision in `select()` runs against synthetic `Element`s.
+
+**The indirection is the whole trick, not the picture.** Set-of-mark pipelines usually
+draw numbers onto a screenshot and let a vision model read them back. The part that earns
+its keep is not the drawing: it is that the model names an id and the host owns the
+coordinate. Doing it in text costs nothing, works with no vision model loaded, and the
+signature makes the wrong answer unrepresentable - there is no x or y argument on any of
+these tools to get wrong. The marked screenshot is still drawn on request, for whoever is
+debugging a misclick, and `screen.send_image` will send it to a model that can read it.
+
+**Separate tools rather than one action verb.** The obvious shape is one `act(action,
+target, text)` call. It is worse here, because the schema can then only say "text is
+sometimes required" - where `click(target, expecting)` and `type_text(target, expecting,
+text, then)` each state exactly what their own call needs, and a missing argument is
+rejected before the tool body runs. Same reasoning as `say(text, then=...)`.
+
+**`expecting` is checked, the way `already_spoke_my_reply` is.** A target number is
+worthless on its own: a number from a scan taken before the list scrolled still resolves
+to a perfectly good coordinate, and that is how automation presses delete on the wrong
+row. So clicking requires the label as well, and refuses if the two disagree. The check
+is deliberately loose - either string containing the other, case and whitespace ignored -
+because labels are truncated before they reach the prompt and a model shortens a long one
+further. Strict equality would refuse correct calls; the mistake being caught is not
+subtle.
+
+**Verify the point, not the runtime id.** Before a click, whatever is under the target's
+centre is compared against the target. A runtime id settles it when it matches, but
+runtime ids do not survive a control being rebuilt, which virtualised lists do
+constantly - so the same name and role in the same place is accepted too. Two things fall
+out of this for free: occlusion (a desktop icon behind a terminal is genuinely not
+clickable, and the refusal says so rather than clicking the terminal) and layout drift.
+
+**Raise the window before checking, not after.** The first version activated the window
+after resolving the target, which meant a background target failed the point check every
+time - what is under a point in a covered window is the window covering it. Input goes to
+the foreground regardless of what was scanned, so raising has to come first. The activate
+is skipped when the window is already in front, which is the common case and keeps a
+click free of the settle delay.
+
+**A minimised window is refused rather than scanned.** This one was a surprise. UI
+Automation happily returns a full tree for a minimised window, with plausible looking
+coordinates left over from wherever it was last drawn, so acting on them presses things
+in whatever application is actually there. `GetWindowRect` is the honest witness - it
+answers -32000 - and `IsIconic` is the tidy way to ask.
+
+**Numbers are not invalidated after an action, only distrusted.** Tempting to throw the
+scan away every time something is pressed, since anything pressed redraws something. It
+is the wrong trade: ticking three checkboxes would cost three rescans at 0.2s each, and
+the point check already turns a stale number into a refusal rather than a misfire. The
+result says to look again instead, at the point where the next tool is being chosen.
+
+**Placing repeated labels.** A browser offers four buttons called Close and a coarse
+position does not separate them - a tab strip is all in the same ninth of the window.
+What does separate them is the thing before them in reading order, which is how anyone
+reads a tab strip: `Close, after "Gutenberg / Alpha - GitLab"`. Only repeats are placed;
+on a unique label it is noise. The placing runs before the `matching` filter, or a search
+for "close" strips out every neighbour it needed.
+
+**Looking is free, acting is opt in.** `look_at_screen` reads a tree and touches nothing,
+so it is always registered. Everything that moves the pointer waits on `screen.control`,
+and until it is set the look result says how to turn it on. The line is easy to explain:
+it can always tell you what is on screen, and can only touch it if you said so.
+
+**Real input rather than UI Automation patterns.** `Invoke()` is tidier where a control
+supports it, but coverage is patchy - much of what a browser or an Electron app draws has
+no pattern at all - and a control that quietly does nothing is worse than one behaving
+exactly as it does under a real hand. Two consequences to live with: Windows silently
+refuses input from an unelevated process to an elevated window, and the pointer visibly
+moves.
+
+**One automation object per thread.** COM apartments do not share objects and an MCP
+client may call one tool from a different thread than the last. Rather than marshal,
+`_automation()` keeps a thread-local - a few milliseconds once per thread - and
+everything handed out of `uia.py` is plain data that crosses threads freely. That is the
+same flattening that makes the module testable, arrived at for a different reason.
+
+**Cache request, or it is not a scan but a stall.** Every property comes back in one
+cross-process call through `FindAllBuildCache`. 810 elements cost 0.17s that way against
+several seconds read one attribute at a time. The cache request has its own `TreeScope`
+and it must be `Element`; setting it to `Descendants` is rejected with "the parameter is
+incorrect", which reads like the scope argument on `FindAll` and is not.
+
+**DPI awareness, set before anything else.** Windows reports rectangles in virtual pixels
+to a process that has not declared it understands scaling, so on a 150% display a click
+lands two thirds of the way to where it was aimed. It is set on first use of the backend,
+and failing means it was already set, which is the outcome wanted anyway.
+
 ## Swapping a component
 
 Each is a Protocol or a factory, so a replacement only has to match the shape:
@@ -339,3 +432,13 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   next calls `stay_silent`. An MCP notification could improve that, if clients honour it
 - Nothing fills the silence if the agent forgets to speak before slow work. That is
   deliberate - see above - but it does mean a forgetful agent sounds broken
+- Screen control has no undo and no dry run. `expecting` catches the wrong target but
+  nothing catches the right target with the wrong intent
+- Nothing reads text out of a control. An agent can see that an edit box exists and type
+  into it, but not what is already in it, so "read me the last message" is out of reach
+- The scan is per window. Anything spanning two windows, or a dialog opening over the one
+  being scanned, needs a second look to notice
+- An application with no usable accessibility tree - a game, a canvas, a remote desktop
+  window - is invisible to all of this, and turning on `send_image` does not rescue it:
+  with no targets there is nothing to number. That case is what a vision model detecting
+  controls in pixels is actually for, and it is not built here

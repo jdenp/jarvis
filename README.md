@@ -4,9 +4,11 @@
 
 A local voice service. It listens on your microphone and hands everything it hears to
 whatever agent is connected. That agent decides what was meant for it, and speaks back
-through your speakers.
+through your speakers. Switch screen control on and it can also see the desktop and
+click on it.
 
-JARVIS has no model of its own - it is ears and a mouth, and the agent is the brain.
+JARVIS has no model of its own - it is ears, a mouth and a pair of hands, and the agent
+is the brain.
 
 ## Features
 
@@ -29,6 +31,11 @@ JARVIS has no model of its own - it is ears and a mouth, and the agent is the br
 - `check_for_speech` for steering mid task, since nothing can preempt an agent
 - Half duplex with an echo guard, so JARVIS never transcribes its own voice
 - Append-only transcript with monotonic ids, so nothing is missed across a reconnect
+- **Screen control by number, not by pixel.** An agent asks what is on screen and gets
+  back a short numbered list of what can be clicked - one Teams window is 810
+  accessibility nodes and 54 of them are things you can act on. It names a number and a
+  label it expects to find there; if the label no longer matches, nothing is pressed. Off
+  by default, see [Screen control](#screen-control)
 - **Hotkey shortcut.** Press End to stop listening without touching the agent. The
   microphone stops being read, so nothing is transcribed, logged or written to
   `heard.jsonl` until you press it again - not merely withheld from the agent. Install
@@ -59,6 +66,9 @@ that, transcription is offline.
 .\jarvis.ps1 status                # exit 0 if it is up, exit 2 if not
 .\jarvis.ps1 next                  # blocks until you speak, no timeout
 .\jarvis.ps1 say "Opening it now"  # speaks it, muting the mic so it is not heard back
+.\jarvis.ps1 look                  # number what is clickable in the window in front
+.\jarvis.ps1 click 12 --expecting Reply   # press one of those numbers
+.\jarvis.ps1 screenshot            # a picture of the window in front
 .\jarvis.ps1 mcp                   # MCP server over stdio, for Cline and friends
 .\jarvis.ps1 --list-devices        # find your microphone
 .\jarvis.ps1 --device 1            # use a specific one
@@ -109,8 +119,10 @@ pattern, and doesn't poll. The MCP tools map cleanly to the JARVIS model of ears
 with the agent as brain. If you are using something else, the loopback HTTP API at
 `http://127.0.0.1:8770` covers everything the MCP tools do.
 
-Six tools appear: `say(text, then=...)`, `stay_silent(because=...)`, `check_for_speech()`,
-`pause_transcription()`, `resume_transcription()` and `voice_status()`.
+Eight tools appear: `say(text, then=...)`, `stay_silent(because=...)`,
+`check_for_speech()`, `pause_transcription()`, `resume_transcription()`, `voice_status()`,
+`look_at_screen(...)` and `screenshot(...)`. Turning on screen control adds five more -
+see [Screen control](#screen-control).
 
 The two required arguments exist because the written instructions could not hold the loop
 together. `then="listen"` speaks and then blocks for the reply in the same call, so
@@ -187,6 +199,82 @@ then in `config/jarvis.json`:
 model, so a smaller model saves less than you would think. `small.en` is the more accurate
 of the two, particularly on names and accents.
 
+## Screen control
+
+Off by default. Looking at the screen is always available - it reads the accessibility
+tree and touches nothing. Clicking moves your real pointer and types on your real
+keyboard, so it waits to be asked:
+
+```json
+{ "screen": { "control": true } }
+```
+
+Restart the MCP server after changing it; the tools are registered at startup.
+
+**The problem this solves.** Handing an agent the whole accessibility tree does not work.
+A Teams window is 810 nodes, almost all of them panes, groups and static text, and a
+model given the lot picks something plausible and wrong. Measured here, the same window
+has 54 elements you can actually act on. Outlook in a browser: 833 nodes, 142 targets.
+
+So the agent never sees the tree, and never sees a coordinate either. It gets a numbered
+list, and names a number:
+
+```powershell
+.\jarvis.ps1 look "outlook" --matching reply
+#    1  Button      Reply
+#    2  Button      Reply all
+.\jarvis.ps1 click 1 --expecting Reply
+```
+
+`--expecting` is the interesting part. It is required, and it is checked against the
+label before anything is pressed. A number left over from a scan taken before the list
+scrolled still resolves to a perfectly good coordinate, and that is how automation ends
+up pressing delete on the wrong row. Naming what you expect turns a misclick into a
+refusal.
+
+Three more things are checked before a click lands:
+
+- **The scan expires** after `screen.max_scan_age_seconds`, 60s by default.
+- **What is under the point** has to still be the target. That catches occlusion for
+  free: a desktop icon behind a terminal window is genuinely not clickable, and the
+  refusal says so instead of clicking the terminal.
+- **A minimised window is refused outright.** It still reports a full tree with plausible
+  coordinates left over from wherever it was last drawn, so scanning one hands back
+  numbers that point at other applications entirely.
+
+**Labels that repeat get placed.** A browser offers four buttons called Close with
+nothing to choose between them, so the repeats come back as `Close, after "Gutenberg /
+Alpha - GitLab"` - which is how anyone reads a tab strip. Only the repeats; on a unique
+label it would be noise.
+
+**And a picture, as the fallback.** `screenshot` returns the window in front as an
+image, for when seeing it is the point rather than pressing it - an error dialog to read,
+a chart, anything the accessibility tree does not describe. It needs a model that can
+read images, and `look_at_screen` beats it for anything you intend to act on, being
+smaller, exact, and clickable. `--numbers` gives you both at once.
+
+**The marked screenshot is for you, not the model.** `jarvis look --marks` writes
+`logs/marks.png` with a numbered box burned over every target, which turns "why did it
+click the wrong thing" from unanswerable into obvious. Needs `uv sync --extra screen`
+for Pillow. The agent's own scans do not draw one unless `screen.marks_file` is set,
+because a full screen grab is about half a second. A vision model can read the same
+image - `screen.send_image` - but with no `--mmproj` loaded it is a megabyte of cost for
+something unreadable, so that is off too.
+
+**Some of it needs no scan.** `press_keys` knows the media keys - `playpause`,
+`nexttrack`, `volumeup`, `mute` and the rest - and Windows routes those to whatever is
+playing. "Pause my music" is one call with no window to find. The shell's own windows are
+scannable too, under `Taskbar`: 39 elements down to 25 targets, one of them whatever you
+have pinned.
+
+No new dependencies for the working part: UI Automation comes through `comtypes`, which
+was already here for SAPI, and input goes through `SendInput` in `ctypes`.
+
+Two limits worth knowing. Windows silently refuses input from an unelevated process to
+any window running as administrator - the tree reads perfectly and every click does
+nothing. And UI Automation only reaches the desktop from the signed-in session, the same
+way an audio device does, so a service in session 0 sees nothing.
+
 ## What leaves this machine
 
 Nothing, unless you ask for it. At startup JARVIS prints exactly what each stage is doing:
@@ -201,6 +289,12 @@ Two backends are remote, both opt in, and both warn loudly when selected:
 | --- | --- | --- |
 | `stt.backend = "google"` | your raw microphone audio | Google |
 | `tts.engine = "edge"` | every reply, as text | Microsoft |
+
+One thing is not JARVIS's to promise: the `screenshot` tool hands a picture of your
+screen to whatever agent is connected, and everything a tool returns goes wherever that
+agent runs. Local model, local picture. Cloud model, and it is on someone else's server -
+along with whatever happened to be on screen at the time. Nothing else here sends an
+image, and `screen.send_image` is off by default for the same reason.
 
 `tts.engine = "auto"` never selects `edge` - you have to name it, and install it:
 
@@ -254,7 +348,7 @@ whatever `JARVIS_CONFIG` points at.
 
 | Module | Role |
 | --- | --- |
-| `cli.py` | Argument parsing, wiring, the `serve` / `say` / `next` / `status` / `config` / `mcp` commands |
+| `cli.py` | Argument parsing, wiring, the `serve` / `say` / `next` / `status` / `config` / `look` / `click` / `mcp` commands |
 | `service.py` | Owns the hardware, serves loopback HTTP |
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, shared by the CLI and MCP |
@@ -264,6 +358,10 @@ whatever `JARVIS_CONFIG` points at.
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
 | `hotkey.py` | The global key that stops and starts listening |
+| `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
+| `uia.py` | UI Automation through comtypes: the only Windows-specific module |
+| `hands.py` | Synthetic clicks and keystrokes, through SendInput |
+| `marks.py` | The numbered boxes drawn onto a screenshot |
 | `reap.py` | Clearing MCP servers that outlived their client |
 | `echo.py` | Recognising JARVIS's own voice coming back |
 | `config.py` | Defaults, TOML, environment |
@@ -279,7 +377,7 @@ against what was just spoken. If it still hears itself, raise `audio.min_energy_
 ## Development
 
 ```powershell
-uv run pytest        # 189 tests, no hardware, model or network needed
+uv run pytest        # 270 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```
