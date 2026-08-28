@@ -377,8 +377,10 @@ def runs_as_admin(hwnd: int) -> bool:
     keystrokes go nowhere with no error at all. Task Manager is the everyday one;
     an admin terminal and regedit are the same.
 
-    Being refused the handle is itself the answer, so a denial here reads as True
-    rather than as nothing.
+    Being refused the process handle is itself the answer and reads as True: that
+    refusal is the same wall. A query that fails after the handle was granted is
+    not evidence of anything and reads as False, because the cost of guessing
+    wrong here is telling somebody an ordinary window cannot be touched.
     """
     import ctypes
     from ctypes import wintypes
@@ -387,6 +389,17 @@ def runs_as_admin(hwnd: int) -> bool:
     try:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        # Declared, because a HANDLE is 64 bits and ctypes assumes every return
+        # is a C int - which silently truncates the handle to garbage.
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        advapi32.OpenProcessToken.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.HANDLE),
+        ]
+
         pid = wintypes.DWORD()
         ctypes.WinDLL("user32").GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if not pid.value:
@@ -403,7 +416,10 @@ def runs_as_admin(hwnd: int) -> bool:
                 got = advapi32.GetTokenInformation(
                     token, TOKEN_ELEVATION, ctypes.byref(elevated), 4, ctypes.byref(size)
                 )
-                return True if not got else bool(elevated.value) and not _we_are_admin()
+                if not got:
+                    logger.debug("Window %s let us look but would not say. Assuming not.", hwnd)
+                    return False
+                return bool(elevated.value) and not we_are_admin()
             finally:
                 kernel32.CloseHandle(token)
         finally:
@@ -413,7 +429,7 @@ def runs_as_admin(hwnd: int) -> bool:
         return False
 
 
-def _we_are_admin() -> bool:
+def we_are_admin() -> bool:
     """Elevated ourselves, in which case an elevated window is no obstacle."""
     import ctypes
 

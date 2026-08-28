@@ -108,6 +108,17 @@ transcribed, logged or written to `heard.jsonl` until you press it again - not m
 Caps Lock and Scroll Lock work the same way; any other key falls back to a hook and needs
 `uv sync --extra hotkey`. `service.hotkey = ""` disables it.
 
+Some windows are out of reach, and it will say so rather than trying. Anything running as
+administrator - Task Manager, an admin terminal, regedit - shows an unelevated process one
+element and no targets, silently discards its clicks and keystrokes, and swallows the hotkey
+while it has focus. `.\jarvis.ps1 -Admin` lifts all of that: one consent prompt at launch and
+never another, because a child process inherits its parent's token. The cost is the same fact -
+there is no second checkpoint, so every command `run_command` runs is an administrator command
+with nothing asked first, every application it opens is elevated too, and mapped network drives
+disappear because an elevated token is a separate logon session. It also cannot be used over
+SSH, since the consent dialog is drawn on the secure desktop where only somebody at the machine
+can click it. Off by default, and startup says which mode it is in.
+
 Asking works too. "Stop listening, I'm on a call" is a tool it has, and it tells you which
 key brings it back, because from then on it cannot hear you ask. Either way the live line
 says it is not listening, rather than claiming to be.

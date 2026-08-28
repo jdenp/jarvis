@@ -2,20 +2,32 @@
 #
 #   .\jarvis.ps1                  run the voice service in this terminal
 #   .\jarvis.ps1 -Windowed        open a new terminal window and run it there
+#   .\jarvis.ps1 -Admin           elevated, so it can drive Task Manager and friends
 #   .\jarvis.ps1 status           any other subcommand or flag is passed through
 #
 # -Windowed is what an agent should use: it returns immediately instead of
 # blocking the caller, and the live transcript stays visible in its own window.
+#
+# -Admin asks Windows for consent once, at launch, and never again: a child
+# process inherits its parent's token, so everything JARVIS starts after that is
+# already elevated and nothing prompts. That is the whole appeal and also the
+# whole cost - read the note above the switch below before using it.
 
 [CmdletBinding()]
 param(
     [switch]$Windowed,
+    [switch]$Admin,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Remaining
 )
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+
+function Test-Elevated {
+    $me = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    return $me.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
 function Get-JarvisCommand {
     # --directory rather than Set-Location: this script runs in the caller's
@@ -44,8 +56,43 @@ function Get-JarvisCommand {
     return @{ File = $python; Prefix = @("-m", "jarvis") }
 }
 
-$cmd = Get-JarvisCommand
+# -Admin, and what it costs.
+#
+# Windows blocks an unelevated process from reading an elevated window's
+# accessibility tree, from sending it clicks or keys, and from receiving a
+# keyboard hook while one has focus. Task Manager, an admin terminal, regedit:
+# all invisible and untouchable. Elevating JARVIS lifts all of that, because you
+# may reach down but never up.
+#
+# One consent prompt, at launch. After that a child process inherits this token,
+# so nothing prompts again - which is the appeal, and is also the point: there is
+# no second checkpoint. Every command run_command runs is an administrator
+# command with nothing asked first, and every application it opens is elevated
+# too. Mapped network drives also disappear: an elevated token is a separate
+# logon session and does not see them.
+#
+# It cannot work over SSH. The consent dialog is drawn on the secure desktop,
+# which by design nothing can see or click but somebody sitting at the machine.
 $passthrough = if ($Remaining) { $Remaining } else { @() }
+
+if ($Admin -and -not (Test-Elevated)) {
+    $self = $PSCommandPath
+    # No -Windowed and no -Admin: elevation already gives us a fresh console,
+    # and this one is the JARVIS window.
+    $again = @("-NoExit", "-ExecutionPolicy", "Bypass", "-File", $self)
+    if ($passthrough) { $again += $passthrough }
+    Write-Host "Asking Windows for administrator rights. Approve the prompt on the machine itself -"
+    Write-Host "it cannot be clicked over SSH."
+    try {
+        Start-Process powershell -Verb RunAs -ArgumentList $again
+    } catch {
+        Write-Host "Elevation was refused or no interactive desktop is available." -ForegroundColor Red
+        exit 1
+    }
+    exit 0
+}
+
+$cmd = Get-JarvisCommand
 
 if (-not $Windowed) {
     & $cmd.File @($cmd.Prefix + $passthrough)

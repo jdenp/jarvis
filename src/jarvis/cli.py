@@ -219,6 +219,13 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         )
     )
     logger.info("Transcript: %s", config.log_dir / config.service.transcript_file)
+    from .screen import we_are_admin
+
+    if we_are_admin():
+        logger.warning(
+            "Running as administrator. Elevated windows can be driven, and every command "
+            "run_command runs is an administrator command with nothing asked first."
+        )
 
     from . import brain
     from .brain import ModelUnavailable
