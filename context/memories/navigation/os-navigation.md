@@ -22,6 +22,17 @@ The prose around them is for whoever opens the file.
 - To open an application, press the Windows key, type its name and press enter.
   It needs no scan, it finds anything installed rather than only what is pinned,
   and it works for things with no name on the command line.
+- A web page is a shell job, and giving the browser the address is the whole of
+  it: `start chrome https://youtube.com`. That opens the page in the last used
+  profile with no profile picker, no new tab to find and no address bar to hunt
+  for. Never open a browser and then try to drive it to a page.
+- Chrome started with no address shows the profile picker, and the profile cards
+  do not appear in a scan - only the three dots beside each one, which opens
+  Edit and Delete and nothing else. Clicking there is a dead end however many
+  times you try it. `--profile-directory="Profile 1"` picks a named profile.
+- A browser tells the accessibility tree almost nothing about the page it is
+  showing. A whole window scans as about thirty elements with no address bar
+  among them, so ctrl+L is how you reach it - no scan, every browser.
 - The Start menu exposes one element covering itself, so a scan of it comes back
   with nothing clickable. That is expected: type wherever the caret already is.
 - Reach for a command line only after that fails. Plenty of what people run has

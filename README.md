@@ -298,7 +298,10 @@ device does, so a service in session 0 sees nothing.
 
 `screen.control = false` leaves the read-only half - looking and screenshots, no pointer.
 `jarvis look --marks` writes `logs/marks.png` with a numbered box burned over every target,
-which turns "why did it click the wrong thing" from unanswerable into obvious.
+which turns "why did it click the wrong thing" from unanswerable into obvious. `--raw` prints
+every element the window exposed with the dropped ones marked, which answers the other half -
+whether a control JARVIS could not press was filtered out or was never in the tree at all.
+The two look identical from the outside and want opposite fixes.
 
 No new dependencies for any of it: UI Automation comes through `comtypes`, which was already
 here for SAPI, and input goes through `SendInput` in `ctypes`.
@@ -453,7 +456,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 629 tests, no hardware, model or network needed
+uv run pytest        # 638 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

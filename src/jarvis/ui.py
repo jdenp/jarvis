@@ -59,6 +59,10 @@ GAVE = " "
 # Up one row, leaving the column alone. What gives the live line back its place
 # after somebody has typed on the row beneath it.
 UP = "\033[A"
+# Save and restore the cursor, DEC style. How the live line is redrawn a row
+# above somebody who is part way through typing without moving their caret.
+SAVE = "\0337"
+RESTORE = "\0338"
 
 
 def tail(text: str, width: int) -> str:
@@ -193,11 +197,17 @@ class Ui:
         again underneath: one row given up and one taken, so release() still
         knows the way back.
         """
-        self.stream.write("\r" + " " * (self.width() - 1) + "\r")
+        self._wipe_row(self.width() - 1)
         if self._stepped:
+            # Up onto the live line, which is spent on the permanent text - and
+            # then a fresh row is pushed for the live line to come back on, so
+            # the next tick does not draw the status over what was just said.
             self.stream.write(UP)
-            self._erase()
-        self.stream.write(text + "\n")
+            self._wipe_row(self._width)
+            self._width = 0
+            self.stream.write(text + "\n\n")
+        else:
+            self.stream.write(text + "\n")
         self.stream.flush()
         if self._repaint is not None:
             self._repaint()
@@ -281,7 +291,13 @@ class Ui:
         """Nothing is happening. Clears the live line without printing."""
         with self._lock:
             self._status = ""
-            self._erase()
+            if self._held and self._stepped:
+                self.stream.write(SAVE + UP)
+                self._wipe_row(self._width)
+                self.stream.write(RESTORE)
+                self._width = 0
+            else:
+                self._erase()
             self.stream.flush()
 
     def hold(self, repaint=None) -> None:
@@ -348,7 +364,12 @@ class Ui:
         what it has cost - so it reads as one status line in the corner rather
         than two things at opposite ends of an empty row.
         """
-        if not self.live or not self._status or self._held:
+        if not self.live or not self._status:
+            return
+        # Held, but with no row of its own to draw on: hold() found nothing
+        # drawn and pushed nothing, so the row above belongs to the
+        # conversation and writing there would take a line of it.
+        if self._held and not self._stepped:
             return
         frame = self.frames[self._tick % len(self.frames)]
         text = f"{frame} {self._status}"
@@ -359,16 +380,34 @@ class Ui:
         # are the part worth keeping when the window is narrow.
         room = self.width() - 1
         text = text[-room:] if len(text) > room else text.rjust(room)
-        self._erase()
-        self.stream.write(paint("dim", text, self.colour))
+        painted = paint("dim", text, self.colour)
+        if self._held:
+            # A row up, and back to where their caret was. Without this the
+            # line stopped the moment a prompt opened and stayed stopped, which
+            # after escape - where the prompt reopens by itself and nobody is
+            # necessarily about to type - read as the terminal having died.
+            self.stream.write(SAVE + UP)
+            self._wipe_row(self._width)
+            self.stream.write(painted + RESTORE)
+        else:
+            self._erase()
+            self.stream.write(painted)
         self.stream.flush()
         self._width = len(text)
 
+    def _wipe_row(self, width: int) -> None:
+        """Blank the row the cursor is on, leaving it at the start."""
+        self.stream.write("\r" + " " * max(0, width) + "\r")
+
     def _erase(self) -> None:
-        """Wipe the live line. Caller holds the lock."""
-        if not self._width:
+        """Wipe the live line. Caller holds the lock.
+
+        Only when the cursor is actually on it. Held, it is a row up and the
+        row under the cursor belongs to whoever is typing.
+        """
+        if not self._width or self._held:
             return
-        self.stream.write("\r" + " " * self._width + "\r")
+        self._wipe_row(self._width)
         self._width = 0
 
 

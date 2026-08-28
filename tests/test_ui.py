@@ -282,3 +282,67 @@ def test_the_name_is_painted_before_anything_else_is_written():
     art = _banner()
     assert "Just A Rather Very Intelligent System" in art
     assert art.startswith(COLOUR["art"]) or "\033[" not in art, "orange, or plain with no codes"
+
+
+# ------------------------------------------------- the live line while typing
+
+
+def test_the_live_line_keeps_going_on_the_row_above_an_open_prompt():
+    """It used to freeze the moment a prompt opened. Escape reopens the prompt
+    by itself and nobody is necessarily about to type, so the line sat there
+    stopped and read as a dead terminal until JARVIS next said something."""
+    from jarvis.ui import RESTORE, SAVE, UP
+
+    ui, written = screen(colour=True)
+    ui.meter("ctx 2.6k/98k")
+    ui.status("listening")
+    ui.hold()
+    before = len(written.getvalue())
+
+    ui._tick += 1
+    ui._draw()
+
+    after = written.getvalue()[before:]
+    assert "listening" in after, "still drawing"
+    assert after.startswith(SAVE + UP), "a row up from where they are typing"
+    assert after.endswith(RESTORE), "and their caret goes back where it was"
+
+
+def test_it_will_not_draw_on_a_row_it_does_not_own():
+    """With nothing on the live line, hold() pushes no row - so the row above
+    belongs to the conversation and writing there costs a line of it."""
+    ui, written = screen(colour=True)
+    ui.hold()
+    assert ui._stepped is False
+    ui.status("thinking")
+    assert "thinking" not in written.getvalue()
+
+
+def test_what_arrives_mid_sentence_gets_a_row_and_the_live_line_gets_a_new_one():
+    """Otherwise the next tick draws the status straight over what was said."""
+    ui, written = screen(colour=True)
+    ui.meter("ctx 2.6k/98k")
+    ui.status("listening")
+    ui.hold()
+    before = len(written.getvalue())
+    ui.spoke("Half past two, sir.")
+
+    after = written.getvalue()[before:]
+    assert after.count("\n") == 2, "one row for the reply, one pushed for the live line"
+    ui._draw()
+    assert "listening" in written.getvalue()[before + len(after) :], "and it draws again"
+
+
+def test_resting_while_held_clears_the_row_above_not_the_one_being_typed_on():
+    from jarvis.ui import RESTORE, SAVE
+
+    ui, written = screen(colour=True)
+    ui.meter("ctx 2.6k/98k")
+    ui.status("listening")
+    ui.hold()
+    before = len(written.getvalue())
+    ui.resting()
+
+    after = written.getvalue()[before:]
+    assert SAVE in after and RESTORE in after
+    assert ui._width == 0

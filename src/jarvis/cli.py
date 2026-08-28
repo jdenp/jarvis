@@ -81,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument("--focus", action="store_true", help="bring the window to the front first")
     look.add_argument("--marks", action="store_true", help="write the marked screenshot too")
     look.add_argument("--json", action="store_true", help="print the raw scan")
+    look.add_argument(
+        "--raw",
+        action="store_true",
+        help="every element the window exposed, not only the ones offered as targets",
+    )
 
     kit = sub.add_parser("tools", help="what the brain can do, as the model is told it")
     kit.add_argument(
@@ -381,7 +386,21 @@ def run_look(config: Config, args: argparse.Namespace) -> int:
         print(exc, file=sys.stderr)
         return 2
 
-    if args.json:
+    if args.raw:
+        # What the window said, before any of the filtering. The only way to
+        # tell "the control is not in the tree" from "the control was dropped",
+        # which from the outside look identical and want opposite fixes.
+        offered = {element.runtime_id: target.number for target, element in scan.pairs()}
+        elements = screen.backend.elements(scan.hwnd)
+        print(f"{scan.window}  ({len(elements)} elements, {len(scan.targets)} offered)")
+        for element in elements:
+            number = offered.get(element.runtime_id)
+            mark = f"{number:>4}" if number else "   ."
+            box = f"{element.width}x{element.height} at {element.left},{element.top}"
+            print(f"{mark}  {element.role:14s} {element.name[:44]:44s} {box}")
+        print()
+        print("A dot is an element that was not offered as a target.")
+    elif args.json:
         print(json.dumps(scan.as_json(), indent=2))
     else:
         print(f"{scan.window}  ({scan.considered} elements, {len(scan.targets)} targets)")

@@ -147,6 +147,11 @@ class Scan:
     def age(self, now: float | None = None) -> float:
         return (time.monotonic() if now is None else now) - self.taken_at
 
+    def pairs(self):
+        """Every target with the element behind it, for anything comparing the
+        offered list against the raw tree."""
+        return [(target, target.element) for target in self.targets]
+
     def as_json(self) -> dict:
         """The whole scan, coordinates included, for another process to reload.
 

@@ -16,7 +16,7 @@ import pytest
 from conftest import FakeDesktop, button
 from jarvis.config import Config, project_root
 from jarvis.screen import Screen
-from jarvis.tools import Toolbox, build_toolbox, clip, parse_arguments, render_scan, shell
+from jarvis.tools import Tool, Toolbox, build_toolbox, clip, parse_arguments, render_scan, shell
 
 
 def desk(*elements, **kwargs) -> Screen:
@@ -428,3 +428,65 @@ def test_something_that_works_in_between_clears_it():
     tools.run("look_at_screen", {})
     again = tools.run("click", {"target": 1, "expecting": "Reply"})
     assert "word for word" not in again
+
+
+# ------------------------------------------------------------- going in circles
+
+
+def clicker():
+    """A tool that always works and never gets anywhere."""
+    return Toolbox([Tool(name="click", description="click", run=lambda **k: "left clicked Casual")])
+
+
+def test_the_third_identical_call_says_so():
+    """A live session pressed "More actions for Casual" six times over two
+    minutes. Every click worked, so nothing refused and nothing escalated - it
+    opened the same Edit/Delete menu each time and the card the user wanted was
+    never in the scan to be pressed."""
+    box = clicker()
+    assert "third time" not in box.run("click", {"target": 1})
+    assert "third time" not in box.run("click", {"target": 1})
+    assert "third time" in box.run("click", {"target": 1})
+
+
+def test_a_look_in_between_does_not_reset_it():
+    """Which is the shape it actually takes: click, look, click, look. Comparing
+    against only the previous call would never have fired once."""
+    box = Toolbox(
+        [
+            Tool(name="click", description="click", run=lambda **k: "clicked"),
+            Tool(name="look_at_screen", description="look", run=lambda **k: "scanned"),
+        ]
+    )
+    for _ in range(2):
+        box.run("click", {"target": 1})
+        box.run("look_at_screen", {})
+    assert "third time" in box.run("click", {"target": 1})
+
+
+def test_a_different_argument_is_a_different_call():
+    box = clicker()
+    for target in (1, 2, 3):
+        assert "third time" not in box.run("click", {"target": target})
+
+
+def test_the_result_itself_still_comes_back():
+    box = clicker()
+    for _ in range(3):
+        result = box.run("click", {"target": 1})
+    assert result.startswith("left clicked Casual")
+
+
+def test_it_only_looks_back_so_far():
+    """A button pressed once a minute for a good reason should not be nagged."""
+    box = Toolbox(
+        [
+            Tool(name="click", description="click", run=lambda **k: "clicked"),
+            Tool(name="look_at_screen", description="look", run=lambda **k: "scanned"),
+        ]
+    )
+    box.run("click", {"target": 1})
+    for _ in range(8):
+        box.run("look_at_screen", {})
+    box.run("click", {"target": 1})
+    assert "third time" not in box.run("click", {"target": 1})

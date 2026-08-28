@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,11 @@ from .config import Config
 from .screen import Screen, ScreenUnavailable, means_the_same, offers_nothing_clickable
 
 logger = logging.getLogger("jarvis.tools")
+
+# How far back a repeat still counts. Long enough to see through the look that
+# sits between two clicks, short enough that a button pressed once a minute for
+# a good reason is not nagged about.
+RECENT_CALLS = 8
 
 # Past this a command wrote a file rather than an answer, and the tail is
 # usually the part that matters - so the middle goes, not the end.
@@ -67,6 +73,11 @@ class Toolbox:
         # The last refusal, cleared by anything that works. Repeating one word
         # for word is the signal that looking again is not going to help.
         self._refused = ""
+        # The calls that worked, lately. A refusal repeating is already caught;
+        # this is the other half - a click that succeeds every time and changes
+        # nothing, which is what happens when the only target offered is not
+        # the thing anybody wants pressed.
+        self._recent: deque[str] = deque(maxlen=RECENT_CALLS)
 
     def specs(self) -> list[dict]:
         return [tool.spec() for tool in self.tools.values()]
@@ -99,7 +110,28 @@ class Toolbox:
             logger.exception("%s failed", name)
             return f"{name} failed - {type(exc).__name__}: {exc}"
         self._refused = ""
-        return result
+        return self._going_round(f"{name}({arguments!r})", result)
+
+    def _going_round(self, signature: str, result: str) -> str:
+        """The same call a third time lately, with the screen no further on.
+
+        A live session pressed "More actions for Casual" six times over two
+        minutes. Each click worked, so nothing refused and nothing escalated; it
+        opened the same little Edit/Delete menu each time, and the profile card
+        the user actually wanted was not in the scan to be clicked. Succeeding
+        at the wrong thing repeatedly is its own failure and needs its own line.
+        """
+        seen = self._recent.count(signature)
+        self._recent.append(signature)
+        if seen < 2:
+            return result
+        return (
+            f"{result}\n\nThat is the third time you have run this exact call. It works "
+            "and it is not getting you anywhere, so what you want is not here - very "
+            "likely it is not in the scan at all, and no amount of looking again will "
+            "add it. Try the keyboard or a shell command instead, or say plainly what "
+            "you cannot do. Do not run it a fourth time."
+        )
 
     def _refusal(self, message: str) -> str:
         """A refusal, escalated when it is the same one twice.

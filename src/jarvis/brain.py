@@ -107,6 +107,10 @@ Reply with nothing at all if there is nothing worth keeping, which is most
 turns. Otherwise reply with at most two lines, each beginning with "- " and each
 a single sentence somebody could act on months from now.
 
+Only what you actually saw happen, never why you think it happened. A turn that
+went badly usually teaches nothing except that it went badly, and a guess at the
+cause written down as fact is worse than an empty file.
+
 Never a target number: every scan numbers what it finds again from scratch, so a
 number written down here points at something else tomorrow. Never anything that
 would be true of any Windows machine, only this one.
