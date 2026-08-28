@@ -17,6 +17,7 @@ from jarvis.brain import (
     HERE_IT_IS,
     NO_MODEL,
     NOTHING_TO_SAY,
+    SQUASHED,
     Brain,
     Call,
     Model,
@@ -1074,6 +1075,109 @@ def test_ctx_holds_still_when_the_tools_come_off():
     it._ask([])
     assert [reading.split(" - ")[0] for reading in shown.readings] == ["ctx 3.0k/98k"] * 2
     assert shown.readings[-1].endswith("in 4.2k - out 50")
+
+
+def scanned(brain, turns: int, size: int = 4000) -> None:
+    """A conversation of `turns` turns, each one a scan and an answer."""
+    for n in range(turns):
+        brain.messages += [
+            {"role": "user", "content": f"question {n}"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": f"c{n}", "function": {"name": "look_at_screen"}}],
+            },
+            {"role": "tool", "tool_call_id": f"c{n}", "content": "target " * (size // 7)},
+            {"role": "assistant", "content": f"answer {n}"},
+        ]
+
+
+def test_old_scans_are_emptied_before_any_turn_is_dropped():
+    """A crowded window is three thousand tokens of numbered targets that were
+    stale the moment anything was clicked. Dropping the text keeps the
+    conversation; dropping the turn does not."""
+    it = brain()
+    scanned(it, 8)
+    it._spent = 70_000  # over 0.65 of a 98304 window
+    it._squash()
+
+    assert it._turns() == 8, "nothing was deleted"
+    results = [m["content"] for m in it.messages if m.get("role") == "tool"]
+    assert results[0] == SQUASHED.format(name="look_at_screen"), "named, so it can be run again"
+    assert "target target" in results[-1], "the latest scan is untouched"
+
+
+def test_the_last_two_turns_keep_their_results_whatever_the_pressure():
+    """The last scan is what "no, the one below it" refers to."""
+    it = brain()
+    scanned(it, 6)
+    it._spent = 10_000_000
+    it._squash()
+
+    results = [m["content"] for m in it.messages if m.get("role") == "tool"]
+    assert len([kept for kept in results if "target" in kept]) == 2
+
+
+def test_squashing_stops_as_soon_as_it_is_under():
+    """Oldest first and no further. There is no reason to throw away the sixth
+    scan back when emptying the tenth was enough."""
+    it = brain()
+    scanned(it, 10)
+    it._spent = 64_500  # a few hundred over the 63.8k ceiling, one scan's worth
+    it._squash()
+
+    emptied = [m for m in it.messages if m.get("role") == "tool" and "target" not in m["content"]]
+    assert len(emptied) == 1
+
+
+def test_a_conversation_under_the_ceiling_is_left_alone():
+    it = brain()
+    scanned(it, 8)
+    it._spent = 50_000
+    it._squash()
+    assert all("target" in m["content"] for m in it.messages if m.get("role") == "tool")
+
+
+def test_short_results_are_not_worth_squashing():
+    """Thirty tokens of apology in place of forty tokens of filename is a loss
+    twice over."""
+    it = brain()
+    scanned(it, 8, size=80)
+    it._spent = 10_000_000
+    it._squash()
+    assert all("target" in m["content"] for m in it.messages if m.get("role") == "tool")
+
+
+def test_the_call_survives_its_result():
+    """A tool result whose call is gone is rejected outright by some endpoints,
+    which is the whole reason this is safe and dropping messages is not."""
+    it = brain()
+    scanned(it, 8)
+    it._spent = 10_000_000
+    it._squash()
+
+    calls = {c["id"] for m in it.messages for c in m.get("tool_calls") or []}
+    answers = {m["tool_call_id"] for m in it.messages if m.get("role") == "tool"}
+    assert calls == answers
+
+
+def test_squashing_twice_changes_nothing_the_second_time():
+    it = brain()
+    scanned(it, 8)
+    it._spent = 10_000_000
+    it._squash()
+    before = [dict(m) for m in it.messages]
+    it._squash()
+    assert it.messages == before
+
+
+def test_it_can_be_turned_off():
+    config = replace(Config(), brain=replace(Config().brain, squash_fraction=0))
+    it = brain(config=config)
+    scanned(it, 8)
+    it._spent = 10_000_000
+    it._squash()
+    assert all("target" in m["content"] for m in it.messages if m.get("role") == "tool")
 
 
 def test_a_conversation_that_gets_too_big_loses_its_oldest_turn():

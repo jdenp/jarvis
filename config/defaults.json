@@ -72,6 +72,7 @@
     "stream": true,
     "context_limit": 0,
     "max_context_fraction": 0.7,
+    "squash_fraction": 0.65,
     "preload": true,
     "shell": true,
     "thinking": true,

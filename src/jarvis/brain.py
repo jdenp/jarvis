@@ -124,6 +124,20 @@ not what they seem to want. Only how the machine behaves.
 Already written down:
 {known}"""
 
+# What an old tool result is replaced with once the window gets tight. Named,
+# because "you ran look_at_screen here" is worth keeping and the three thousand
+# tokens of numbered targets under it are not.
+SQUASHED = "({name} ran here. Its result was dropped to make room - run it again if you need it.)"
+
+# Results shorter than this are left alone. Squashing forty tokens to thirty
+# saves nothing and a short result is usually a fact worth having - a filename, a
+# path, an answer.
+SQUASH_OVER = 400
+
+# Turns whose results survive whatever the pressure: this one and the one before.
+# The last scan is what "no, the one below it" refers to.
+KEEP_WHOLE = 2
+
 # Sent with an image, because a picture arriving on its own is a turn the model
 # has to guess the purpose of.
 HERE_IT_IS = "The image you asked to look at:"
@@ -896,6 +910,56 @@ class Brain:
         self.voice.say(spoken)
         return spoken
 
+    def _squash(self) -> None:
+        """Drop the text of old tool results, keeping the shape around them.
+
+        Almost all of a long session is scans. A crowded window is three
+        thousand tokens of numbered targets and they were stale the moment
+        anything was clicked, so an afternoon of them is most of the window
+        spent on lists nobody will read again. What is worth keeping is what was
+        asked, what was run and what was said, and that is a few hundred tokens
+        a turn.
+
+        So above the squash ceiling the results go, oldest first, until it is
+        back under. The call stays with its id, so nothing is orphaned and the
+        endpoint still sees a well formed conversation - which is the whole
+        reason this is cheaper than dropping turns. It runs before the trim and
+        usually means the trim has nothing to do.
+        """
+        ceiling = self._ceiling(self.settings.squash_fraction)
+        if self._spent <= ceiling:
+            return
+
+        starts = self._turns(indexes=True)
+        recent = starts[-KEEP_WHOLE] if len(starts) >= KEEP_WHOLE else 0
+        named = {
+            call.get("id"): (call.get("function") or {}).get("name") or "A tool"
+            for message in self.messages
+            for call in message.get("tool_calls") or []
+        }
+
+        saved = dropped = 0
+        for message in self.messages[:recent]:
+            if self._spent - saved <= ceiling:
+                break
+            was = message.get("content")
+            if message.get("role") != "tool" or not isinstance(was, str):
+                continue
+            if len(was) < SQUASH_OVER:
+                continue
+            message["content"] = SQUASHED.format(
+                name=named.get(message.get("tool_call_id"), "A tool")
+            )
+            # Four characters to the token, which is close enough to decide with
+            # and wrong in the safe direction on a list of numbers.
+            saved += (len(was) - len(message["content"])) // 4
+            dropped += 1
+
+        if dropped:
+            logger.info("Squashed %d old tool result(s), about %s tokens.", dropped, count(saved))
+            # An estimate standing in until the next call measures it for real.
+            self._spent -= saved
+
     def _trim(self) -> None:
         """Keep the system prompt and the last few turns, whole.
 
@@ -909,7 +973,12 @@ class Brain:
         rather than degrade. So the turn count is the usual one and the measured
         size is the backstop, one turn dropped per turn taken - which is enough,
         because the conversation only grows one turn at a time.
+
+        _squash runs first and is the gentler half: it empties old results while
+        leaving the conversation whole, and a turn only gets deleted when that
+        was not enough.
         """
+        self._squash()
         keep = max(1, self.settings.history_turns)
         if self._spent > self._ceiling():
             logger.info("Conversation is %d tokens; dropping the oldest turn.", self._spent)
@@ -925,9 +994,10 @@ class Brain:
         starts = [i for i, message in enumerate(self.messages) if message.get("role") == "user"]
         return starts if indexes else len(starts)
 
-    def _ceiling(self) -> int:
+    def _ceiling(self, fraction: float | None = None) -> int:
         """Most of the window the conversation may take, or none if unknown."""
-        fraction = self.settings.max_context_fraction
+        if fraction is None:
+            fraction = self.settings.max_context_fraction
         limit = self.model.context_limit() if fraction > 0 else 0
         return int(limit * fraction) if limit else 2**31
 

@@ -591,8 +591,24 @@ affordable, but the argument for the cap was never the tokens - it is that a mod
 worse from a longer list, which is the whole accessibility tree lesson. Affording more is not
 a reason to offer more.
 
-**There is no compaction, and `_trim` is not one.** It keeps the system prompt and the last
-`brain.history_turns` turns whole and deletes everything before them. Cutting at a turn
+**Forgetting happens twice, and the cheap half runs first.** Past
+`brain.squash_fraction` of the window - 0.65, about 64k of a 98k one - `_squash` walks the
+tool results oldest first and replaces the text of each with a line naming the tool that ran.
+It stops as soon as the estimate is back under. The last two turns are never touched, because
+the last scan is what "no, the one below it" refers to, and neither is anything under four
+hundred characters, since a short result is usually a fact worth having and squashing forty
+tokens to thirty saves nothing.
+
+That works because of what a long session is actually made of. A crowded window scans as three
+thousand tokens of numbered targets which were stale the moment anything was clicked, and an
+afternoon of them is most of the window spent on lists nobody will read again. What was asked,
+what was run and what was said is a few hundred tokens a turn and reads as a memory of the
+afternoon. The call stays with its id, so nothing is orphaned and the endpoint still sees a
+well formed conversation - which is exactly why this is safe and deleting the message would
+not be.
+
+**`_trim` is the other half, and it is not compaction either.** It keeps the system prompt and
+the last `brain.history_turns` turns whole and deletes everything before them. Cutting at a turn
 boundary is the load-bearing part, because half a turn leaves a tool result whose call is gone
 and some endpoints reject that outright. Nothing is summarised: ask about something from ten
 turns ago and it is gone without trace.
@@ -606,7 +622,10 @@ grows one turn at a time.
 
 That was chosen on the grounds that voice conversations are short, and it is still mostly
 true, but it is dropping rather than compacting and the meter in the corner now makes it
-visible. It also made the old default look silly: the prompt sits at 2.6k of a 98k window, so
+visible. Squashing is what got built instead of summarising, and it is worth being clear about
+what it is: not a compaction, just a cheaper thing to throw away first. It costs no model call
+and no waiting, and by the time it has run a few times the turn count is usually enough on its
+own. It also made the old default look silly: the prompt sits at 2.6k of a 98k window, so
 six turns was throwing conversation away to save nothing, and 20 is the number now. Trimming
 is the one thing that invalidates a cached prefix - everything after the system prompt shifts
 - so trimming rarely is faster as well as more useful. Every real alternative costs something a voice loop can feel. Summarising on eviction

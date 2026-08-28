@@ -287,6 +287,14 @@ class BrainConfig:
     # would overflow a 98k window and the request would simply fail. Whichever
     # of the two bites first wins. 0 leaves only the turn count.
     max_context_fraction: float = 0.7
+    # Where old tool results start being emptied, as a fraction of the window.
+    # Below max_context_fraction on purpose, because it is the cheaper thing to
+    # lose: the call, the answer and the conversation around it all stay, and
+    # only the text of the result goes. Almost all of a long session is scans
+    # that were stale the moment anything was clicked. 0.65 is about 64k of a
+    # 98k window, which is where a session starts to feel heavy. 0 turns it off
+    # and leaves dropping whole turns as the only way down.
+    squash_fraction: float = 0.65
     # Send one throwaway request at startup, so the system prompt and the tool
     # schemas are already in the server's cache when somebody first speaks. It
     # costs a second or two of nobody's time and takes it off the first answer,
