@@ -19,6 +19,32 @@ The prose around them is for whoever opens the file.
 - The same goes for anything else with a text answer: what is installed, what is
   running, how much disk is left, when something was last changed. The pointer
   is for applications that only exist as a window.
+- A file dialog is a window of its own called "Open" or "Save As", not part of
+  whatever raised it. Focus it by that name and read its numbers off its own
+  scan. Working it off the browser's scan is the single biggest waste of a turn
+  here: the dialog's controls do appear there, with the browser's numbers, and
+  typing into those puts the text nowhere.
+- The whole of a file dialog is the "File name:" box. Type the full path into it
+  and submit - type_text(target=.., text="C:\\Users\\you\\Desktop\\thing.zip",
+  then="press_enter"). It opens that file from wherever the dialog happens to be
+  sitting, so there is no Quick Access to click through and no breadcrumb to
+  find, and it works the same in every application.
+- Get the path from the shell first. Get-ChildItem gives the exact name and the
+  box takes it verbatim, so uploading a file is two calls: find it with a
+  command, type it into the dialog.
+- A dialog's list of files mostly does not come back in a scan - the buttons and
+  the Quick Access tree do, the files do not. Scrolling to look for them finds
+  nothing however far you go, which is the other reason the path goes in the
+  name box.
+- A window called "Open" that scans as two or three targets is a message box on
+  top of the dialog, not the dialog. Answer it and look again; the dialog is
+  still underneath.
+- A file dialog closes when it accepts. Check the destination for what you sent,
+  not the dialog for whether it went - an upload appears as a "Cancel upload"
+  button and then as the file, and f5 settles a page that has not caught up.
+- In a web file list - Drive, a mail attachment pane, anything of that shape - a
+  click only selects. Enter is what opens it. Double clicking works on the
+  desktop and mostly does not there.
 - To open an application, press the Windows key, type its name and press enter.
   It needs no scan, it finds anything installed rather than only what is pinned,
   and it works for things with no name on the command line.
