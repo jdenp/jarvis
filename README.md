@@ -440,12 +440,18 @@ all the things that were tried and removed.
 ## Not done yet
 
 - **A better way to forget.** There is no compaction. `brain.history_turns` keeps the last
-  six turns whole and deletes the rest - chosen because voice conversations are short, and
-  cutting at a turn boundary is what keeps a tool result from outliving the call it answered.
-  It is still just dropping things: ask about something from ten turns ago and it is gone
-  without a trace, and nothing summarises what went. Every real option costs something a
-  voice loop can feel - summarising means a model call between turns, and a rolling summary
-  means the summary is in every request forever.
+  twenty turns whole and deletes the rest, and `brain.max_context_fraction` drops one more
+  per turn once the measured prompt passes 70% of the window. Cutting at a turn boundary is
+  what keeps a tool result from outliving the call it answered. It is still just dropping
+  things: ask about something from twenty-five turns ago and it is gone without a trace, and
+  nothing summarises what went. Every real option costs something a voice loop can feel -
+  summarising means a model call between turns, and a rolling summary means the summary is in
+  every request forever.
+- **An honest word when one turn is too big.** The trim always keeps at least one turn, so a
+  single turn that overflows the window on its own cannot be cut. llama-server rejects the
+  request, that arrives as an HTTP error like any other, and what gets said out loud is "I
+  cannot reach my model, sir" - which is not what happened. It takes a scan of a very
+  crowded window several times over to get there, so it has not been hit yet.
 - **Speech interruption on speakers.** Cutting JARVIS off mid sentence needs the microphone
   open while it talks, and with no acoustic echo cancellation that means it transcribes
   itself - which it did, answering its own weather forecast with "That's right. Is there
