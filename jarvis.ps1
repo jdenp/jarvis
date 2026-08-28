@@ -2,13 +2,13 @@
 #
 #   .\jarvis.ps1                  run the voice service in this terminal
 #   .\jarvis.ps1 -Windowed        open a new terminal window and run it there
-#   .\jarvis.ps1 -Admin           elevated, so it can drive Task Manager and friends
+#   .\jarvis.ps1 --admin          elevated, so it can drive Task Manager and friends
 #   .\jarvis.ps1 status           any other subcommand or flag is passed through
 #
 # -Windowed is what an agent should use: it returns immediately instead of
 # blocking the caller, and the live transcript stays visible in its own window.
 #
-# -Admin asks Windows for consent once, at launch, and never again: a child
+# --admin asks Windows for consent once, at launch, and never again: a child
 # process inherits its parent's token, so everything JARVIS starts after that is
 # already elevated and nothing prompts. That is the whole appeal and also the
 # whole cost - read the note above the switch below before using it.
@@ -74,6 +74,14 @@ function Get-JarvisCommand {
 # It cannot work over SSH. The consent dialog is drawn on the secure desktop,
 # which by design nothing can see or click but somebody sitting at the machine.
 $passthrough = if ($Remaining) { $Remaining } else { @() }
+
+# --admin as well as -Admin. Everything else passed through this script is
+# double dashed on its way to the Python CLI, so PowerShell's own switch syntax
+# is the odd one out and both spellings are cheaper than remembering which.
+if ($passthrough -contains "--admin") {
+    $Admin = $true
+    $passthrough = @($passthrough | Where-Object { $_ -ne "--admin" })
+}
 
 if ($Admin -and -not (Test-Elevated)) {
     $self = $PSCommandPath

@@ -111,7 +111,7 @@ Caps Lock and Scroll Lock work the same way; any other key falls back to a hook 
 Some windows are out of reach, and it will say so rather than trying. Anything running as
 administrator - Task Manager, an admin terminal, regedit - shows an unelevated process one
 element and no targets, silently discards its clicks and keystrokes, and swallows the hotkey
-while it has focus. `.\jarvis.ps1 -Admin` lifts all of that: one consent prompt at launch and
+while it has focus. `.\jarvis.ps1 --admin` lifts all of that: one consent prompt at launch and
 never another, because a child process inherits its parent's token. The cost is the same fact -
 there is no second checkpoint, so every command `run_command` runs is an administrator command
 with nothing asked first, every application it opens is elevated too, and mapped network drives
