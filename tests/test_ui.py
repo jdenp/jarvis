@@ -161,10 +161,12 @@ def test_the_silent_terminal_does_nothing_at_all(capsys):
 
 def test_both_terminals_offer_the_same_thing():
     """Silent stands in for Ui everywhere, so a method added to one and not the
-    other is a crash the first time somebody runs without a terminal."""
-    for name in ("heard", "spoke", "tool", "note", "warn", "status", "resting", "ask", "close"):
-        assert hasattr(Silent, name), name
-        assert hasattr(Ui, name), name
+    other is a crash the first time somebody runs without a terminal - which is
+    how `meter` got missed, Brain drawing one only when the endpoint reports
+    tokens and the tests never having any to report."""
+    public = {name for name in vars(Ui) if not name.startswith("_")}
+    missing = public - set(vars(Silent))
+    assert not missing, f"Silent is missing {sorted(missing)}"
 
 
 # --------------------------------------------------------------------- logging

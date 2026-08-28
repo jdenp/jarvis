@@ -13,10 +13,13 @@ from dataclasses import replace
 import pytest
 
 from jarvis.brain import (
+    ALREADY_SEEN,
+    HERE_IT_IS,
     NO_MODEL,
     NOTHING_TO_SAY,
     Brain,
     Call,
+    Model,
     ModelUnavailable,
     Reply,
     ServiceVoice,
@@ -169,6 +172,73 @@ def refusing() -> Toolbox:
         raise ValueError("Target 3 was 'Close', but something else is there now")
 
     return Toolbox([Tool(name="look_at_screen", description="look", run=refuse)])
+
+
+# ------------------------------------------------------------------- seeing
+
+
+def test_a_picture_reaches_the_model_as_the_message_after_the_tool():
+    """No endpoint takes an image on a `tool` message, which is the whole reason
+    looking is two calls - the first says one is coming, the second is where it
+    can be described."""
+    it = brain(calling("look_at_image"), said("Spotify is in front, sir."))
+    it.toolbox = toolbox(look_at_image="shot.png is in front of you now")
+    it.toolbox.images.append("data:image/png;base64,AAAA")
+
+    assert it.turn(["what is on screen"]) == "Spotify is in front, sir."
+    picture = it.messages[-2]
+    assert picture["role"] == "user"
+    assert picture["content"][0]["text"] == HERE_IT_IS
+    assert picture["content"][1]["image_url"] == {"url": "data:image/png;base64,AAAA"}
+
+
+def test_the_queue_is_emptied_so_it_is_not_sent_twice():
+    it = brain(calling("look_at_image"), said("Done, sir."))
+    it.toolbox = toolbox(look_at_image="looking")
+    it.toolbox.images.append("data:image/png;base64,AAAA")
+    it.turn(["what is on screen"])
+    assert it.toolbox.images == []
+
+
+def test_only_the_latest_picture_stays_attached():
+    """Each one is a couple of thousand tokens and they live in the history, so
+    a turn that looks twice would carry both for the rest of the conversation."""
+    it = brain()
+    it.messages.append({"role": "user", "content": [{"type": "text", "text": "old"}]})
+    it.toolbox.images.append("data:image/png;base64,BBBB")
+    it._show_the_pictures()
+
+    assert it.messages[-2]["content"] == ALREADY_SEEN
+    assert it.messages[-1]["content"][1]["image_url"]["url"].endswith("BBBB")
+
+
+def test_nothing_is_appended_when_nothing_was_looked_at():
+    it = brain(said("Half past two, sir."))
+    before = len(it.messages)
+    it._show_the_pictures()
+    assert len(it.messages) == before
+
+
+def test_the_endpoint_is_asked_whether_it_can_see():
+    """Worth knowing at startup rather than the first time a picture goes out to
+    something with no eyes."""
+    import httpx
+
+    def props(request):
+        return httpx.Response(200, json={"modalities": {"vision": True, "audio": False}})
+
+    model = Model(Config().brain, client=httpx.Client(transport=httpx.MockTransport(props)))
+    assert model.can_see() is True
+
+
+def test_an_endpoint_that_will_not_say_is_not_guessed_at():
+    import httpx
+
+    model = Model(
+        Config().brain,
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))),
+    )
+    assert model.can_see() is None
 
 
 # ------------------------------------------------------------------ escape

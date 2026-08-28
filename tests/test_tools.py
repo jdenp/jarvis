@@ -34,6 +34,8 @@ def test_everything_is_offered_by_default():
     """Plug and play - the defaults turn it all on, so this is the real list."""
     assert box().names == [
         "look_at_screen",
+        "screenshot",
+        "look_at_image",
         "focus_window",
         "click",
         "type_text",
@@ -50,6 +52,8 @@ def test_with_control_off_it_can_only_look():
     config = replace(Config(), screen=replace(Config().screen, control=False))
     assert box(config).names == [
         "look_at_screen",
+        "screenshot",
+        "look_at_image",
         "search_web",
         "read_page",
         "remember",
@@ -562,3 +566,100 @@ def test_a_window_that_will_not_come_forward_presses_nothing():
     assert result.startswith("Refused")
     assert "would not come to the front" in result
     assert pressed == []
+
+
+# ------------------------------------------------------------------- seeing
+
+
+def png(path, width=40, height=20, colour=(20, 120, 200)):
+    from PIL import Image
+
+    Image.new("RGB", (width, height), colour).save(path, "PNG")
+    return path
+
+
+def test_a_picture_comes_back_as_a_data_url(tmp_path):
+    from jarvis.tools import read_image
+
+    found, encoded, size = read_image(str(png(tmp_path / "shot.png")))
+    assert found.name == "shot.png"
+    assert encoded.startswith("data:image/png;base64,")
+    assert size == (40, 20)
+
+
+def test_a_wide_picture_is_narrowed_before_it_is_sent(tmp_path):
+    """The whole desk across two monitors is 4880px, which is worth shrinking
+    before it becomes tokens."""
+    from jarvis.tools import read_image
+
+    _, _, size = read_image(str(png(tmp_path / "wide.png", width=4000, height=1000)), 1600)
+    assert size == (1600, 400), "aspect kept"
+
+
+def test_a_picture_already_small_enough_is_left_alone(tmp_path):
+    from jarvis.tools import read_image
+
+    _, _, size = read_image(str(png(tmp_path / "small.png", width=800, height=600)), 1600)
+    assert size == (800, 600)
+
+
+def test_a_file_that_is_not_there_says_so(tmp_path):
+    from jarvis.screen import ScreenUnavailable
+    from jarvis.tools import read_image
+
+    with pytest.raises(ScreenUnavailable, match="no file at"):
+        read_image(str(tmp_path / "nothing.png"))
+
+
+def test_a_file_that_is_not_a_picture_says_what_is_readable(tmp_path):
+    from jarvis.screen import ScreenUnavailable
+    from jarvis.tools import read_image
+
+    document = tmp_path / "notes.txt"
+    document.write_text("not a picture")
+    with pytest.raises(ScreenUnavailable, match=r"[.]png"):
+        read_image(str(document))
+
+
+def test_looking_queues_the_picture_for_the_brain(tmp_path):
+    """A tool result is text, so this is the only way it reaches the model."""
+    kit = box()
+    result = kit.run("look_at_image", {"path": str(png(tmp_path / "shot.png"))})
+    assert "in front of you now, 40 by 20" in result
+    assert len(kit.images) == 1
+    assert kit.images[0].startswith("data:image/png;base64,")
+
+
+def test_a_missing_file_queues_nothing(tmp_path):
+    kit = box()
+    assert kit.run("look_at_image", {"path": str(tmp_path / "gone.png")}).startswith("Refused")
+    assert kit.images == []
+
+
+def test_taking_one_says_where_it_went_and_what_to_do_next(tmp_path, monkeypatch):
+    monkeypatch.setattr("jarvis.marks.capture", lambda bounds, path, width=0: png(path))
+    kit = box()
+    result = kit.run("screenshot", {})
+    assert "every monitor" in result
+    assert "look_at_image" in result
+    assert kit.images == [], "taking a picture is not looking at one"
+
+
+def test_naming_a_window_takes_that_window(tmp_path, monkeypatch):
+    seen = {}
+
+    def capture(bounds, path, width=0):
+        seen["bounds"] = bounds
+        return png(path)
+
+    monkeypatch.setattr("jarvis.marks.capture", capture)
+    assert "Notepad" in box().run("screenshot", {"window": "Notepad"})
+    assert seen["bounds"] is not None, "cropped to the window rather than the whole desk"
+
+
+def test_with_images_off_neither_tool_is_there():
+    """A model with no projector gets a couple of thousand tokens of payload for
+    nothing, so this is a switch rather than a warning."""
+    config = replace(Config(), brain=replace(Config().brain, images=False))
+    assert "screenshot" not in box(config).names
+    assert "look_at_image" not in box(config).names

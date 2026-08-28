@@ -297,6 +297,32 @@ UI Automation only reaches the desktop from the signed-in session, the same way 
 device does, so a service in session 0 sees nothing.
 
 `screen.control = false` leaves the read-only half - looking and screenshots, no pointer.
+## Looking at a picture
+
+The accessibility tree is a list of labels, and some things are not in it - a chart, an error
+dialog, a page a browser tells UI Automation nothing about. Two tools for that, deliberately
+separate because they are separate questions:
+
+```
+screenshot()                      -> saved a picture of every monitor to logs/screen.png
+screenshot(window="Chrome")       -> that window alone
+look_at_image(path="...")         -> it arrives with the next message
+```
+
+Taking a picture is cheap and often the file is all that was wanted. Looking at one costs
+about 1.3k tokens for a 1600px capture, so it is asked for on purpose. The two calls are also
+why the second is where the answer goes: a tool result is text, no endpoint takes an image on
+a `tool` message, so the picture travels as the user message after it. Only the most recent
+one stays attached - a turn that looks twice would otherwise carry both for the rest of the
+conversation.
+
+It needs a model loaded with a vision projector. llama-server reports that on `/props` as
+`modalities.vision`, and startup warns if `brain.images` is on and the model says it cannot
+see, because a picture sent to something with no eyes is payload for nothing. Set
+`brain.images = false` and both tools disappear rather than being present and useless.
+
+For pressing something, `look_at_screen` and its numbers are still surer than any picture.
+
 `jarvis look --marks` writes `logs/marks.png` with a numbered box burned over every target,
 which turns "why did it click the wrong thing" from unanswerable into obvious. `--raw` prints
 every element the window exposed with the dropped ones marked, which answers the other half -
@@ -375,11 +401,11 @@ Three settings can change that, all of them opt in and all of them named in that
 | `tts.engine = "edge"` | every reply, as text | Microsoft |
 | `brain.url` off loopback | every word of every conversation | wherever it points |
 
-One thing is not JARVIS's to promise: `screenshot` hands a picture of your screen to
-whatever model is connected, and so does every scan while `screen.send_image` is on. A
-picture of your screen has whatever was on it at the time. Local model, local picture; on a
-model with no vision it is also a megabyte of payload for nothing, which is the other reason
-to turn it off.
+One thing is not JARVIS's to promise: `look_at_image` hands a picture to the model, and so
+does every scan on the MCP path while `screen.send_image` is on. A picture of your screen has
+whatever was on it at the time. Local model, local picture - `brain.url` on loopback means it
+goes no further than llama-server. Point that off the machine and every screenshot goes with
+it. `brain.images = false` takes both tools away.
 
 ## Configuration
 
@@ -462,7 +488,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 649 tests, no hardware, model or network needed
+uv run pytest        # 665 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

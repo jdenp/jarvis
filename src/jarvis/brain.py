@@ -124,6 +124,15 @@ not what they seem to want. Only how the machine behaves.
 Already written down:
 {known}"""
 
+# Sent with an image, because a picture arriving on its own is a turn the model
+# has to guess the purpose of.
+HERE_IT_IS = "The image you asked to look at:"
+
+# What an image is replaced with once another arrives. Each one is a couple of
+# thousand tokens and they stay in the history, so a turn that looked three
+# times would spend the window on pictures nobody is asking about any more.
+ALREADY_SEEN = "(an image you were shown earlier, no longer attached)"
+
 SOUL = "context/soul/jarvis.md"
 
 # The ears paragraph, kept inline in that file inside these markers so whoever
@@ -204,6 +213,7 @@ class Model:
         # point reading a reply a token at a time with nobody watching.
         self.ui = terminal or ui.Silent()
         self._limit: int | None = None
+        self._settings: dict | None = None
         self._client = client or httpx.Client(
             timeout=httpx.Timeout(config.timeout_seconds, connect=5.0),
             headers=({"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}),
@@ -223,24 +233,38 @@ class Model:
             return str(exc)
         return ""
 
-    def context_limit(self) -> int:
-        """How much context the server has, or 0 if it will not say.
-
-        llama.cpp answers this on /props, which is not part of the OpenAI shape -
-        hence the fallback to `brain.context_limit` and to saying nothing.
-        """
-        if self.config.context_limit:
-            return self.config.context_limit
-        if self._limit is None:
-            self._limit = 0
+    def _props(self) -> dict:
+        """What llama.cpp says about itself, once. Not part of the OpenAI shape,
+        so an endpoint that has never heard of it answers nothing and everything
+        here falls back."""
+        if self._settings is None:
+            self._settings = {}
             try:
                 response = self._client.get(f"{self.base.removesuffix('/v1')}/props", timeout=5.0)
                 response.raise_for_status()
-                settings = response.json().get("default_generation_settings") or {}
-                self._limit = int(settings.get("n_ctx") or 0)
+                self._settings = response.json() or {}
             except (httpx.HTTPError, ValueError, TypeError):
-                logger.debug("The endpoint did not say how big its context is.")
+                logger.debug("The endpoint would not say anything about itself.")
+        return self._settings
+
+    def context_limit(self) -> int:
+        """How much context the server has, or 0 if it will not say."""
+        if self.config.context_limit:
+            return self.config.context_limit
+        if self._limit is None:
+            settings = self._props().get("default_generation_settings") or {}
+            try:
+                self._limit = int(settings.get("n_ctx") or 0)
+            except (ValueError, TypeError):
+                self._limit = 0
         return self._limit
+
+    def can_see(self) -> bool | None:
+        """Whether a vision projector is loaded, or None if it will not say."""
+        modalities = self._props().get("modalities")
+        if not isinstance(modalities, dict) or "vision" not in modalities:
+            return None
+        return bool(modalities["vision"])
 
     def reply(
         self,
@@ -695,6 +719,7 @@ class Brain:
                         "content": self._run(call),
                     }
                 )
+            self._show_the_pictures()
 
             # Nothing can interrupt a turn from outside, so the turn looks. This
             # is what owning the loop buys: "no, the other one" lands mid task
@@ -712,6 +737,34 @@ class Brain:
                 )
 
         return self._speak(self._final_word(), fallback=used_tools)
+
+    def _show_the_pictures(self) -> None:
+        """Hand over anything look_at_image asked to be seen.
+
+        A tool result is text and no endpoint takes an image on a `tool`
+        message, so a picture travels as the user message after it. That is the
+        whole reason looking is two calls: the first says one is coming, the
+        second is where it can be described.
+        """
+        waiting = list(self.toolbox.images)
+        if not waiting:
+            return
+        self.toolbox.images.clear()
+        # Only the latest survives. Anything else and a turn that looks twice
+        # carries both for the rest of the conversation.
+        for message in self.messages:
+            if message.get("role") == "user" and not isinstance(message.get("content"), str):
+                message["content"] = ALREADY_SEEN
+        self.messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": HERE_IT_IS},
+                    *({"type": "image_url", "image_url": {"url": url}} for url in waiting),
+                ],
+            }
+        )
+        logger.info("Attached %d image(s) to the conversation.", len(waiting))
 
     def _ask(self, tools, limit: int | None = None) -> Reply:
         """One model call, watched, with the meter kept up to date afterwards.
@@ -1028,6 +1081,13 @@ def start(config: Config, service, voice=None, terminal=None) -> Brain:
         len(brain.toolbox.names),
         ", ".join(brain.toolbox.names),
     )
+    if config.brain.images and model.can_see() is False:
+        logger.warning(
+            "brain.images is on but %s reports no vision, so look_at_image will send a "
+            "picture to something with no eyes. Load a projector (--mmproj) or set "
+            "brain.images false.",
+            config.brain.url,
+        )
     brain.thread = threading.Thread(target=brain.run_forever, name="jarvis-brain", daemon=True)
     brain.thread.start()
     return brain

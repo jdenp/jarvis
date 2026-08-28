@@ -324,6 +324,11 @@ class BrainConfig:
     # navigation, and cutting in the middle of the paragraph with the answer in
     # it is the expensive mistake, not the tokens.
     page_chars: int = 6000
+    # Offer screenshot() and look_at_image(). Needs a model loaded with a vision
+    # projector - llama-server says so on /props as modalities.vision, and
+    # startup warns if this is on and that is false. On a model that cannot see,
+    # the picture is a couple of thousand tokens of payload for nothing.
+    images: bool = True
     # A command line coding agent to hand real code changes to, if you have one -
     # JARVIS is told to run `<this> "the whole request"` rather than editing
     # source a line at a time through the shell. Empty and it is simply told

@@ -22,6 +22,22 @@ List everything on screen that can be clicked or typed into, numbered. With no a
 - `window` (string) - part of a window title
 - `matching` (string) - only labels containing this
 
+## screenshot
+
+Take a picture of the screen and save it. Returns where it went; it does not show it to you - look_at_image does that.
+
+With no window it is every monitor, which is what you want for 'what is on screen'. Name a window for that window alone. This is the tool for anything that has to be seen rather than pressed: a chart, an error dialog, a photograph, a page that scans as nothing. For pressing something, look_at_screen and its numbers are surer than any picture.
+
+- `window` (string) - part of a window title, or leave it out for the whole desk
+
+## look_at_image
+
+Look at an image file. Any picture on this machine - one screenshot just saved, or something that was already there.
+
+It is attached to the next message rather than returned here, so this call tells you it is coming and the one after is where you can describe it. Costs a couple of thousand tokens, so ask when the answer is genuinely in the picture.
+
+- `path` (string, required) - the image file to look at
+
 ## focus_window
 
 Raise a window, restoring it if it was minimised, then scan it. Input goes to whatever holds the foreground, so this is what to call when what you want is behind something else, and the only thing that gets at a minimised window.

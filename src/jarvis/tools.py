@@ -80,8 +80,13 @@ class Tool:
 class Toolbox:
     """Everything the brain can do, by name."""
 
-    def __init__(self, tools: list[Tool]) -> None:
+    def __init__(self, tools: list[Tool], images: list[str] | None = None) -> None:
         self.tools = {tool.name: tool for tool in tools}
+        # Pictures look_at_image has been asked to show, waiting for the brain to
+        # put them in front of the model. A tool result is text and no endpoint
+        # takes an image on a `tool` message, so they travel as the next user
+        # message instead - see Brain._show_the_pictures.
+        self.images = images if images is not None else []
         # The last refusal, cleared by anything that works. Repeating one word
         # for word is the signal that looking again is not going to help.
         self._refused = ""
@@ -256,6 +261,7 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
     desktop = screen or Screen(config.screen)
     label_chars = config.screen.label_chars
     tools: list[Tool] = []
+    seeing: list[str] = []
 
     # No marked screenshot on this path, deliberately. It exists for `send_image`
     # and for a human to look at, the brain never sends an image, and a full
@@ -296,8 +302,10 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
         )
     )
 
+    tools += _eye_tools(config, desktop, seeing)
+
     if not config.screen.control:
-        return Toolbox(tools + _extras(config, ears))
+        return Toolbox(tools + _extras(config, ears), images=seeing)
 
     def aim(target: int, expecting: str):
         """Resolve a number, having made the model say what it is aiming at."""
@@ -516,7 +524,114 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
         )
     )
 
-    return Toolbox(tools + _extras(config, ears))
+    return Toolbox(tools + _extras(config, ears), images=seeing)
+
+
+def _eye_tools(config: Config, desktop: Screen, seeing: list[str]) -> list[Tool]:
+    """Taking a picture, and being shown one.
+
+    Two tools rather than one because they are two different questions. A
+    screenshot is cheap and often all that is wanted is the file - to open it, to
+    keep it, to hand to somebody. Looking costs a couple of thousand tokens and
+    should be asked for on purpose.
+    """
+    if not config.brain.images:
+        return []
+
+    def screenshot(window: str = "") -> str:
+        from . import marks
+
+        target = config.log_dir / (config.screen.screenshot_file or "screen.png")
+        bounds, where = None, "every monitor"
+        if window:
+            hwnd, where = desktop.find_window(window)
+            bounds = desktop.backend.window_rect(hwnd)
+        path = marks.capture(bounds, target, config.screen.screenshot_max_width)
+        return (
+            f"Saved a picture of {where} to {path}. Nothing has looked at it yet - "
+            f'call look_at_image(path="{path}") to see what is in it.'
+        )
+
+    def look_at_image(path: str) -> str:
+        found, encoded, size = read_image(path, config.screen.screenshot_max_width)
+        seeing.append(encoded)
+        return (
+            f"{found.name} is in front of you now, {size[0]} by {size[1]}. It arrives with "
+            "the next message rather than in this result, so say what is in it after you "
+            "have seen it, not before."
+        )
+
+    return [
+        Tool(
+            name="screenshot",
+            description=(
+                "Take a picture of the screen and save it. Returns where it went; it does "
+                "not show it to you - look_at_image does that.\n\n"
+                "With no window it is every monitor, which is what you want for 'what is "
+                "on screen'. Name a window for that window alone. This is the tool for "
+                "anything that has to be seen rather than pressed: a chart, an error "
+                "dialog, a photograph, a page that scans as nothing. For pressing "
+                "something, look_at_screen and its numbers are surer than any picture."
+            ),
+            run=screenshot,
+            properties={
+                "window": {
+                    "type": "string",
+                    "description": "part of a window title, or leave it out for the whole desk",
+                }
+            },
+        ),
+        Tool(
+            name="look_at_image",
+            description=(
+                "Look at an image file. Any picture on this machine - one screenshot just "
+                "saved, or something that was already there.\n\n"
+                "It is attached to the next message rather than returned here, so this "
+                "call tells you it is coming and the one after is where you can describe "
+                "it. Costs a couple of thousand tokens, so ask when the answer is "
+                "genuinely in the picture."
+            ),
+            run=look_at_image,
+            properties={"path": {"type": "string", "description": "the image file to look at"}},
+            required=("path",),
+        ),
+    ]
+
+
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"})
+
+
+def read_image(named: str, max_width: int = 0) -> tuple[Path, str, tuple[int, int]]:
+    """One image file as a data URL, shrunk to something worth sending.
+
+    PNG whatever went in, because the usual subject is a screenshot and what is
+    being read off it is text - and JPEG artefacts on eight point type are the
+    difference between reading a filename and guessing at it.
+    """
+    path = under_root(named)
+    if not path.is_file():
+        raise ScreenUnavailable(f"There is no file at {path}.")
+    if path.suffix.lower() not in IMAGE_SUFFIXES:
+        offered = ", ".join(sorted(IMAGE_SUFFIXES))
+        raise ScreenUnavailable(f"{path.name} is not an image. Readable: {offered}.")
+
+    import base64
+    import io
+
+    from PIL import Image
+
+    with Image.open(path) as opened:
+        picture = opened.convert("RGB")
+        if 0 < max_width < picture.width:
+            height = round(picture.height * max_width / picture.width)
+            picture = picture.resize((max_width, height), Image.LANCZOS)
+        buffer = io.BytesIO()
+        picture.save(buffer, "PNG", optimize=True)
+        size = (picture.width, picture.height)
+
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    logger.info("Read %s at %dx%d, %dKB encoded", path.name, *size, len(encoded) // 1024)
+    return path, f"data:image/png;base64,{encoded}", size
 
 
 def _extras(config: Config, ears=None) -> list[Tool]:

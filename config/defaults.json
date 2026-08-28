@@ -79,6 +79,7 @@
     "search_url": "https://html.duckduckgo.com/html/",
     "search_results": 5,
     "page_chars": 6000,
+    "images": true,
     "coding_agent": "",
     "shell_timeout_seconds": 60.0,
     "shell_output_chars": 4000,
