@@ -640,6 +640,22 @@ five colours, and an alternate-screen application would be actively wrong here: 
 a scrolling record you can pipe, redirect and scroll back through, which is also why
 everything degrades to plain lines the moment the output is not a terminal.
 
+**Typing goes in where speech does, and nowhere else.** `service.typed()` puts the line
+straight into the transcript, so the brain, the MCP path, `heard.jsonl` and the `you >` on
+screen all see the same thing and none of them can tell the difference. It skips exactly two
+of the things speech goes through: the echo guard, since nothing typed can be JARVIS hearing
+itself, and the pause, since shutting the microphone is not a reason to ignore somebody who
+has chosen to type.
+
+It is read a character at a time rather than with `input()`, and that is the whole reason
+`typed.py` exists. `input()` owns the terminal from the moment it is called, and the live line
+under the conversation wants the same row - so `Ui.hold()` puts the status away, the line is
+echoed by hand, and `release()` brings it back. Nothing is drawn until a key has actually been
+pressed: `msvcrt.kbhit()` is a peek at the console buffer every fiftieth of a second, and a
+prompt sitting there unanswered would be clutter that means nothing most of the time. Escape
+abandons the line, which is the way out for whoever pressed a key by accident - and pressing
+one by accident is precisely why it waits for a keypress rather than showing a prompt.
+
 **The live line shows the model thinking, and then it does not.** Streaming exists here for
 exactly one reason: a spinner says a model is busy, and the last line of what it is actually
 reasoning about says whether it is busy on the right thing. It is set without redrawing -

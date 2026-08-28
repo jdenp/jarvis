@@ -87,16 +87,18 @@ class Transcript:
         with self._condition:
             return self._paused
 
-    def add(self, text: str) -> Utterance:
+    def add(self, text: str, always: bool = False) -> Utterance:
         """Record an utterance and wake anything waiting.
 
         If paused, the utterance still gets an id but does not enter the ring
-        or notify waiters, so clients holding a cursor never see it.
+        or notify waiters, so clients holding a cursor never see it. `always`
+        is for the things that did not come from the microphone: pausing closes
+        the ears, and somebody typing has plainly chosen to say something.
         """
         with self._condition:
             utterance = Utterance.new(self._next_id, text)
             self._next_id += 1
-            if not self._paused:
+            if always or not self._paused:
                 self._items.append(utterance)
                 self._condition.notify_all()
         self._append_to_file(utterance)

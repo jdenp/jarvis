@@ -90,6 +90,23 @@ class VoiceService:
             logger.info("[%d] %s", utterance.id, heard)
             self.ui.heard(heard)
 
+    def typed(self, text: str) -> None:
+        """Take a typed line as though it had been heard.
+
+        Same transcript, same line on screen, same everything downstream - the
+        brain and any connected agent cannot tell the difference, and should
+        not. Two things speech goes through that this does not: the echo guard,
+        because nothing typed can be JARVIS hearing itself, and the pause,
+        because pausing shuts the microphone and somebody typing has plainly
+        chosen to say something.
+        """
+        text = text.strip()
+        if not text:
+            return
+        utterance = self.transcript.add(text, always=True)
+        logger.info("[%d] %s (typed)", utterance.id, text)
+        self.ui.heard(text)
+
     def _start_hotkey(self) -> None:
         """Register the configured key to toggle transcription."""
         self._hotkey = HotkeyListener(

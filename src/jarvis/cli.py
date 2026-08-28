@@ -213,9 +213,18 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     # Only once the brain is answering is there a conversation to draw. Without
     # it the words belong to whatever agent is connected over MCP, and drawing
     # them here as well as logging them would print everything twice.
+    typing = None
     if thinking is not None:
         service.ui = screen
         _hand_the_terminal_over(logger, screen)
+        # Only with a terminal to read from. Started after the takeover so that
+        # the first thing it does cannot land in the middle of the boot lines.
+        if screen.colour:
+            from .typed import Typing
+
+            typing = Typing(screen, service.typed)
+            typing.start()
+            screen.note("  Type a line and press enter to say it without speaking.")
 
     if getattr(args, "no_http", False):
         logger.info("Listening. Transcript file only, no API. Ctrl+C to stop.")
@@ -247,6 +256,8 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     except KeyboardInterrupt:
         logger.info("\nStopping.")
     finally:
+        if typing is not None:
+            typing.stop()
         screen.close()
         server.shutdown()
         server.server_close()

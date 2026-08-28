@@ -105,6 +105,9 @@ class Silent:
     def status(self, text: str) -> None: ...
     def thinking(self, text: str) -> None: ...
     def resting(self) -> None: ...
+    def hold(self) -> None: ...
+    def release(self) -> None: ...
+    def raw(self, text: str) -> None: ...
     def ask(self, prompt: str) -> str:
         return input(prompt)
 
@@ -128,6 +131,10 @@ class Ui:
         self._tick = 0
         self._stop = threading.Event()
         self._spinner: threading.Thread | None = None
+        # Set while somebody is typing on the bottom line. Everything permanent
+        # still scrolls above; only the live line stands aside, because it and a
+        # half typed sentence want the same row.
+        self._held = False
 
     def _frames(self) -> str:
         encoding = getattr(self.stream, "encoding", None) or "ascii"
@@ -228,6 +235,25 @@ class Ui:
             self._erase()
             self.stream.flush()
 
+    def hold(self) -> None:
+        """Give the bottom line to whoever is typing on it."""
+        with self._lock:
+            self._held = True
+            self._erase()
+            self.stream.flush()
+
+    def release(self) -> None:
+        """Take it back, and carry on saying what is happening."""
+        with self._lock:
+            self._held = False
+            self._draw()
+
+    def raw(self, text: str) -> None:
+        """Write exactly this, now. For echoing keystrokes while held."""
+        with self._lock:
+            self.stream.write(text)
+            self.stream.flush()
+
     def ask(self, prompt: str) -> str:
         """Read a line, with the live line out of the way first.
 
@@ -253,7 +279,7 @@ class Ui:
 
     def _draw(self) -> None:
         """Repaint the live line. Caller holds the lock."""
-        if not self.live or not self._status:
+        if not self.live or not self._status or self._held:
             return
         frame = self.frames[self._tick % len(self.frames)]
         text = f"{frame} {self._status}"

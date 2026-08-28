@@ -86,6 +86,14 @@ anything, it is asked once more with the tools taken away, so prose is the only 
 Staying quiet is still allowed and takes deliberate effort - a reply of a single hyphen, which
 is what it should do when it hears somebody else's conversation.
 
+You can also just type. In the window JARVIS is running in, start typing and the line appears
+where the status usually sits; press enter and it goes in exactly where speech does - same
+`you >`, same transcript, same everything after that. Nothing shows until you press a key, and
+escape throws the line away. It is the answer to a room with somebody else in it, a word
+Whisper will never get right however many times you say it, and anything you would rather not
+say out loud. It works while the microphone is paused, too, since typing is plainly a choice
+to say something.
+
 Press Num Lock to stop listening from anywhere. The microphone stops being read, so nothing
 is transcribed, logged or written to `heard.jsonl` until you press it again - not merely
 withheld. Needs `uv sync --extra hotkey`; `service.hotkey = ""` disables it.
@@ -362,6 +370,7 @@ setting is what it is. Copy only the bits you want; anything absent keeps its de
 | `tools.py` | What the brain can do, as schemas and dispatch |
 | `chat.py` | The same loop with a keyboard instead of a microphone |
 | `ui.py` | The terminal: scrolling conversation, one live line, no dependency |
+| `typed.py` | A line typed into the voice session, taken as though it were heard |
 | `memories.py` | The list JARVIS writes for itself and reads back every turn |
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, shared by the CLI and MCP |
@@ -402,7 +411,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 572 tests, no hardware, model or network needed
+uv run pytest        # 590 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```
