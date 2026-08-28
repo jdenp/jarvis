@@ -53,7 +53,10 @@ whatever it does next and gone when it answers - visible while it happens, kept 
 which is all "collapsing" ever means. At the right hand end of it is how full the context is
 and how much the last reply cost. Voice mode and chat mode draw through the same code, so
 they look the same, and piped or redirected it degrades to plain lines with no escape codes.
-Detail goes to `logs/jarvis.log`, which rotates, and every utterance to `logs/heard.jsonl`.
+Detail goes to `logs/jarvis.log`, and every utterance to `logs/heard.jsonl`. The log holds
+every tool call, every result, every thought and where the context stood at the end of each
+turn, so it grows quickly; `log_max_mb` is the whole budget it and its backups may take
+between them, 100MB by default, and past that the oldest quarter goes.
 The reasoning is in that log too: it is the only record of why it did what it did, and a
 voice session has nowhere else to keep one.
 
@@ -423,16 +426,11 @@ all the things that were tried and removed.
 
 ## Not done yet
 
-- **A better way to forget.** Nothing is summarised. There are two things that make room and
-  both of them throw something away. `brain.squash_fraction` goes first at 65% of the window:
-  old tool results lose their text and keep a line naming the tool, which is where the tokens
-  actually are and is nearly free to lose, since a scan is stale the moment anything is
-  clicked. Then `brain.history_turns` keeps the last twenty turns whole and deletes the rest,
-  and `brain.max_context_fraction` drops one more per turn past 70%. Cutting at a turn
-  boundary is what keeps a tool result from outliving the call it answered. Ask about
-  something from twenty-five turns ago and it is still gone without a trace. Every real
-  option costs something a voice loop can feel - summarising means a model call between
-  turns, and a rolling summary means the summary is in every request forever.
+- **A summary of a summary.** Forgetting is a ladder of three now and the top two are
+  cheap, but the third one rewrites its own earlier output rather than the conversation, so a
+  long enough session ends up with a paragraph written from a paragraph. Nothing catches that
+  degrading. Below it, `brain.history_turns` still deletes rather than compacts: ask about
+  something from before the summary and what is left is the paragraph, not the exchange.
 - **An honest word when one turn is too big.** The trim always keeps at least one turn, so a
   single turn that overflows the window on its own cannot be cut. llama-server rejects the
   request, that arrives as an HTTP error like any other, and what gets said out loud is "I
@@ -450,7 +448,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 573 tests, no hardware, model or network needed
+uv run pytest        # 591 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

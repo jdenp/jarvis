@@ -266,14 +266,23 @@ class BrainConfig:
     # would overflow a 98k window and the request would simply fail. Whichever
     # of the two bites first wins. 0 leaves only the turn count.
     max_context_fraction: float = 0.7
-    # Where old tool results start being emptied, as a fraction of the window.
-    # Below max_context_fraction on purpose, because it is the cheaper thing to
-    # lose: the call, the answer and the conversation around it all stay, and
-    # only the text of the result goes. Almost all of a long session is scans
-    # that were stale the moment anything was clicked. 0.65 is about 64k of a
-    # 98k window, which is where a session starts to feel heavy. 0 turns it off
-    # and leaves dropping whole turns as the only way down.
-    squash_fraction: float = 0.65
+    # Where the droppable half of the conversation starts being emptied, as a
+    # fraction of the window. Droppable is reasoning and tool results; what
+    # stays is what was asked, what was called and what was answered. Both go
+    # oldest first, whichever comes first, because a thought and the scan it
+    # led to are worth the same nothing an hour later. 0.7 is about 69k of a
+    # 98k window. 0 turns it off and leaves dropping whole turns as the only
+    # way down.
+    squash_fraction: float = 0.7
+    # When emptying is not enough, summarise. As a fraction of the ceiling
+    # above rather than of the window: at 0.7 and 0.8 it means 56k of a 98k
+    # window made up of nothing but prompts, replies and calls, with every
+    # result and every thought already gone. The oldest half of that is
+    # replaced by one paragraph of what happened, in the model's own words -
+    # a story rather than a log, since a target number written down is a lie
+    # by the time it is read. Costs one model call, on the turn it happens.
+    # 0 turns it off and leaves dropping whole turns as the only way down.
+    summarise_fraction: float = 0.8
     # Send one throwaway request at startup, so the system prompt and the tool
     # schemas are already in the server's cache when somebody first speaks. It
     # costs a second or two of nobody's time and takes it off the first answer,
@@ -377,6 +386,13 @@ class Config:
     screen: ScreenConfig = field(default_factory=ScreenConfig)
     brain: BrainConfig = field(default_factory=BrainConfig)
     log_level: str = "INFO"
+    # Everything logs/jarvis.log and its backups may take up between them, in
+    # megabytes. Past it the oldest goes. It is the whole budget rather than the
+    # size of one file: the log is written in four, so that reaching the limit
+    # drops a quarter of the history instead of all of it. Every tool call, every
+    # result and every thought goes in here, so a busy afternoon is tens of
+    # megabytes and 100 is a few weeks. 0 turns rotation off and lets it grow.
+    log_max_mb: int = 100
 
     @property
     def log_dir(self) -> Path:

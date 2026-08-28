@@ -410,23 +410,54 @@ affordable, but the argument for the cap was never the tokens - it is that a mod
 worse from a longer list, which is the whole accessibility tree lesson. Affording more is not
 a reason to offer more.
 
-**Forgetting happens twice, and the cheap half runs first.** Past
-`brain.squash_fraction` of the window - 0.65, about 64k of a 98k one - `_squash` walks the
-tool results oldest first and replaces the text of each with a line naming the tool that ran.
-It stops as soon as the estimate is back under. The last two turns are never touched, because
-the last scan is what "no, the one below it" refers to, and neither is anything under four
-hundred characters, since a short result is usually a fact worth having and squashing forty
-tokens to thirty saves nothing.
+**The conversation has a droppable half and a kept half.** Everything below turns on that
+split. Kept: what they asked, what was called, what was answered. Droppable: the reasoning
+behind a call, and the result it came back with. Those two are worth the same nothing an hour
+later - a crowded window scans as three thousand tokens of numbered targets that were stale
+the moment anything was clicked, and the thought that chose them was about a screen that has
+since changed. What is kept is a few hundred tokens a turn and reads as a memory of the
+afternoon.
 
-That works because of what a long session is actually made of. A crowded window scans as three
-thousand tokens of numbered targets which were stale the moment anything was clicked, and an
-afternoon of them is most of the window spent on lists nobody will read again. What was asked,
-what was run and what was said is a few hundred tokens a turn and reads as a memory of the
-afternoon. The call stays with its id, so nothing is orphaned and the endpoint still sees a
-well formed conversation - which is exactly why this is safe and deleting the message would
-not be.
+Measured on a real 106 turn session, tokenised by the model actually loaded: on a turn that
+used a tool, 354 tokens of reasoning against 1363 of scan output; on a turn with four calls or
+more, 578 against 2789. Per call it is a median of 36 tokens of thinking against 364 of
+result. So the results are the bulk of it, and the reasoning is not nothing.
 
-**`_trim` is the other half, and it is not compaction either.** It keeps the system prompt and
+**Forgetting happens three times, cheapest first.** Past `brain.squash_fraction` of the window
+- 0.7, about 69k of a 98k one - `_squash` walks the conversation oldest first and empties the
+droppable half of it, either kind, whichever comes first, stopping as soon as the estimate is
+back under. A thought simply goes: nothing stands in for it, so emptying one always wins
+however short it was. A result leaves a line naming the tool that ran, which is why that one
+needs a floor - squashing forty tokens to thirty saves nothing and a short result is usually a
+fact worth having. The last two turns are never touched either way, because the last scan is
+what "no, the one below it" refers to.
+
+The call stays with its id, so nothing is orphaned and the endpoint still sees a well formed
+conversation - which is exactly why this is safe and deleting the message would not be.
+
+**Then summarising, which is the one thing here that costs a model call.** `_summarise` only
+comes up when the kept half is itself past `brain.summarise_fraction` of the ceiling - 0.8 of
+0.7, so 56k of a 98k window made of nothing but prompts, replies and calls, with every result
+and every thought already gone. By then there is nothing cheap left to take. The oldest half
+of the turns becomes one paragraph in the model's own words, and goes back in as a user
+message, because an assistant one reads as the last thing JARVIS said and shapes what it does
+next.
+
+A story rather than a log, and the prompt says so in as many words. Exact parameters and
+target numbers are the first thing to stop being true - a number written down here points at
+something else by the time anybody reads it - so what it asks for is what they wanted, what
+was done about it, how it turned out, and anything they said about themselves. `as_story`
+feeds it the kept half only; pasting a scan in would be summarising the one part of the
+conversation that was never worth keeping.
+
+The costs are real, and they are why this went unbuilt for so long. It is a model call between
+turns, at the moment somebody is waiting, and it rewrites the prefix so the server's cache of
+it goes. Both are paid rarely: the kept half of a turn is a few hundred tokens, so it takes a
+very long conversation to get there at all, and every cheaper rung runs first. A summary of a
+summary also degrades, since the second one is written from the first rather than from what
+happened. That is a real limit rather than something to design around.
+
+**`_trim` is the last resort, and it is not compaction.** It keeps the system prompt and
 the last `brain.history_turns` turns whole and deletes everything before them. Cutting at a turn
 boundary is the load-bearing part, because half a turn leaves a tool result whose call is gone
 and some endpoints reject that outright. Nothing is summarised: ask about something from ten
@@ -439,18 +470,14 @@ So there are two limits and whichever bites first wins. The measured prompt size
 backstop, dropping one turn per turn taken, which is enough because the conversation only
 grows one turn at a time.
 
-That was chosen on the grounds that voice conversations are short, and it is still mostly
-true, but it is dropping rather than compacting and the meter in the corner now makes it
-visible. Squashing is what got built instead of summarising, and it is worth being clear about
-what it is: not a compaction, just a cheaper thing to throw away first. It costs no model call
-and no waiting, and by the time it has run a few times the turn count is usually enough on its
-own. It also made the old default look silly: the prompt sits at 2.6k of a 98k window, so
-six turns was throwing conversation away to save nothing, and 20 is the number now. Trimming
-is the one thing that invalidates a cached prefix - everything after the system prompt shifts
-- so trimming rarely is faster as well as more useful. Every real alternative costs something a voice loop can feel. Summarising on eviction
-means a model call between turns, at the moment somebody is waiting. A rolling summary means
-the summary is in every request forever, growing, and being rewritten by a model that will
-eventually rewrite it wrongly. It is in the README's "not done yet" rather than half built.
+Nothing is summarised at this rung - that already happened above, and a turn only reaches
+here when it did not help. Ask about something from before it and what is left is the
+paragraph, not the exchange. That was chosen on the grounds that voice conversations are
+short, and it is still mostly true; the meter in the corner is what makes the cost visible. It
+also made the old default look silly: the prompt sits at 2.6k of a 98k window, so six turns
+was throwing conversation away to save nothing, and 20 is the number now. Trimming is the one
+thing that invalidates a cached prefix - everything after the system prompt shifts - so
+trimming rarely is faster as well as more useful.
 
 **A lock key is watched, not hooked.** `keyboard`'s low level hook lives in this process, and
 Windows does not deliver input to an unelevated process while an elevated window has the

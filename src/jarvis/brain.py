@@ -138,6 +138,30 @@ SQUASH_OVER = 400
 # The last scan is what "no, the one below it" refers to.
 KEEP_WHOLE = 2
 
+# Room the summary gets. A paragraph or two of plain sentences, which is what
+# the prompt below asks for.
+SUMMARY_TOKENS = 400
+
+SUMMARISE = """This is the earlier half of a conversation you have been having.
+It does not fit any more, so write it down before it goes.
+
+An account of what happened, in the past tense, the way you would tell somebody
+about it afterwards. What they asked for, what you did about it, how it turned
+out, and anything they told you about themselves or about how they like things
+done.
+
+Not a log. No tool names, no target numbers, no exact parameters, no headings
+and no lists. None of that means anything now - a number written down here
+points at something else by the time it is read. Plain sentences, a paragraph or
+two at most, and nothing else: no preamble, no offer to help.
+
+Here is what happened:
+{story}"""
+
+# How the summary comes back in. As a user message, because an assistant one
+# reads as the last thing JARVIS said and shapes what it does next.
+EARLIER = "Before this, in your own words:\n{summary}"
+
 # Sent with an image, because a picture arriving on its own is a turn the model
 # has to guess the purpose of.
 HERE_IT_IS = "The image you asked to look at:"
@@ -291,9 +315,15 @@ class Model:
     ) -> Reply:
         """One completion. `tools=None` leaves the model nothing to do but write.
 
-        `think` overrides `brain.thinking` for this call alone. Only one place
-        uses it: reasoning earns its cost when a tool has to be chosen, and the
-        looking back afterwards has no tools to choose between.
+        `think` overrides `brain.thinking` for this call alone: reasoning earns
+        its cost when a tool has to be chosen, and neither the last word of a
+        turn nor the looking back afterwards has one.
+
+        `preserve_thinking` is sent on every call, never conditionally. It is
+        what renders an earlier turn's reasoning back into the prompt, and it
+        overrides llama-server's own `--no-reasoning-preserve`; sending it only
+        sometimes would rewrite the whole prefix and throw away the server's
+        cache of it.
         """
         payload: dict = {
             "model": self.config.model,
@@ -304,11 +334,13 @@ class Model:
         }
         if tools:
             payload["tools"] = tools
-        if not (self.config.thinking if think is None else think):
-            # The model's own chat template decides whether it reasons, and this
-            # is what llama.cpp's --jinja passes through to it. An endpoint that
-            # does not know the argument ignores it, which is the right failure.
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        # Both are the chat template's own arguments, passed through by
+        # llama.cpp's --jinja. An endpoint that does not know them ignores them,
+        # which is the right failure.
+        payload["chat_template_kwargs"] = {
+            "enable_thinking": self.config.thinking if think is None else think,
+            "preserve_thinking": True,
+        }
         if self.config.stream and not isinstance(self.ui, ui.Silent):
             return self._streamed(payload, watch, stop)
         try:
@@ -412,7 +444,14 @@ def _collect(calls: dict[int, dict], deltas: list) -> None:
 
 
 def _read(body: dict) -> Reply:
-    """Pull the one choice apart, tolerating a thin or odd response."""
+    """Pull the one choice apart, tolerating a thin or odd response.
+
+    The reasoning is kept on the message and sent back. Measured against this
+    machine's own server: a thought on the last assistant message renders into
+    the prompt already, so the tool loop stops re-deriving at step seven what it
+    worked out at step three, and one on an earlier turn renders under
+    `preserve_thinking`. It is the first thing emptied when the window tightens.
+    """
     choices = body.get("choices") or [{}]
     message = choices[0].get("message") or {}
     ran_out = choices[0].get("finish_reason") == "length"
@@ -431,12 +470,14 @@ def _read(body: dict) -> Reply:
             )
         )
 
+    thought = str(message.get("reasoning_content") or "")
     kept: dict = {"role": "assistant", "content": text}
+    if thought:
+        kept["reasoning_content"] = thought
     if message.get("tool_calls"):
         kept["tool_calls"] = message["tool_calls"]
     used = body.get("usage") or {}
     spent = (int(used.get("prompt_tokens") or 0), int(used.get("completion_tokens") or 0))
-    thought = str(message.get("reasoning_content") or "")
     return Reply(
         text=text,
         calls=tuple(calls),
@@ -606,6 +647,7 @@ class Brain:
                 self._look_back()
             return spoken
         finally:
+            logger.info("Context: %s", self._meter())
             self._working.clear()
             self.stopped.clear()
 
@@ -822,10 +864,19 @@ class Brain:
             if limit := self.model.context_limit():
                 self._room += f"/{count(limit)}"
         if prompt:
-            self.ui.meter(
-                f"{self._room} - in {count(self._tokens_in)} - out {count(self._tokens_out)}"
-            )
+            self.ui.meter(self._meter())
         return reply
+
+    def _meter(self) -> str:
+        """What the corner of the terminal says, in one line.
+
+        Written to the log at the end of every turn as well as drawn. The corner
+        is gone the moment the window scrolls or the session ends, and "was it
+        already at 80k when that happened" is the first question worth asking
+        about a turn that went strangely.
+        """
+        room = f"{self._room} - " if self._room else ""
+        return f"{room}in {count(self._tokens_in)} - out {count(self._tokens_out)}"
 
     def _run(self, call: Call) -> str:
         if call.broken:
@@ -922,20 +973,21 @@ class Brain:
         return spoken
 
     def _squash(self) -> None:
-        """Drop the text of old tool results, keeping the shape around them.
+        """Empty the droppable half of the conversation, oldest first.
 
-        Almost all of a long session is scans. A crowded window is three
-        thousand tokens of numbered targets and they were stale the moment
-        anything was clicked, so an afternoon of them is most of the window
-        spent on lists nobody will read again. What is worth keeping is what was
-        asked, what was run and what was said, and that is a few hundred tokens
-        a turn.
+        The conversation splits in two. Kept: what they asked, what was called,
+        what was answered. Droppable: the reasoning behind a call, and the
+        result it came back with. Those two are worth the same nothing an hour
+        later - a crowded window is three thousand tokens of numbered targets
+        that were stale the moment anything was clicked, and the thought that
+        chose them was about a screen that has since changed.
 
-        So above the squash ceiling the results go, oldest first, until it is
-        back under. The call stays with its id, so nothing is orphaned and the
-        endpoint still sees a well formed conversation - which is the whole
-        reason this is cheaper than dropping turns. It runs before the trim and
-        usually means the trim has nothing to do.
+        So above the ceiling they go, oldest first and whichever comes first,
+        until it is back under. A thought simply goes; a result leaves a line
+        naming the tool, and its call keeps its id, so nothing is orphaned and
+        the endpoint still sees a well formed conversation. That is the whole
+        reason this is cheaper than dropping turns. It runs before everything
+        else and usually means there is nothing else to do.
         """
         ceiling = self._ceiling(self.settings.squash_fraction)
         if self._spent <= ceiling:
@@ -949,10 +1001,16 @@ class Brain:
             for call in message.get("tool_calls") or []
         }
 
-        saved = dropped = 0
+        saved = thoughts = results = 0
         for message in self.messages[:recent]:
             if self._spent - saved <= ceiling:
                 break
+            # No floor on a thought, unlike a result: nothing stands in for it,
+            # so emptying one always wins however short it was.
+            if thought := message.pop("reasoning_content", None):
+                saved += len(thought) // 4
+                thoughts += 1
+                continue
             was = message.get("content")
             if message.get("role") != "tool" or not isinstance(was, str):
                 continue
@@ -964,12 +1022,88 @@ class Brain:
             # Four characters to the token, which is close enough to decide with
             # and wrong in the safe direction on a list of numbers.
             saved += (len(was) - len(message["content"])) // 4
-            dropped += 1
+            results += 1
 
-        if dropped:
-            logger.info("Squashed %d old tool result(s), about %s tokens.", dropped, count(saved))
+        if thoughts or results:
+            logger.info(
+                "Emptied %d old result(s) and %d thought(s), about %s tokens.",
+                results,
+                thoughts,
+                count(saved),
+            )
             # An estimate standing in until the next call measures it for real.
             self._spent -= saved
+
+    def _droppable(self) -> int:
+        """Roughly what another squash could still reclaim from here."""
+        loose = 0
+        for message in self.messages:
+            if thought := message.get("reasoning_content"):
+                loose += len(thought) // 4
+            body = message.get("content")
+            if message.get("role") == "tool" and isinstance(body, str) and len(body) >= SQUASH_OVER:
+                loose += (len(body) - len(SQUASHED)) // 4
+        return loose
+
+    def _summarise(self) -> None:
+        """Replace the oldest half of what cannot be dropped with an account of it.
+
+        The last thing tried before turns start disappearing, and it only comes
+        up when the kept half is itself most of the ceiling - by then every
+        result and every thought has already gone and there is nothing cheap
+        left to take.
+
+        The oldest half of the turns becomes one paragraph in the model's own
+        words. Deliberately a story rather than a log: exact parameters and
+        target numbers are the first thing to stop being true, and a number
+        written down here points at something else by the time anybody reads it.
+        What survives is what the conversation was about, which is what somebody
+        asking "what did we decide" actually wanted.
+
+        Cut at a turn boundary, like the trim, so no tool result outlives the
+        call it answered. If nothing comes back the conversation is left exactly
+        as it was and the trim takes it from here.
+        """
+        if not self.settings.summarise_fraction:
+            return
+        ceiling = int(self._ceiling() * self.settings.summarise_fraction)
+        if not ceiling or max(0, self._spent - self._droppable()) <= ceiling:
+            return
+
+        starts = self._turns(indexes=True)
+        if len(starts) < 2 * KEEP_WHOLE:
+            return
+        cut = starts[len(starts) // 2]
+        going = self.messages[1:cut]
+        story = as_story(going)
+        if not story:
+            return
+
+        self.ui.status("remembering")
+        logger.info("Summarising the oldest %d of %d turns.", len(starts) // 2, len(starts))
+        try:
+            reply = self.model.reply(
+                [{"role": "user", "content": SUMMARISE.format(story=story)}],
+                tools=None,
+                limit=SUMMARY_TOKENS,
+                think=False,
+                stop=self.stopped.is_set,
+            )
+        except Cancelled:
+            return
+        except Exception:
+            logger.exception("Summarising failed; carrying on without it.")
+            return
+
+        summary = reply.text.strip()
+        if not summary:
+            logger.info("Nothing came back, so the conversation is left as it was.")
+            return
+
+        kept = {"role": "user", "content": EARLIER.format(summary=summary)}
+        self._spent -= sum(weigh(message) for message in going) - weigh(kept)
+        self.messages[1:cut] = [kept]
+        logger.info("Summarised. About %s tokens now.", count(max(0, self._spent)))
 
     def _trim(self) -> None:
         """Keep the system prompt and the last few turns, whole.
@@ -985,11 +1119,12 @@ class Brain:
         size is the backstop, one turn dropped per turn taken - which is enough,
         because the conversation only grows one turn at a time.
 
-        _squash runs first and is the gentler half: it empties old results while
-        leaving the conversation whole, and a turn only gets deleted when that
-        was not enough.
+        Two gentler things run first. _squash empties the droppable half and
+        _summarise rewrites the oldest turns as prose; both leave a conversation
+        that still makes sense. A turn is only deleted when neither was enough.
         """
         self._squash()
+        self._summarise()
         keep = max(1, self.settings.history_turns)
         if self._spent > self._ceiling():
             logger.info("Conversation is %d tokens; dropping the oldest turn.", self._spent)
@@ -1072,6 +1207,47 @@ def first_line(result: str, limit: int = 160) -> str:
     """The opening line of a tool result, short enough for one line of log."""
     opening = next((line for line in result.splitlines() if line.strip()), "")
     return opening[:limit] + ("..." if len(opening) > limit else "")
+
+
+def weigh(message: dict) -> int:
+    """Roughly what one message costs, for decisions taken between requests.
+
+    Four characters to the token, and it lands either side of the truth: 4.33
+    characters per token across a session's worth of reasoning, 3.89 on one
+    dense sample, where the real cost of a kept thought was 301 tokens against
+    292 estimated. Close enough to decide with, and never the number shown - the
+    meter reads what the endpoint charged.
+    """
+    total = len(str(message.get("content") or "")) + len(
+        str(message.get("reasoning_content") or "")
+    )
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        total += len(str(function.get("name") or "")) + len(str(function.get("arguments") or ""))
+    return total // 4
+
+
+def as_story(messages: list[dict]) -> str:
+    """The kept half of a conversation as plain lines, for something to summarise.
+
+    What was asked, what was answered, and the name of anything called. Not the
+    results and not the reasoning: those are the droppable half by definition
+    and have usually gone already, and pasting a scan in here would be
+    summarising the one part that was never worth keeping in the first place.
+    """
+    lines = []
+    for message in messages:
+        role = message.get("role")
+        body = " ".join(str(message.get("content") or "").split())
+        if role == "user" and body:
+            lines.append(f"They said: {body}")
+        elif role == "assistant":
+            if body:
+                lines.append(f"You said: {body}")
+            for call in message.get("tool_calls") or []:
+                name = (call.get("function") or {}).get("name") or "a tool"
+                lines.append(f"You used {name}.")
+    return "\n".join(lines)
 
 
 def count(tokens: int) -> str:

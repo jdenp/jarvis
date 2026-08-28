@@ -214,6 +214,17 @@ context_limit = 0
 # window and the request would fail outright rather than degrade. Whichever of
 # the two bites first wins. 0 leaves only the turn count.
 max_context_fraction = 0.7
+# Where the droppable half starts being emptied, as a fraction of the window.
+# Droppable is reasoning and tool results; what stays is what was asked, what was
+# called and what was answered. Both go oldest first, whichever comes first,
+# because a thought and the scan it led to are worth the same nothing an hour
+# later. 0 turns it off.
+squash_fraction = 0.7
+# When emptying is not enough, summarise. A fraction of the ceiling above rather
+# than of the window, measured against what is left once everything droppable has
+# gone: the oldest half of that becomes one paragraph of what happened, in the
+# model's own words. Costs one model call on the turn it fires. 0 turns it off.
+summarise_fraction = 0.8
 # The shell tool, which is how anything that is not the desktop gets done -
 # files, git, and a coding agent if one is named below. It runs whatever the model
 # asks for, as you, with no confirmation: that is the point of it and also the

@@ -557,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
         "screenshot",
         "tools",
     }:
-        configure(config.log_dir, "WARNING")
+        configure(config.log_dir, "WARNING", max_mb=config.log_max_mb)
         if args.command == "say":
             return run_say(config, args)
         if args.command == "next":
@@ -578,12 +578,12 @@ def main(argv: list[str] | None = None) -> int:
         # No microphone and no service, so this runs anywhere an ssh session
         # does. Logging stays off the screen unless asked for - the tool calls
         # are printed by the chat front end and duplicating them is noise.
-        configure(config.log_dir, config.log_level, console=args.verbose)
+        configure(config.log_dir, config.log_level, console=args.verbose, max_mb=config.log_max_mb)
         from .chat import run as run_chat
 
         return run_chat(config, args.verbose)
 
-    logger = configure(config.log_dir, config.log_level)
+    logger = configure(config.log_dir, config.log_level, max_mb=config.log_max_mb)
     logger.info(_banner())
     try:
         return run_serve(config, args, logger)

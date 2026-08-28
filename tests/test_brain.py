@@ -15,6 +15,7 @@ import pytest
 from jarvis.brain import (
     ALREADY_SEEN,
     HERE_IT_IS,
+    KEEP_WHOLE,
     NO_MODEL,
     NOTHING_TO_SAY,
     SQUASHED,
@@ -34,8 +35,9 @@ from jarvis.tools import Tool, Toolbox
 class FakeModel:
     """Replies in the order given, and remembers what it was asked."""
 
-    def __init__(self, *replies: Reply) -> None:
+    def __init__(self, *replies: Reply, limit: int = 98304) -> None:
         self.replies = list(replies)
+        self.limit = limit
         self.asked: list[tuple[int, bool]] = []  # (messages, tools offered)
         self.preloads = 0
         self.watched: list[bool] = []
@@ -45,7 +47,7 @@ class FakeModel:
         self.raise_next: Exception | None = None
 
     def context_limit(self) -> int:
-        return 98304
+        return self.limit
 
     def reply(self, messages, tools=None, limit=None, watch=None, think=None, stop=None) -> Reply:
         if self.raise_next is not None:
@@ -128,7 +130,7 @@ def toolbox(**results) -> Toolbox:
     return box
 
 
-def brain(*replies, voice=None, config=None, box=None) -> Brain:
+def brain(*replies, voice=None, config=None, box=None, limit=98304) -> Brain:
     """A brain for testing the answering loop.
 
     Looking back is off. It is a separate concern with its own tests below, and
@@ -139,7 +141,7 @@ def brain(*replies, voice=None, config=None, box=None) -> Brain:
     return Brain(
         replace(config, brain=replace(config.brain, consolidate=False)),
         voice or FakeVoice(),
-        model=FakeModel(*replies),
+        model=FakeModel(*replies, limit=limit),
         toolbox=box or toolbox(),
     )
 
@@ -230,6 +232,42 @@ def test_the_endpoint_is_asked_whether_it_can_see():
 
     model = Model(Config().brain, client=httpx.Client(transport=httpx.MockTransport(props)))
     assert model.can_see() is True
+
+
+def sent(config, **kwargs) -> dict:
+    """The body of one request, with a canned reply behind it."""
+    import httpx
+
+    seen: dict = {}
+
+    def capture(request):
+        seen.update(__import__("json").loads(request.content))
+        return httpx.Response(
+            200, json={"choices": [{"message": {"role": "assistant", "content": "yes"}}]}
+        )
+
+    model = Model(config, client=httpx.Client(transport=httpx.MockTransport(capture)))
+    model.reply([{"role": "user", "content": "hello"}], **kwargs)
+    return seen
+
+
+def test_the_template_is_told_to_keep_earlier_reasoning():
+    """Sent on every call and never conditionally. It is what renders an
+    earlier turn's thinking back into the prompt, and it overrides
+    llama-server's own --no-reasoning-preserve. Sending it only sometimes would
+    rewrite the whole prefix and throw the server's cache of it away."""
+    config = replace(Config().brain, stream=False)
+    for think in (None, True, False):
+        body = sent(config, think=think)
+        assert body["chat_template_kwargs"]["preserve_thinking"] is True
+
+
+def test_reasoning_is_asked_for_or_not_per_call():
+    config = replace(Config().brain, stream=False, thinking=True)
+    assert sent(config)["chat_template_kwargs"]["enable_thinking"] is True
+    assert sent(config, think=False)["chat_template_kwargs"]["enable_thinking"] is False
+    off = replace(config, thinking=False)
+    assert sent(off)["chat_template_kwargs"]["enable_thinking"] is False
 
 
 def test_an_endpoint_that_will_not_say_is_not_guessed_at():
@@ -734,9 +772,10 @@ def test_a_llama_server_response_is_read():
     assert reply.calls[0].broken == ""
 
 
-def test_reasoning_is_not_echoed_back():
-    """Qwen returns its thinking in a field of its own. Sending it back costs
-    tokens on every subsequent call and the endpoint does not want it."""
+def test_reasoning_is_kept_on_the_message():
+    """Measured against this machine's own server: a thought on the last
+    assistant message renders into the prompt already, so the tool loop stops
+    re-deriving at step seven what it worked out at step three."""
     from jarvis.brain import _read
 
     reply = _read(
@@ -752,7 +791,11 @@ def test_reasoning_is_not_echoed_back():
             ]
         }
     )
-    assert reply.message == {"role": "assistant", "content": "Half past two."}
+    assert reply.message == {
+        "role": "assistant",
+        "content": "Half past two.",
+        "reasoning_content": "The user asked for the time. I should...",
+    }
 
 
 def test_malformed_arguments_are_carried_rather_than_thrown():
@@ -1077,6 +1120,42 @@ def test_ctx_holds_still_when_the_tools_come_off():
     assert shown.readings[-1].endswith("in 4.2k - out 50")
 
 
+def test_where_the_context_stood_is_written_down_at_the_end_of_a_turn(caplog):
+    """The corner of the terminal is gone the moment the window scrolls, and
+    "was it already at 80k when that happened" is the first question worth
+    asking about a turn that went strangely."""
+    import logging
+
+    it = brain(
+        Reply(
+            text="Half past two, sir.",
+            tokens=(3000, 20),
+            message={"role": "assistant", "content": "Half past two, sir."},
+        ),
+        box=toolbox(look_at_screen="Taskbar - 25 targets"),
+    )
+    with caplog.at_level(logging.INFO, logger="jarvis.brain"):
+        it.turn(["what time is it"])
+
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Context: "))
+    assert line == "Context: ctx 3.0k/98k - in 3.0k - out 20", "the status line, written down"
+
+
+def test_it_is_written_down_even_when_the_turn_was_cancelled(caplog):
+    """A turn that was thrown away is exactly the kind worth having the number
+    for afterwards."""
+    import logging
+
+    from jarvis.brain import Cancelled
+
+    it = brain(said("Half past two, sir."))
+    it.model.raise_next = Cancelled()
+    with caplog.at_level(logging.INFO, logger="jarvis.brain"):
+        it.turn(["what time is it"])
+
+    assert any(r.getMessage().startswith("Context: ") for r in caplog.records)
+
+
 def scanned(brain, turns: int, size: int = 4000) -> None:
     """A conversation of `turns` turns, each one a scan and an answer."""
     for n in range(turns):
@@ -1098,7 +1177,7 @@ def test_old_scans_are_emptied_before_any_turn_is_dropped():
     conversation; dropping the turn does not."""
     it = brain()
     scanned(it, 8)
-    it._spent = 70_000  # over 0.65 of a 98304 window
+    it._spent = 75_000  # over 0.7 of a 98304 window
     it._squash()
 
     assert it._turns() == 8, "nothing was deleted"
@@ -1123,7 +1202,7 @@ def test_squashing_stops_as_soon_as_it_is_under():
     scan back when emptying the tenth was enough."""
     it = brain()
     scanned(it, 10)
-    it._spent = 64_500  # a few hundred over the 63.8k ceiling, one scan's worth
+    it._spent = 69_500  # a few hundred over the 68.8k ceiling, one scan's worth
     it._squash()
 
     emptied = [m for m in it.messages if m.get("role") == "tool" and "target" not in m["content"]]
@@ -1133,7 +1212,7 @@ def test_squashing_stops_as_soon_as_it_is_under():
 def test_a_conversation_under_the_ceiling_is_left_alone():
     it = brain()
     scanned(it, 8)
-    it._spent = 50_000
+    it._spent = 60_000
     it._squash()
     assert all("target" in m["content"] for m in it.messages if m.get("role") == "tool")
 
@@ -1180,12 +1259,204 @@ def test_it_can_be_turned_off():
     assert all("target" in m["content"] for m in it.messages if m.get("role") == "tool")
 
 
+# ----------------------------------------------------- the droppable half
+
+
+def thought_out(brain, turns: int, thinking: int = 600) -> None:
+    """A conversation of `turns` turns, each one reasoned about and answered.
+
+    No tools, so the only thing here that can be emptied is the thinking.
+    """
+    for n in range(turns):
+        brain.messages += [
+            {"role": "user", "content": f"question {n}"},
+            {
+                "role": "assistant",
+                "content": f"answer {n}",
+                "reasoning_content": f"thought {n} " * (thinking // 10),
+            },
+        ]
+
+
+def test_a_thought_is_emptied_the_way_a_result_is():
+    """Both halves of the droppable side are worth the same nothing an hour
+    later: the scan was stale the moment anything was clicked, and the thought
+    that chose it was about a screen that has since changed."""
+    it = brain()
+    thought_out(it, 8)
+    it._spent = 10_000_000
+    it._squash()
+
+    left = [m for m in it.messages if m.get("reasoning_content")]
+    assert len(left) == KEEP_WHOLE, "only the two most recent turns keep their thinking"
+    assert [m["content"] for m in it.messages if m["role"] == "assistant"] == [
+        f"answer {n}" for n in range(8)
+    ], "and every answer is still there"
+
+
+def test_the_oldest_goes_first_whichever_kind_it_is():
+    """One pass over the conversation, oldest first. A thought from turn two
+    goes before a scan from turn six, because the scan is newer."""
+    it = brain()
+    for n in range(6):
+        it.messages += [
+            {"role": "user", "content": f"question {n}"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "thinking about it " * 60,
+                "tool_calls": [{"id": f"c{n}", "function": {"name": "look_at_screen"}}],
+            },
+            {"role": "tool", "tool_call_id": f"c{n}", "content": "target " * 200},
+            {"role": "assistant", "content": f"answer {n}"},
+        ]
+    # Room for exactly the first thought and then the first result, and no
+    # more: the loop checks before each one, so a token over would take a third.
+    room = 1080 // 4 + (1400 - len(SQUASHED.format(name="look_at_screen"))) // 4
+    it._spent = it._ceiling(it.settings.squash_fraction) + room
+    it._squash()
+
+    thoughts = [bool(m.get("reasoning_content")) for m in it.messages if "reasoning_content" in m]
+    results = ["target" in m["content"] for m in it.messages if m.get("role") == "tool"]
+    assert thoughts.count(False) == 0, "a thought is popped, not blanked"
+    assert len([m for m in it.messages if m.get("reasoning_content")]) == 5, "the oldest went"
+    assert results == [False] + [True] * 5, "and then the result under it, and no further"
+
+
+def test_a_short_thought_goes_too():
+    """Unlike a result, nothing stands in for it, so emptying one always wins."""
+    it = brain()
+    thought_out(it, 8, thinking=20)
+    it._spent = 10_000_000
+    it._squash()
+    assert len([m for m in it.messages if m.get("reasoning_content")]) == KEEP_WHOLE
+
+
+# --------------------------------------------------------------- summarising
+
+
+def long_session():
+    """The static conversation in tests/fixtures, as a fresh list."""
+    import json
+    from pathlib import Path
+
+    body = (Path(__file__).parent / "fixtures" / "a-long-session.json").read_text(encoding="utf-8")
+    return json.loads(body)
+
+
+def summarising(*replies, limit=2000, **overrides):
+    """A brain holding the long session, against a window small enough to bite."""
+    config = replace(Config(), brain=replace(Config().brain, context_limit=limit, **overrides))
+    it = brain(*replies, config=config, limit=limit)
+    it.messages = long_session()
+    return it
+
+
+def test_the_fixture_is_a_conversation_the_ladder_has_to_survive():
+    """Static and committed rather than generated, so what is being asked of
+    the compaction is readable in a diff."""
+    it = summarising()
+    assert it._turns() == 12
+    assert len([m for m in it.messages if m.get("reasoning_content")]) == 22
+    assert len([m for m in it.messages if m.get("role") == "tool"]) == 10
+
+
+def test_emptying_comes_first_and_is_usually_enough():
+    """Nothing is summarised while there is still something cheap to take."""
+    it = summarising(said("a summary nobody asked for"), limit=3000)
+    it._spent = 2200  # over the 2100 squash ceiling, under everything else
+    it._trim()
+
+    assert it._turns() == 12, "no turn was rewritten"
+    assert it.model.asked == [], "and the model was never called"
+
+
+def test_what_cannot_be_dropped_is_summarised():
+    """By the time this runs, every result and every thought has already gone
+    and there is nothing cheap left to take."""
+    it = summarising(said("They had you working through Spotify and Outlook."))
+    it._spent = 1400  # over the ceiling with nothing droppable left
+    for message in it.messages:
+        message.pop("reasoning_content", None)
+    for message in it.messages:
+        if message.get("role") == "tool":
+            message["content"] = "(look_at_screen ran here.)"
+    it._summarise()
+
+    assert it._turns() == 7, "the oldest six became one"
+    assert it.messages[1]["role"] == "user", "and it goes back as something they were told"
+    assert "They had you working" in it.messages[1]["content"]
+    assert it.messages[-1]["content"] == "Down a few notches.", "the recent half is untouched"
+
+
+def test_the_story_carries_no_target_numbers_or_parameters():
+    """A number written down here points at something else by the time it is
+    read, and the exact arguments were about a screen that has changed."""
+    from jarvis.brain import as_story
+
+    story = as_story(long_session()[:9])
+    assert "They said: what's playing" in story
+    assert "You used look_at_screen." in story
+    assert "Spotify Premium" not in story, "no arguments"
+    assert "23 targets" not in story, "and no scan in it at all"
+
+
+def test_summarising_leaves_the_conversation_alone_if_nothing_comes_back():
+    it = summarising(said("   "))
+    it._spent = 1400
+    for message in it.messages:
+        message.pop("reasoning_content", None)
+    before = [dict(m) for m in it.messages]
+    it._summarise()
+    assert it.messages == before
+
+
+def test_summarising_can_be_turned_off():
+    it = summarising(said("a summary"), summarise_fraction=0)
+    it._spent = 10_000_000
+    before = [dict(m) for m in it.messages]
+    it._summarise()
+    assert it.messages == before
+    assert it.model.asked == []
+
+
+def test_a_short_conversation_is_not_worth_halving():
+    """Two turns cut in half is one turn and a paragraph about one turn."""
+    it = summarising(said("a summary"))
+    it.messages = it.messages[:5]
+    it._spent = 10_000_000
+    it._summarise()
+    assert it.model.asked == []
+
+
+def test_the_whole_ladder_in_order():
+    """Empty what can go, then summarise what is left, then drop turns. Each
+    rung is only reached because the one before it was not enough."""
+    it = summarising(said("They had you working through Spotify and Outlook."), limit=600)
+    it._spent = 1547  # what the fixture weighs, against a 600 token window
+    it._trim()
+
+    assert it._turns() < 12, "it got smaller"
+    thinking = [m for m in it.messages if m.get("reasoning_content")]
+    assert len(thinking) == 4, "thinking went first, bar the two turns that are still current"
+    calls = {c["id"] for m in it.messages for c in m.get("tool_calls") or []}
+    answers = {m["tool_call_id"] for m in it.messages if m.get("role") == "tool"}
+    assert calls == answers, "and it is still a conversation the endpoint would take"
+
+
 def test_a_conversation_that_gets_too_big_loses_its_oldest_turn():
     """history_turns counts turns and turns are not the same size. Twenty that
     each scan a crowded window twice would overflow the window and fail the
     request outright rather than degrade."""
     config = replace(
-        Config(), brain=replace(Config().brain, history_turns=20, max_context_fraction=0.7)
+        Config(),
+        brain=replace(
+            Config().brain,
+            history_turns=20,
+            max_context_fraction=0.7,
+            # Off, so this is the backstop on its own. Summarising is tested below.
+            summarise_fraction=0,
+        ),
     )
     it = brain(*[said(f"reply {n}") for n in range(6)], config=config)
     for n in range(3):

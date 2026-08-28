@@ -31,8 +31,8 @@ def _keep_the_suite_out_of_the_real_log():
     real = logging_setup.configure
     elsewhere = Path(tempfile.mkdtemp(prefix="jarvis-tests-"))
 
-    def configure(log_dir, level="INFO", console=True):
-        return real(elsewhere, level, console=False)
+    def configure(log_dir, level="INFO", console=True, max_mb=1):
+        return real(elsewhere, level, console=False, max_mb=max_mb)
 
     patch = pytest.MonkeyPatch()
     patch.setattr(logging_setup, "configure", configure)
