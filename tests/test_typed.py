@@ -12,7 +12,8 @@ import io
 
 import pytest
 
-from jarvis.typed import Typing
+from jarvis.typed import CANCEL as CANCEL_KEY
+from jarvis.typed import ENTER, Typing
 from jarvis.ui import Ui
 
 
@@ -36,10 +37,15 @@ class Keys:
         return self.pending.pop(0)
 
 
-def typing(*presses, written=None):
+def typing(*presses, written=None, on_cancel=None):
     said: list[str] = []
     keys = Keys(*presses)
-    reader = Typing(Ui(written or io.StringIO(), colour=True), said.append, keyboard=keys)
+    reader = Typing(
+        Ui(written or io.StringIO(), colour=True),
+        said.append,
+        keyboard=keys,
+        on_cancel=on_cancel,
+    )
     keys.exhausted = reader.stop
     return reader, said
 
@@ -156,6 +162,45 @@ def test_a_reply_arriving_mid_sentence_cancels_the_way_back():
     assert reader.ui._stepped is True
     reader.ui.spoke("Half past two, sir.")
     assert reader.ui._stepped is False
+
+
+# ------------------------------------------------------------------ escape
+
+
+def test_escape_on_an_empty_line_means_stop_rather_than_never_mind():
+    """There is nothing on the line to throw away, so the key means the other
+    thing you would want from it while something is being written for you."""
+    from jarvis.typed import CANCEL
+
+    reader, _ = typing(CANCEL)
+    assert reader.read_line() == ""
+    assert reader.cancelled is True
+
+
+def test_escape_on_a_line_with_something_on_it_still_only_drops_the_line():
+    from jarvis.typed import CANCEL
+
+    reader, _ = typing("delete everything" + CANCEL)
+    assert reader.read_line() == ""
+    assert reader.cancelled is False, "nothing was stopped, a sentence was abandoned"
+
+
+def test_stopping_something_asks_straight_away_what_they_meant_instead():
+    """Escape is nearly always followed by saying what you wanted. Waiting for
+    another keypress to put the prompt back makes them press twice."""
+    from jarvis.typed import CANCEL
+
+    reader, said = typing(CANCEL, "open spotify" + ENTER[0], on_cancel=lambda: True)
+    reader.run()
+    assert said == ["open spotify"], "read without waiting to be woken again"
+
+
+def test_escape_with_nothing_to_stop_leaves_no_prompt_behind():
+    written = io.StringIO()
+    reader, said = typing(CANCEL_KEY, written=written, on_cancel=lambda: False)
+    reader.run()
+    assert said == []
+    assert written.getvalue().count("you > ") == 1, "the one they opened, and no more"
 
 
 # ------------------------------------------------------------------ the loop

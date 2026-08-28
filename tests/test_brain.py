@@ -35,6 +35,7 @@ class FakeModel:
         self.asked: list[tuple[int, bool]] = []  # (messages, tools offered)
         self.preloads = 0
         self.watched: list[bool] = []
+        self.stopped: list = []
         self.limits: list[int | None] = []
         self.interrupt: list[list[str]] = []
         self.raise_next: Exception | None = None
@@ -42,13 +43,14 @@ class FakeModel:
     def context_limit(self) -> int:
         return 98304
 
-    def reply(self, messages, tools=None, limit=None, watch=None, think=None) -> Reply:
+    def reply(self, messages, tools=None, limit=None, watch=None, think=None, stop=None) -> Reply:
         if self.raise_next is not None:
             raise self.raise_next
         if limit == 1:
             self.preloads += 1
             return said("")
         self.watched.append(watch is not None)
+        self.stopped.append(stop)
         self.limits.append(limit)
         # Whatever is queued to be said over the top of this one.
         if self.interrupt and watch is not None:
@@ -68,6 +70,7 @@ class FakeVoice:
         self.turns = list(turns)
         self.spoken: list[str] = []
         self.mid_task: list[list[str]] = []
+        self.hushed = 0
 
     def hear(self, timeout: float) -> list[str]:
         if timeout == 0.0:
@@ -76,6 +79,9 @@ class FakeVoice:
 
     def say(self, text: str) -> None:
         self.spoken.append(text)
+
+    def hush(self) -> None:
+        self.hushed += 1
 
     def waiting(self) -> str:
         return "listening"
@@ -150,6 +156,66 @@ def looking_back(tmp_path, *replies, box=None) -> Brain:
         model=FakeModel(*replies),
         toolbox=box or toolbox(look_at_screen="Taskbar - 25 targets"),
     )
+
+
+# ------------------------------------------------------------------ escape
+
+
+def test_escape_with_nothing_happening_does_nothing():
+    """Which is what tells the terminal not to put a prompt up for no reason."""
+    assert brain().cancel() is False
+
+
+def test_a_cancelled_turn_says_nothing_and_leaves_no_trace():
+    """The question goes with the answer. A half worked request left in the
+    history is one they have already withdrawn, and an assistant message whose
+    tool calls were never answered is one the endpoint refuses outright."""
+    from jarvis.brain import Cancelled
+
+    it = brain(said("Half past two, sir."))
+    before = list(it.messages)
+    it.model.raise_next = Cancelled()
+    assert it.turn(["what time is it"]) == ""
+    assert it.voice.spoken == []
+    assert it.messages == before
+
+
+def test_escape_lands_as_soon_as_the_tool_it_arrived_during_finishes():
+    """Checked between steps as well as mid stream, so a cancel during a slow
+    command costs nothing more than the rest of that command."""
+    held: list[Brain] = []
+
+    def press_escape(**arguments):
+        assert held[0].cancel() is True, "there was something to stop"
+        return "Taskbar - 25 targets"
+
+    box = Toolbox([Tool(name="look_at_screen", description="look", run=press_escape)])
+    it = brain(calling("look_at_screen"), said("Open, sir."), box=box)
+    held.append(it)
+
+    assert it.turn(["is spotify open"]) == ""
+    assert it.voice.spoken == [], "the answer it was about to write is gone with it"
+    assert it.voice.hushed == 1, "and it stopped talking"
+
+
+def test_a_cancel_does_not_carry_into_the_next_turn():
+    """Otherwise one escape kills every turn after it."""
+    from jarvis.brain import Cancelled
+
+    it = brain(said("Half past two, sir."))
+    it.model.raise_next = Cancelled()
+    it.turn(["what time is it"])
+    it.model.raise_next = None
+    it.model.replies = [said("Tuesday, sir.")]
+    assert it.turn(["what day is it"]) == "Tuesday, sir."
+
+
+def test_the_stream_is_given_a_way_to_be_stopped():
+    """The flag has to reach the reading of the stream or escape only works
+    between calls, which is most of a minute when it is thinking hard."""
+    it = brain(said("Done, sir."))
+    it.turn(["do something"])
+    assert it.model.stopped and all(callable(check) for check in it.model.stopped)
 
 
 # ------------------------------------------------------------ the reply is said
@@ -1069,6 +1135,27 @@ def test_at_most_two_lessons_from_one_turn(tmp_path):
     assert bullets(tmp_path / "navigation" / "user-navigation.md") == ["One.", "Two."]
 
 
+def test_a_lesson_about_a_target_number_is_thrown_away(tmp_path):
+    """Live session, written down verbatim: "the Close button is target number
+    3 when focused". Every scan numbers what it finds again, so that is a click
+    on something else tomorrow - worse than having learned nothing."""
+    from jarvis.memories import bullets
+
+    it = looking_back(
+        tmp_path,
+        calling("look_at_screen"),
+        said("Closed, sir."),
+        said(
+            "- File Explorer closes by clicking Close, target number 3.\n"
+            "- Explorer opens straight from run_command with no path."
+        ),
+    )
+    it.turn(["close file explorer"])
+
+    kept = bullets(tmp_path / "navigation" / "user-navigation.md")
+    assert kept == ["Explorer opens straight from run_command with no path."]
+
+
 def test_a_turn_that_used_no_tools_is_not_worth_looking_back_at(tmp_path):
     it = looking_back(tmp_path, said("Half past two, sir."))
     it.turn(["what time is it"])
@@ -1092,7 +1179,7 @@ def test_a_failure_while_looking_back_does_not_lose_the_answer(tmp_path):
     it = looking_back(tmp_path, calling("look_at_screen"), said("Done, sir."))
     it.model.replies = [calling("look_at_screen"), said("Done, sir.")]
 
-    def explode(messages, tools=None, limit=None, watch=None):
+    def explode(messages, tools=None, limit=None, watch=None, think=None, stop=None):
         if len(it.model.asked) >= 2:
             raise RuntimeError("the endpoint fell over")
         return FakeModel.reply(it.model, messages, tools, limit, watch)

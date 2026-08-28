@@ -57,11 +57,23 @@ class Keyboard:
 class Typing:
     """Reads one line at a time from the console and hands it over."""
 
-    def __init__(self, ui, on_line: Callable[[str], None], keyboard=None, prompt="you > ") -> None:
+    def __init__(
+        self,
+        ui,
+        on_line: Callable[[str], None],
+        keyboard=None,
+        prompt="you > ",
+        on_cancel: Callable[[], bool] | None = None,
+    ) -> None:
         self.ui = ui
         self.on_line = on_line
         self.keyboard = keyboard or Keyboard()
         self.prompt = prompt
+        # Answers whether there was anything to stop, which decides whether the
+        # prompt comes back. Nothing happening means escape did nothing.
+        self.on_cancel = on_cancel or (lambda: False)
+        # Set when escape was pressed on an empty line.
+        self.cancelled = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -75,14 +87,22 @@ class Typing:
 
     def run(self) -> None:
         """Wait for somebody to start typing, read what they type, repeat."""
-        while not self._stop.wait(POLL_SECONDS):
-            if not self.keyboard.waiting():
+        prompt_again = False
+        while not self._stop.is_set():
+            if not prompt_again and (self._stop.wait(POLL_SECONDS) or not self.keyboard.waiting()):
                 continue
+            prompt_again = False
             try:
                 line = self.read_line()
             except Exception:
                 logger.exception("Reading a typed line failed; carrying on without it.")
                 self.ui.release()
+                continue
+            if self.cancelled:
+                # Straight back into a prompt, without waiting for a keypress
+                # this time. Stopping something is nearly always followed by
+                # saying what you wanted instead.
+                prompt_again = self.on_cancel()
                 continue
             if line:
                 logger.info("Typed: %s", line)
@@ -93,9 +113,12 @@ class Typing:
 
         Escape throws the line away, which is the way out for somebody who
         pressed a key by accident - and pressing a key by accident is the whole
-        reason this waits for one rather than showing a prompt.
+        reason this waits for one rather than showing a prompt. On an empty line
+        there is nothing to throw away, so it means the other thing you would
+        want from that key: stop what you are doing.
         """
         self.ui.hold()
+        self.cancelled = False
         typed: list[str] = []
         # Counted apart from what was typed, because escape empties the line
         # without unprinting it - and then the wipe below comes up short and
@@ -112,6 +135,7 @@ class Typing:
                 elif key in ENTER:
                     break
                 elif key == CANCEL:
+                    self.cancelled = not typed
                     typed = []
                     break
                 elif key in BACKSPACE:

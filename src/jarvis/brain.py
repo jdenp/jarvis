@@ -82,6 +82,12 @@ CALL_IT = (
     "plain English what you were trying to do."
 )
 
+# A lesson naming a target number is worse than no lesson. Every scan numbers
+# what it finds from scratch, so "the Close button is target 3 when focused" -
+# written down verbatim in a live session - is a click on something else
+# tomorrow. Asked for in the prompt below and enforced here.
+PER_SCAN = re.compile(r"\btargets?\s+(number\s+)?\d", re.IGNORECASE)
+
 # Enough for two sentences and no more. Whether one line is worth keeping is not
 # a question that gets better with more room to answer it in.
 LOOK_BACK_TOKENS = 200
@@ -101,6 +107,10 @@ Reply with nothing at all if there is nothing worth keeping, which is most
 turns. Otherwise reply with at most two lines, each beginning with "- " and each
 a single sentence somebody could act on months from now.
 
+Never a target number: every scan numbers what it finds again from scratch, so a
+number written down here points at something else tomorrow. Never anything that
+would be true of any Windows machine, only this one.
+
 Never anything about this conversation - not what they asked, not what you said,
 not what they seem to want. Only how the machine behaves.
 
@@ -119,6 +129,15 @@ EARS_SHUT = "<!-- /ears -->"
 
 class ModelUnavailable(RuntimeError):
     """The endpoint in `brain.url` did not answer. Usually llama-server is down."""
+
+
+class Cancelled(Exception):
+    """Escape was pressed. Whatever was in flight is abandoned unanswered.
+
+    Distinct from Interrupted, which carries a new instruction and starts the
+    turn again knowing more. This one carries nothing, because there is nothing
+    to carry: they have decided the answer is not worth waiting for.
+    """
 
 
 class Interrupted(Exception):
@@ -223,6 +242,7 @@ class Model:
         limit: int | None = None,
         watch=None,
         think: bool | None = None,
+        stop=None,
     ) -> Reply:
         """One completion. `tools=None` leaves the model nothing to do but write.
 
@@ -245,7 +265,7 @@ class Model:
             # does not know the argument ignores it, which is the right failure.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
         if self.config.stream and not isinstance(self.ui, ui.Silent):
-            return self._streamed(payload, watch)
+            return self._streamed(payload, watch, stop)
         try:
             response = self._client.post(f"{self.base}/chat/completions", json=payload)
             response.raise_for_status()
@@ -256,7 +276,7 @@ class Model:
             raise ModelUnavailable(f"{self.base} did not return JSON ({exc}).") from exc
         return _read(body)
 
-    def _streamed(self, payload: dict, watch=None) -> Reply:
+    def _streamed(self, payload: dict, watch=None, stop=None) -> Reply:
         """The same completion, read as it is written.
 
         Worth the extra code for two reasons. The reasoning can be shown while it
@@ -295,9 +315,12 @@ class Model:
                     # Cheap, but not per token: at fifty tokens a second that
                     # would be fifty transcript reads for a delay nobody could
                     # perceive being shortened.
-                    if watch is not None and time.monotonic() - looked_at > WATCH_SECONDS:
+                    if (watch or stop) and time.monotonic() - looked_at > WATCH_SECONDS:
                         looked_at = time.monotonic()
-                        if said := watch():
+                        if stop is not None and stop():
+                            logger.info("Cancelled mid reply.")
+                            raise Cancelled
+                        if watch is not None and (said := watch()):
                             logger.info("Interrupted mid reply by %r", said)
                             raise Interrupted(said)
 
@@ -400,6 +423,9 @@ class ServiceVoice:
     def say(self, text: str) -> None:
         self.service.say(text)
 
+    def hush(self) -> None:
+        self.service.hush()
+
     def waiting(self) -> str:
         """What the live line should say while nothing is happening.
 
@@ -452,6 +478,13 @@ class Brain:
         # whether an afternoon of this has been expensive.
         self._tokens_in = 0
         self._tokens_out = 0
+        # Set by escape and read as the stream arrives, so a reply can be
+        # abandoned the moment they decide it is going the wrong way.
+        self.stopped = threading.Event()
+        # Whether there is anything to abandon. Escape with nothing happening
+        # should do nothing at all rather than put a prompt up for no reason.
+        self._working = threading.Event()
+        self.thread: threading.Thread | None = None
 
     def system_prompt(self) -> str:
         """Who JARVIS is, read from `context/soul/brain.md`.
@@ -504,11 +537,41 @@ class Brain:
         so a model call made now costs nobody anything.
         """
         before = len(self.messages)
-        spoken = self._answer(said)
-        used_hands = any(message.get("role") == "tool" for message in self.messages[before:])
-        if self.settings.consolidate and self.settings.memories and used_hands:
-            self._look_back()
-        return spoken
+        self.stopped.clear()
+        self._working.set()
+        try:
+            try:
+                spoken = self._answer(said)
+            except Cancelled:
+                # The whole turn goes with it, tool results and all. A half
+                # worked request left in the history is a question they have
+                # already withdrawn, and an assistant message whose tool calls
+                # were never answered is one the endpoint will refuse outright.
+                del self.messages[before:]
+                logger.info("Cancelled - the turn was dropped.")
+                self.ui.note("  cancelled")
+                return ""
+            used_hands = any(message.get("role") == "tool" for message in self.messages[before:])
+            if self.settings.consolidate and self.settings.memories and used_hands:
+                self._look_back()
+            return spoken
+        finally:
+            self._working.clear()
+            self.stopped.clear()
+
+    def cancel(self) -> bool:
+        """Stop whatever is in flight. True if there was anything to stop.
+
+        The answer is what the caller does next with: escape while nothing is
+        happening should be nothing at all, not a prompt appearing for no
+        reason. Speech goes as well as thinking - "stop" said to something part
+        way through a sentence means that sentence too.
+        """
+        if not self._working.is_set():
+            return False
+        self.stopped.set()
+        self.voice.hush()
+        return True
 
     def _look_back(self) -> None:
         """Write down anything about the desk that turn just taught.
@@ -527,7 +590,15 @@ class Brain:
             # tool has to be chosen, and this call has no tools: left on, it
             # spent four thousand characters weighing up whether one line was
             # worth keeping and then ran out of room before writing it.
-            reply = self.model.reply(asked, tools=None, limit=LOOK_BACK_TOKENS, think=False)
+            reply = self.model.reply(
+                asked,
+                tools=None,
+                limit=LOOK_BACK_TOKENS,
+                think=False,
+                stop=self.stopped.is_set,
+            )
+        except Cancelled:
+            return
         except Exception:
             logger.exception("Looking back failed; carrying on without it.")
             return
@@ -536,6 +607,9 @@ class Brain:
             logger.info("looking back: %s", " ".join(reply.thinking.split()))
         path = tools.navigation_file(self.config)
         for lesson in memories.bullets_in(reply.text)[:2]:
+            if PER_SCAN.search(lesson):
+                logger.info("Not kept, target numbers do not survive the scan: %s", lesson)
+                continue
             logger.info("Learned: %s", lesson)
             memories.remember(path, lesson, self.settings.max_memory_chars)
 
@@ -549,6 +623,11 @@ class Brain:
         step = 0
         while step < max(1, self.settings.max_steps):
             step += 1
+            # Checked here as well as mid stream, so a cancel that arrives while
+            # a tool is running lands the moment it finishes rather than costing
+            # a whole model call first.
+            if self.stopped.is_set():
+                raise Cancelled
             try:
                 reply = self._ask(self.toolbox.specs())
             except Interrupted as cut:
@@ -635,6 +714,7 @@ class Brain:
             tools,
             limit=limit,
             watch=(lambda: self.voice.hear(0.0)) if tools else None,
+            stop=self.stopped.is_set,
         )
         if reply.thinking:
             logger.info("thought: %s", " ".join(reply.thinking.split()))
@@ -911,8 +991,11 @@ def is_loopback(url: str) -> bool:
     return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
 
-def start(config: Config, service, voice=None, terminal=None) -> threading.Thread:
+def start(config: Config, service, voice=None, terminal=None) -> Brain:
     """Start the loop against a running service.
+
+    Returns the brain rather than its thread, because escape has to reach
+    something: the terminal needs a `cancel()` to call.
 
     Raises rather than carrying on without a model. It used to log a line and
     leave the voice service up as ears and hands for an agent over MCP, and the
@@ -933,6 +1016,6 @@ def start(config: Config, service, voice=None, terminal=None) -> threading.Threa
         len(brain.toolbox.names),
         ", ".join(brain.toolbox.names),
     )
-    thread = threading.Thread(target=brain.run_forever, name="jarvis-brain", daemon=True)
-    thread.start()
-    return thread
+    brain.thread = threading.Thread(target=brain.run_forever, name="jarvis-brain", daemon=True)
+    brain.thread.start()
+    return brain

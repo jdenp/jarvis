@@ -97,6 +97,11 @@ Whisper will never get right however many times you say it, and anything you wou
 say out loud. It works while the microphone is paused, too, since typing is plainly a choice
 to say something.
 
+Escape on an empty line stops it. Whatever it was writing is abandoned mid sentence, whatever
+it was saying is cut off, the turn is dropped out of the conversation entirely, and the prompt
+comes straight back for what you meant instead - there is no sense making you press a key
+twice to say the thing that made you interrupt.
+
 Press Num Lock to stop listening from anywhere. The microphone stops being read, so nothing
 is transcribed, logged or written to `heard.jsonl` until you press it again - not merely
 withheld. Needs `uv sync --extra hotkey`; `service.hotkey = ""` disables it.
@@ -415,7 +420,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 602 tests, no hardware, model or network needed
+uv run pytest        # 613 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

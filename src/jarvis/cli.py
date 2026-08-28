@@ -219,7 +219,7 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     from .brain import ModelUnavailable
 
     try:
-        brain.start(config, service, terminal=screen)
+        mind = brain.start(config, service, terminal=screen)
     except (ModelUnavailable, OSError) as exc:
         # Nothing carries on without a brain. Listening, transcribing and saying
         # nothing is a JARVIS that looks entirely well and answers no one, which
@@ -237,9 +237,10 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     if screen.colour:
         from .typed import Typing
 
-        typing = Typing(screen, service.typed)
+        typing = Typing(screen, service.typed, on_cancel=mind.cancel)
         typing.start()
         screen.note("Type a line and press enter to say it without speaking.")
+        screen.note("Escape stops JARVIS mid thought and asks you again.")
 
     if getattr(args, "no_http", False):
         logger.info("Listening. Transcript file only, no API. Ctrl+C to stop.")

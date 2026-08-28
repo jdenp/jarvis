@@ -61,6 +61,9 @@ class FakeSpeech:
     def wait(self, timeout=None) -> bool:
         return True
 
+    def interrupt(self) -> None:
+        self.said.clear()
+
     def close(self) -> None:
         pass
 
@@ -351,3 +354,13 @@ def test_half_duplex_is_still_available_on_request():
     service, _microphone, speech = half_duplex()
     service.say("Opening it now.")
     assert speech.muted_while_speaking == [True]
+
+
+def test_hushing_drops_what_was_queued_and_cuts_off_what_is_playing():
+    """What escape reaches. Told to stop, a reply half way through a sentence
+    has to stop there rather than finish the paragraph first."""
+    service, _, speech = half_duplex()
+    service.say("A rather long answer, sir.")
+    assert speech.said == ["A rather long answer, sir."]
+    service.hush()
+    assert speech.said == []

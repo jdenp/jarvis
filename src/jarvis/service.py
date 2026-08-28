@@ -164,6 +164,11 @@ class VoiceService:
         self.speech.say(text)
         threading.Thread(target=self._unmute_when_done, name="jarvis-unmute", daemon=True).start()
 
+    def hush(self) -> None:
+        """Stop talking now - drop what is queued and cut off what is playing."""
+        if self.speech is not None:
+            self.speech.interrupt()
+
     def _unmute_when_done(self) -> None:
         """Release the microphone once everything queued has been spoken.
 

@@ -91,7 +91,7 @@ def test_the_console_voice_is_what_the_loop_expects():
 
     from jarvis.brain import ServiceVoice
 
-    for name in ("hear", "say"):
+    for name in ("hear", "say", "hush"):
         theirs = inspect.signature(getattr(ServiceVoice, name))
         ours = inspect.signature(getattr(ConsoleVoice, name))
         assert list(theirs.parameters) == list(ours.parameters), name

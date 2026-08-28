@@ -81,6 +81,9 @@ class ConsoleVoice:
         self.spoken.append(text)
         self.ui.spoke(text)
 
+    def hush(self) -> None:
+        """Nothing to cut off. Written already is written."""
+
     def waiting(self) -> str:
         """Nothing, because the prompt is about to be drawn on that line."""
         return ""
