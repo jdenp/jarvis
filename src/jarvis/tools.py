@@ -593,10 +593,9 @@ def navigation_file(config: Config) -> Path:
 
 
 def under_root(named: str) -> Path:
-    from .config import project_root
+    from .config import under_root as resolve
 
-    path = Path(named).expanduser()
-    return path if path.is_absolute() else project_root() / path
+    return resolve(named)
 
 
 def _shell_tools(config: Config) -> list[Tool]:

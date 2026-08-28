@@ -151,17 +151,46 @@ def test_the_status_does_not_draw_over_what_is_being_typed():
     assert "thinking" not in written.getvalue()
 
 
-def test_a_reply_arriving_mid_sentence_cancels_the_way_back():
-    """Something permanent moves every row down, so the way up is no longer
-    where it was. Forgetting costs the status a redraw; guessing costs a line
-    of whatever it lands on."""
+def test_a_reply_arriving_mid_sentence_puts_the_line_back():
+    """The cursor is on the row they borrowed rather than on the live line, so
+    the ordinary erase wiped a half typed sentence and printed on top of it.
+    Every escape hit this, the cancel note landing at the moment the prompt
+    came back."""
     written = io.StringIO()
     reader, _ = typing("hi", written=written)
     reader.ui.status("listening")
-    reader.ui.hold()
-    assert reader.ui._stepped is True
+    reader.ui.hold(reader._repaint)
+    reader._typed = list("open spo")
+    before = len(written.getvalue())
+
     reader.ui.spoke("Half past two, sir.")
-    assert reader.ui._stepped is False
+
+    after = written.getvalue()[before:]
+    assert "Half past two, sir." in after
+    assert after.endswith("open spo"), "and their sentence is drawn again underneath"
+    assert reader.ui._stepped is True, "one row given up, one taken - the way back holds"
+
+
+def test_the_live_line_is_spent_on_what_arrived_rather_than_left_above_it():
+    """Otherwise a stale `listening` is stranded in the scrollback every time
+    anything is written while somebody is typing."""
+    from jarvis.ui import UP
+
+    written = io.StringIO()
+    reader, _ = typing("hi", written=written)
+    reader.ui.status("listening")
+    reader.ui.hold(reader._repaint)
+    before = len(written.getvalue())
+    reader.ui.spoke("Half past two, sir.")
+    assert UP in written.getvalue()[before:], "it takes the row back first"
+
+
+def test_nothing_is_repainted_once_the_line_is_finished_with():
+    """The callback outliving the line would draw a prompt nobody asked for."""
+    written = io.StringIO()
+    reader, _ = typing("hi" + ENTER[0], written=written)
+    reader.read_line()
+    assert reader.ui._repaint is None
 
 
 # ------------------------------------------------------------------ escape

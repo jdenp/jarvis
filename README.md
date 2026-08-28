@@ -14,8 +14,7 @@ speakers. Four mechanisms trying to get that guarantee from outside are recorded
 [`DESIGN.md`](DESIGN.md) as failures.
 
 **Windows only.** The ears would port - Whisper and PyAudio do not care - but the hands are
-UI Automation and `SendInput`, and the voice is SAPI. Linux is not off the table, it just is
-not started.
+UI Automation and `SendInput`. Linux is not off the table, it just is not started.
 
 ## Setup
 
@@ -125,6 +124,40 @@ screen as well as in the log.
 It needs no voice service running, which also means it cannot hear you and cannot speak. It
 can still see and drive the desktop, but only the one it is actually logged into - UI
 Automation does not reach the desktop from a remote session.
+
+## The voice
+
+Three local options and one that is not.
+
+| `tts.engine` | What it is | Cost |
+| --- | --- | --- |
+| `sapi` | The Windows voice. Concatenative, 1990s, and sounds it | nothing, always there |
+| `kokoro` | An 82M neural voice, and the reason this section exists | 330MB on disk |
+| `edge` | Microsoft's neural voices, over the network | every reply leaves the machine |
+| `none` | Text only | - |
+
+`auto` picks Kokoro if you have downloaded it and SAPI otherwise, so adding the model is the
+whole of switching over. Two files, once:
+
+```powershell
+uv sync --extra kokoro
+mkdir models
+$base = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+curl.exe -L -o models/kokoro-v1.0.onnx "$base/kokoro-v1.0.onnx"
+curl.exe -L -o models/voices-v1.0.bin "$base/voices-v1.0.bin"
+```
+
+Measured here on the CPU, a 7700X with llama-server and Whisper already on the GPU: a short
+reply is 0.42s for 1.34s of audio, a two clause one 0.66s for 3.78s - so roughly 5x real time
+once a sentence has any length to it, and under a second before it starts talking either way.
+`tts.kokoro_device` takes `cpu`, `cuda` or `auto`, the same three Whisper's does and with the
+same fallback: `auto` tries CUDA, logs why it could not, and carries on. CUDA is around 20x
+real time, which is faster than nothing can hear, so it is only worth the ~300MB of VRAM if
+the GPU is otherwise idle.
+
+`tts.kokoro_voice` picks the voice, and the first letter picks the accent it is read with -
+`bm_george` and `bm_lewis` are British men, `bf_emma` British women, `am_`/`af_` the American
+ones.
 
 ## Looking things up
 
@@ -387,7 +420,7 @@ setting is what it is. Copy only the bits you want; anything absent keeps its de
 | `microphone.py` | Background capture, phrase splitting, mute |
 | `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
-| `tts.py` | Speech worker thread, SAPI and Edge backends, sentence splitting |
+| `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
 | `hotkey.py` | The global key that stops and starts listening |
 | `overhear.py` | Reading a coding agent's prose off disk and speaking what it never said |
 | `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
@@ -420,7 +453,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 613 tests, no hardware, model or network needed
+uv run pytest        # 629 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

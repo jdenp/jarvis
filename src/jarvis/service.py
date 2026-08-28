@@ -133,13 +133,13 @@ class VoiceService:
         # effect of its own, so with nothing drawn a working hotkey is
         # indistinguishable from a dead one.
         key = self.config.service.hotkey or "resume_transcription"
-        self.ui.note(f"  Not listening. {key} to start again.")
+        self.ui.note(f"Not listening. {key} to start again.")
         return True
 
     def resume(self) -> None:
         """Start listening again."""
         if self.transcript.resume():
-            self.ui.note("  Listening again.")
+            self.ui.note("Listening again.")
         if self.microphone is not None:
             self.microphone.resume()
 

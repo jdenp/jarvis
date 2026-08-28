@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.8.8"
+version = "0.9.0"
 description = "Jarvis - A local voice and computer-use assistant for Windows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,10 @@ dependencies = [
 # Opt in, and NOT local: sends every reply to Microsoft's Edge TTS service in
 # exchange for a much better neural voice.
 edge = ["edge-tts>=6.1", "pygame>=2.6"]
+# An 82M neural voice that stays on this machine, in exchange for a 330MB model
+# you download once by hand. Add onnxruntime-gpu yourself if you want tts.kokoro_device
+# set to cuda; on CPU it is around 5x real time on a modern desktop chip.
+kokoro = ["kokoro-onnx>=0.4", "onnxruntime>=1.20"]
 # CUDA runtime for Whisper, without a system CUDA install. Buys about 0.2s per
 # utterance and costs ~340MB of VRAM, most of it the CUDA context rather than
 # the model - so it is worth it only if the GPU is otherwise idle.

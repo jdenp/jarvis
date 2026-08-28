@@ -118,7 +118,7 @@ class Silent:
     def status(self, text: str) -> None: ...
     def thinking(self, text: str) -> None: ...
     def resting(self) -> None: ...
-    def hold(self) -> None: ...
+    def hold(self, repaint=None) -> None: ...
     def release(self) -> None: ...
     def raw(self, text: str) -> None: ...
     def ask(self, prompt: str) -> str:
@@ -137,7 +137,9 @@ class Ui:
         # one answer covers both.
         self.live = self.colour
         self.frames = self._frames()
-        self._lock = threading.Lock()
+        # Re-entrant: a permanent line landing mid typing asks whoever is typing
+        # to draw their row again, and that comes back through raw().
+        self._lock = threading.RLock()
         self._status = ""
         self._meter = ""
         self._width = 0
@@ -150,6 +152,9 @@ class Ui:
         self._held = False
         # Whether hold() pushed a row, and so whether release() owes one back.
         self._stepped = False
+        # How whoever is typing puts their row back after something permanent
+        # has been written over it.
+        self._repaint = None
 
     def _frames(self) -> str:
         encoding = getattr(self.stream, "encoding", None) or "ascii"
@@ -164,6 +169,9 @@ class Ui:
     def line(self, text: str = "") -> None:
         """Write something that stays, above the live line."""
         with self._lock:
+            if self._held:
+                self._over_the_typing(text)
+                return
             # Something permanent arriving mid-sentence moves every row down,
             # so the way back up is no longer where it was. Forgetting the debt
             # costs the status one redraw; paying it wrongly costs a line of
@@ -173,6 +181,26 @@ class Ui:
             self.stream.write(text + "\n")
             self.stream.flush()
             self._draw()
+
+    def _over_the_typing(self, text: str) -> None:
+        """Write a permanent line while somebody is part way through one.
+
+        The cursor is on the row they borrowed rather than on the live line, so
+        the ordinary erase would wipe their sentence and print on top of it -
+        which happened every time escape landed, the cancel note arriving at the
+        moment the prompt came back. Their row is cleared, the live line above
+        is spent on the permanent text, and they are asked to draw themselves
+        again underneath: one row given up and one taken, so release() still
+        knows the way back.
+        """
+        self.stream.write("\r" + " " * (self.width() - 1) + "\r")
+        if self._stepped:
+            self.stream.write(UP)
+            self._erase()
+        self.stream.write(text + "\n")
+        self.stream.flush()
+        if self._repaint is not None:
+            self._repaint()
 
     def banner(self, version: str, notes: list[str]) -> None:
         self.line(paint("loud", f"JARVIS {version}", self.colour))
@@ -256,7 +284,7 @@ class Ui:
             self._erase()
             self.stream.flush()
 
-    def hold(self) -> None:
+    def hold(self, repaint=None) -> None:
         """Take the row beneath the live line, for somebody to type on.
 
         Beneath rather than over: the first version erased the status, so the
@@ -266,6 +294,7 @@ class Ui:
         """
         with self._lock:
             self._held = True
+            self._repaint = repaint
             # Only if there is something to keep. With nothing drawn there is
             # no reason to push a blank row in front of whoever is typing.
             self._stepped = self.live and self._width > 0
@@ -277,6 +306,7 @@ class Ui:
         """Give the row back and carry on saying what is happening."""
         with self._lock:
             self._held = False
+            self._repaint = None
             if self._stepped:
                 self._stepped = False
                 self.stream.write(UP)

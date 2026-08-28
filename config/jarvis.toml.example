@@ -69,9 +69,21 @@ whisper_beam_size = 1          # 1 is greedy and fastest, raise for accuracy
 whisper_vad = true             # skip silence before transcribing
 
 [tts]
-# auto means sapi, the offline Windows voice. edge sounds far better but sends
-# every reply to Microsoft, so it has to be named explicitly.
-engine = "auto"                # auto | sapi | edge | none
+# auto means kokoro if its model has been downloaded and sapi otherwise, both of
+# which stay here. edge sounds better than sapi but sends every reply to
+# Microsoft, so it has to be named explicitly.
+engine = "auto"                # auto | kokoro | sapi | edge | none
+# The 82M neural voice. The two files are 330MB and are fetched by hand - see the
+# README - because nothing should pull that down the first time you say hello.
+kokoro_voice = "bm_george"     # b* are British and a* American, which also picks
+                               # the phonemes the text is read with
+kokoro_model = "models/kokoro-v1.0.onnx"
+kokoro_voices = "models/voices-v1.0.bin"
+# About 5x real time on a modern desktop CPU against 20x on CUDA, and one
+# sentence is well under a second either way - so cpu unless the GPU is idle.
+# auto tries CUDA first and falls back with a line in the log, the same as
+# whisper_device. cuda needs onnxruntime-gpu installed.
+kokoro_device = "cpu"          # cpu | cuda | auto
 # Preference order, first installed wins. Both are female - Hazel is en-GB and
 # usually the Windows default, Zira is en-US. For a British male, George ships as
 # a OneCore voice only: run scripts/expose-onecore-voices.ps1 (elevated) to let

@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Any
 
 
+def under_root(named: str) -> Path:
+    """A configured path, with relative names read from the project root."""
+    path = Path(named).expanduser()
+    return path if path.is_absolute() else project_root() / path
+
+
 def project_root() -> Path:
     """Directory holding jarvis.toml and logs/, overridable with JARVIS_HOME."""
     if env_home := os.environ.get("JARVIS_HOME"):
@@ -94,10 +100,21 @@ class SttConfig:
 class TtsConfig:
     """Text to speech. Defaults to the offline Windows voice."""
 
-    engine: str = "auto"  # auto (local first) | sapi | edge | none
+    engine: str = "auto"  # auto (kokoro if downloaded, else sapi) | kokoro | sapi | edge | none
     voice: str = "en-GB-RyanNeural"  # edge only
     # Preference order, first installed wins. Hazel is en-GB, Zira the en-US fallback.
     sapi_voice: str = "Hazel, Zira"
+    # Kokoro's voice. The b* ones are British and the a* American, which also
+    # decides which phonemes the text is read with.
+    kokoro_voice: str = "bm_george"
+    # Downloaded once by hand, because they are 330MB and nothing should pull
+    # that down behind your back. Relative names sit under the project root.
+    kokoro_model: str = "models/kokoro-v1.0.onnx"
+    kokoro_voices: str = "models/voices-v1.0.bin"
+    # About 5x real time on a modern desktop CPU against 20x on CUDA, and one
+    # sentence is well under a second either way - so cpu unless the GPU is
+    # otherwise idle. Needs onnxruntime-gpu installed for cuda to be there.
+    kokoro_device: str = "cpu"  # cpu | cuda | auto
     rate: int = 210
     volume: float = 1.0
 

@@ -448,6 +448,15 @@ wheels = [
 ]
 
 [[package]]
+name = "dlinfo"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/8e/8f2f94cd40af1b51e8e371a83b385d622170d42f98776441a6118f4dd682/dlinfo-2.0.0.tar.gz", hash = "sha256:88a2bc04f51d01bc604cdc9eb1c3cc0bde89057532ca6a3e71a41f6235433e17", size = 12727 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/90/022c79d6e5e6f843268c10b84d4a021ee3afba0621d3c176d3ff2024bfc8/dlinfo-2.0.0-py3-none-any.whl", hash = "sha256:b32cc18e3ea67c0ca9ca409e5b41eed863bd1363dbc9dd3de90fedf11b61e7bc", size = 3654 },
+]
+
+[[package]]
 name = "edge-tts"
 version = "7.2.8"
 source = { registry = "https://pypi.org/simple" }
@@ -460,6 +469,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3f/60/afbf548b43c78355e03926c6b1fff7500303a2da4d84db9e1324119e21ae/edge_tts-7.2.8.tar.gz", hash = "sha256:fcf185a0d527a0d2d003f9d5841facc1d5e0e7b3b88d5df9c32990402c6b8cd0", size = 27875 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8c/2b/a8cb687b92a2690d2ad171f0c2fd1c8f18690363cca7618bab2bbe4cdf2b/edge_tts-7.2.8-py3-none-any.whl", hash = "sha256:361fe48ce7ef613adbe30f664e3765dd71029c6cb57427279eff8ad6df2eb211", size = 31026 },
+]
+
+[[package]]
+name = "espeakng-loader"
+version = "0.2.4"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/92/f44ed7f531143c3c6c97d56e2b0f9be8728dc05e18b96d46eb539230ed46/espeakng_loader-0.2.4-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:b77477ae2ddf62a748e04e49714eabb2f3a24f344166200b00539083bd669904", size = 9938387 },
+    { url = "https://files.pythonhosted.org/packages/a8/26/258c0cd43b9bc1043301c5f61767d6a6c3b679df82790c9cb43a3277b865/espeakng_loader-0.2.4-py3-none-macosx_11_0_arm64.whl", hash = "sha256:d27cdca31112226e7299d8562e889d3e38a1e48055c9ee381b45d669072ee59f", size = 9892565 },
+    { url = "https://files.pythonhosted.org/packages/de/1e/25ec5ab07528c0fbb215a61800a38eca05c8a99445515a02d7fa5debcb32/espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d", size = 10078484 },
+    { url = "https://files.pythonhosted.org/packages/d9/ad/1b768d8daffc2996e07bbcb6f534d8de3202cd75fce1f1c45eced1ce6465/espeakng_loader-0.2.4-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:d1e798141b46a050cdb75fcf3c17db969bb2c40394f3f4a48910655d547508b9", size = 10037736 },
+    { url = "https://files.pythonhosted.org/packages/9d/ed/a3d872fbad4f3a3f3db0e8c31768ab14e77cd77306de16b8b20b1e1df7ea/espeakng_loader-0.2.4-py3-none-win_amd64.whl", hash = "sha256:41f1e08ac9deda2efd1ea9de0b81dab9f5ae3c4b24284f76533d0a7b1dd7abd7", size = 9437292 },
+    { url = "https://files.pythonhosted.org/packages/29/64/0b75bc50ec53b4e000bac913625511215aa96124adf5dba8c4baa17c02cd/espeakng_loader-0.2.4-py3-none-win_arm64.whl", hash = "sha256:d7a2928843eaeb2df82f99a370f44e8a630f59b02f9b0d1f168a03c4eeb76b89", size = 9426841 },
 ]
 
 [[package]]
@@ -733,7 +755,7 @@ wheels = [
 
 [[package]]
 name = "jarvis"
-version = "0.7.4"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "comtypes" },
@@ -759,6 +781,10 @@ edge = [
 hotkey = [
     { name = "keyboard" },
 ]
+kokoro = [
+    { name = "kokoro-onnx" },
+    { name = "onnxruntime" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -773,10 +799,12 @@ requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "keyboard", marker = "extra == 'hotkey'", specifier = ">=0.13" },
+    { name = "kokoro-onnx", marker = "extra == 'kokoro'", specifier = ">=0.4" },
     { name = "mcp", specifier = ">=1.2" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "nvidia-cublas-cu12", marker = "extra == 'cuda'", specifier = ">=12.4" },
     { name = "nvidia-cudnn-cu12", marker = "extra == 'cuda'", specifier = ">=9,<10" },
+    { name = "onnxruntime", marker = "extra == 'kokoro'", specifier = ">=1.20" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "psutil", specifier = ">=6.0" },
     { name = "pyaudio", specifier = ">=0.2.14" },
@@ -788,6 +816,15 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "joblib"
+version = "1.5.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071 },
 ]
 
 [[package]]
@@ -827,6 +864,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/79/75/c969f2258e908c39aadfc57d1cb78247dc49e6d36371bb3a48c194640c01/keyboard-0.13.5.zip", hash = "sha256:63ed83305955939ca5c9a73755e5cc43e8242263f5ad5fd3bb7e0b032f3d308b", size = 71798 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/88/287159903c5b3fc6d47b651c7ab65a54dcf9c9916de546188a7f62870d6d/keyboard-0.13.5-py3-none-any.whl", hash = "sha256:8e9c2422f1217e0bd84489b9ecd361027cc78415828f4fe4f88dd4acd587947b", size = 58098 },
+]
+
+[[package]]
+name = "kokoro-onnx"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "espeakng-loader" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "phonemizer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/ef/b58dedba0a1417f16352352787fbcfcbaa0b907e284c2ea3ebaf5541109a/kokoro_onnx-0.6.1.tar.gz", hash = "sha256:7bbdb66dd53775f71088a99999a9aefdad240740daf54cb09410d8bb1e294e35", size = 69799 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/e1/a27e5a70a525a5ee1fd5357596f07b724d02ff317f134e86cb6e3d9db968/kokoro_onnx-0.6.1-py3-none-any.whl", hash = "sha256:50c8de4950d601df41428ee5462a48c8a78bef441bf671f2492e070ef44d8a32", size = 26084 },
 ]
 
 [[package]]
@@ -1126,6 +1178,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956 },
+]
+
+[[package]]
+name = "phonemizer"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "dlinfo" },
+    { name = "joblib" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bc/7d/5a96ddb130552f6365a090b5fd12ace803a95a858e3f67258f2ad13dc51f/phonemizer-3.4.0.tar.gz", hash = "sha256:e13231980c50bc671ec0466379ba027260ad9d61929952d8ae9665b3d0f251eb", size = 93535 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/41/09bafd0ccf4f4ddd1530c9f9d10e75a24056e10e120b9daa97f691fcabc3/phonemizer-3.4.0-py3-none-any.whl", hash = "sha256:5ff1215d0efa3606dd1b92449f6d71b5c1741efcc84c6d40c17bfaf64f6ded5f", size = 108529 },
 ]
 
 [[package]]

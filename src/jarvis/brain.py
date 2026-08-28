@@ -549,7 +549,7 @@ class Brain:
                 # were never answered is one the endpoint will refuse outright.
                 del self.messages[before:]
                 logger.info("Cancelled - the turn was dropped.")
-                self.ui.note("  cancelled")
+                self.ui.note("Cancelled.")
                 return ""
             used_hands = any(message.get("role") == "tool" for message in self.messages[before:])
             if self.settings.consolidate and self.settings.memories and used_hands:

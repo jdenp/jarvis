@@ -1,8 +1,9 @@
 """Text to speech.
 
 Backends are built on the worker thread that uses them - both SAPI and pygame
-hold thread affine resources. ``auto`` picks ``sapi``, the offline Windows
-voice; ``edge`` sounds better but sends every reply to Microsoft.
+hold thread affine resources. ``auto`` picks ``kokoro`` if its model
+has been downloaded and ``sapi`` otherwise, both of which stay on this machine;
+``edge`` sounds better than SAPI but sends every reply to Microsoft.
 """
 
 from __future__ import annotations
@@ -188,6 +189,133 @@ class EdgeSpeaker:
             logger.debug("pygame mixer did not shut down cleanly.", exc_info=True)
 
 
+class KokoroSpeaker:
+    """An 82M neural voice, synthesised here and played through pyaudio.
+
+    The reason to bother: SAPI is a 1990s concatenative voice and sounds it,
+    and the alternative that sounds human - edge - ships every reply to
+    Microsoft. This is the third option, and it stays on the machine.
+
+    Two files have to be downloaded first, which is deliberate. They are 330MB
+    and a voice backend is not something that should quietly pull that down the
+    first time somebody says hello; a clear line about which file is missing is
+    better than a stall with no explanation.
+    """
+
+    is_local = True
+
+    # What Kokoro emits, whatever the device. Not configurable at this end.
+    SAMPLE_RATE = 24000
+    # Played in tenths of a second, so barge-in is inside a syllable rather
+    # than at the end of the sentence.
+    CHUNK = 2400
+
+    def __init__(self, config: TtsConfig) -> None:
+        import numpy as np
+        import pyaudio
+
+        from .config import under_root
+
+        self.config = config
+        self._np = np
+        self._pyaudio = pyaudio
+        self._cancelled = threading.Event()
+        self._audio = None
+        self._voice = config.kokoro_voice
+        self._speed = _kokoro_speed(config.rate)
+        self._lang = "en-gb" if self._voice[:1] == "b" else "en-us"
+
+        model = under_root(config.kokoro_model)
+        voices = under_root(config.kokoro_voices)
+        for path in (model, voices):
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"{path} is not there. Both Kokoro files come from "
+                    "https://github.com/thewh1teagle/kokoro-onnx/releases - see the README."
+                )
+
+        self._kokoro = self._load(str(model), str(voices))
+
+    def _load(self, model: str, voices: str):
+        """Build the session on the first device that will have it.
+
+        The same shape as Whisper's, and for the same reason: cuda that is
+        configured but not installed should fall through to a working CPU voice
+        with a line in the log, rather than take the process down.
+        """
+        import onnxruntime
+        from kokoro_onnx import Kokoro
+
+        failures = []
+        for device in _devices(self.config.kokoro_device):
+            provider = "CUDAExecutionProvider" if device == "cuda" else "CPUExecutionProvider"
+            try:
+                session = onnxruntime.InferenceSession(model, providers=[provider])
+                if provider not in session.get_providers():
+                    raise RuntimeError(f"{provider} is not available to onnxruntime")
+                kokoro = Kokoro.from_session(session, voices)
+            except Exception as exc:
+                failures.append(f"{device}: {exc}")
+                logger.warning("Kokoro is not usable on %s (%s).", device, exc)
+                continue
+            logger.info(
+                "Speaking as kokoro %s on %s, %.2fx speed.", self._voice, device, self._speed
+            )
+            return kokoro
+        raise RuntimeError("Kokoro could not start on any device - " + "; ".join(failures))
+
+    def _open(self):
+        if self._audio is None:
+            self._audio = self._pyaudio.PyAudio()
+        return self._audio.open(
+            format=self._pyaudio.paFloat32,
+            channels=1,
+            rate=self.SAMPLE_RATE,
+            output=True,
+        )
+
+    def speak(self, text: str) -> None:
+        self._cancelled.clear()
+        samples, rate = self._kokoro.create(
+            text, voice=self._voice, speed=self._speed, lang=self._lang
+        )
+        samples = self._np.asarray(samples, dtype="float32")
+        if volume := max(0.0, min(1.0, self.config.volume)):
+            samples = samples * volume
+        stream = self._open()
+        try:
+            for start in range(0, len(samples), self.CHUNK):
+                if self._cancelled.is_set():
+                    return
+                stream.write(samples[start : start + self.CHUNK].tobytes())
+        finally:
+            stream.stop_stream()
+            stream.close()
+        if rate != self.SAMPLE_RATE:  # pragma: no cover - the model is fixed at 24k
+            logger.warning("Kokoro returned %dHz audio, expected %d.", rate, self.SAMPLE_RATE)
+
+    def stop(self) -> None:
+        """Safe from any thread: a flag speak() checks between chunks."""
+        self._cancelled.set()
+
+    def close(self) -> None:
+        self.stop()
+        if self._audio is not None:
+            self._audio.terminate()
+            self._audio = None
+
+
+def _kokoro_speed(words_per_minute: int) -> float:
+    """Words per minute as Kokoro's speed multiplier, 1.0 being about 175wpm."""
+    return max(0.5, min(2.0, max(1, words_per_minute) / 175.0))
+
+
+def _devices(wanted: str) -> list[str]:
+    """Which devices to try, best first. Same shape as Whisper's."""
+    device = wanted.strip().lower()
+    return ["cuda", "cpu"] if device == "auto" else [device]
+
+
 def build_speaker(config: TtsConfig | None = None) -> Speaker:
     """Construct the speaker named by ``config.engine``, falling back if asked.
 
@@ -200,6 +328,17 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
         return NullSpeaker()
     if engine == "auto":
         # edge is never reached by auto - it ships every reply to Microsoft.
+        # Kokoro is, but only once its files have been downloaded deliberately,
+        # so auto never surprises anybody with a 330MB voice they did not ask
+        # for and never silently ignores one they went and fetched.
+        try:
+            speaker = KokoroSpeaker(config)
+        except FileNotFoundError:
+            logger.debug("No Kokoro model downloaded, using sapi.")
+        except Exception as exc:
+            logger.warning("Kokoro did not start (%s), falling back to sapi.", exc)
+        else:
+            return speaker
         try:
             speaker = SapiSpeaker(config)
         except Exception as exc:
@@ -207,6 +346,8 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
             return NullSpeaker()
         logger.info("Using sapi text to speech.")
         return speaker
+    if engine == "kokoro":
+        return KokoroSpeaker(config)
     if engine == "sapi":
         return SapiSpeaker(config)
     if engine == "edge":
@@ -215,7 +356,9 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
             "synthesised. Use 'sapi' to keep it on this machine."
         )
         return EdgeSpeaker(config)
-    raise ValueError(f"Unknown TTS engine {config.engine!r}. Choose auto, edge, sapi or none.")
+    raise ValueError(
+        f"Unknown TTS engine {config.engine!r}. Choose auto, kokoro, sapi, edge or none."
+    )
 
 
 class SpeechEngine:

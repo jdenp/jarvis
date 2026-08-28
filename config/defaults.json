@@ -28,6 +28,10 @@
     "engine": "auto",
     "voice": "en-GB-RyanNeural",
     "sapi_voice": "Hazel, Zira",
+    "kokoro_voice": "bm_george",
+    "kokoro_model": "models/kokoro-v1.0.onnx",
+    "kokoro_voices": "models/voices-v1.0.bin",
+    "kokoro_device": "cpu",
     "rate": 210,
     "volume": 1.0
   },

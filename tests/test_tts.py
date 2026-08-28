@@ -5,7 +5,14 @@ import time
 
 import pytest
 
-from jarvis.tts import NullSpeaker, SpeechEngine, _sapi_rate, iter_sentences
+from jarvis.tts import (
+    NullSpeaker,
+    SpeechEngine,
+    _devices,
+    _kokoro_speed,
+    _sapi_rate,
+    iter_sentences,
+)
 
 
 @pytest.mark.parametrize(
@@ -167,3 +174,155 @@ def test_speech_engine_survives_a_broken_backend():
     engine.say("This will fail.")
     assert engine.wait(timeout=5)
     engine.close()  # must not hang or raise
+
+
+# ----------------------------------------------------------------------- kokoro
+
+
+@pytest.mark.parametrize(
+    ("wpm", "speed"), [(175, 1.0), (210, 1.2), (88, 0.5), (10, 0.5), (1000, 2.0)]
+)
+def test_words_per_minute_maps_onto_kokoros_multiplier(wpm, speed):
+    assert _kokoro_speed(wpm) == pytest.approx(speed, abs=0.01)
+
+
+def test_auto_tries_the_gpu_first_and_keeps_the_cpu_behind_it():
+    """The same shape as Whisper's: cuda configured but not installed should
+    fall through to a working voice with a line in the log."""
+    assert _devices("auto") == ["cuda", "cpu"]
+    assert _devices("cpu") == ["cpu"]
+    assert _devices(" CUDA ") == ["cuda"]
+
+
+def test_a_missing_model_says_which_file_and_where_it_comes_from(tmp_path, monkeypatch):
+    """330MB is not something to download behind somebody's back, so the whole
+    of that decision is one clear line rather than a stall."""
+    from dataclasses import replace
+
+    from jarvis.config import TtsConfig
+    from jarvis.tts import KokoroSpeaker
+
+    monkeypatch.setenv("JARVIS_HOME", str(tmp_path))
+    config = replace(TtsConfig(), engine="kokoro")
+    with pytest.raises(FileNotFoundError) as raised:
+        KokoroSpeaker(config)
+    assert "kokoro-v1.0.onnx" in str(raised.value)
+    assert "kokoro-onnx/releases" in str(raised.value)
+
+
+def test_auto_falls_through_to_sapi_when_nothing_has_been_downloaded(tmp_path, monkeypatch):
+    """Otherwise adding the backend breaks every machine that has not fetched it."""
+    from jarvis.config import TtsConfig
+    from jarvis.tts import build_speaker
+
+    monkeypatch.setenv("JARVIS_HOME", str(tmp_path))
+    fell_back = []
+
+    class NoSapi(Exception):
+        pass
+
+    def refuse(config):
+        fell_back.append(config)
+        raise NoSapi("no SAPI on this box either")
+
+    monkeypatch.setattr("jarvis.tts.SapiSpeaker", refuse)
+    assert isinstance(build_speaker(TtsConfig()), NullSpeaker)
+    assert fell_back, "it went looking for sapi rather than raising"
+
+
+def test_an_unknown_engine_lists_the_ones_there_are():
+    from dataclasses import replace
+
+    from jarvis.config import TtsConfig
+    from jarvis.tts import build_speaker
+
+    with pytest.raises(ValueError, match="kokoro"):
+        build_speaker(replace(TtsConfig(), engine="elevenlabs"))
+
+
+class FakeKokoro:
+    """Synthesis without the 330MB. Returns a second of silence per call."""
+
+    def __init__(self) -> None:
+        self.asked: list[dict] = []
+
+    def create(self, text, voice, speed, lang):
+        import numpy as np
+
+        self.asked.append({"text": text, "voice": voice, "speed": speed, "lang": lang})
+        return np.zeros(24000, dtype="float32"), 24000
+
+
+class FakeStream:
+    def __init__(self) -> None:
+        self.written = 0
+
+    def write(self, data):
+        self.written += len(data)
+
+    def stop_stream(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def kokoro(monkeypatch, tmp_path, **overrides):
+    """A speaker with the files and the model faked out."""
+    from dataclasses import replace
+
+    from jarvis.config import TtsConfig
+    from jarvis.tts import KokoroSpeaker
+
+    monkeypatch.setenv("JARVIS_HOME", str(tmp_path))
+    (tmp_path / "models").mkdir()
+    for name in ("kokoro-v1.0.onnx", "voices-v1.0.bin"):
+        (tmp_path / "models" / name).write_bytes(b"not really a model")
+    monkeypatch.setattr(KokoroSpeaker, "_load", lambda self, model, voices: FakeKokoro())
+
+    speaker = KokoroSpeaker(replace(TtsConfig(), engine="kokoro", **overrides))
+    stream = FakeStream()
+    monkeypatch.setattr(speaker, "_open", lambda: stream)
+    return speaker, stream
+
+
+def test_a_british_voice_is_read_with_british_phonemes(monkeypatch, tmp_path):
+    """Same letters, different sounds. bm_george reading en-us is audible."""
+    speaker, _ = kokoro(monkeypatch, tmp_path)
+    speaker.speak("Half past two, sir.")
+    assert speaker._kokoro.asked[0]["lang"] == "en-gb"
+    assert speaker._kokoro.asked[0]["voice"] == "bm_george"
+
+
+def test_an_american_voice_is_not(monkeypatch, tmp_path):
+    speaker, _ = kokoro(monkeypatch, tmp_path, kokoro_voice="am_michael")
+    speaker.speak("Half past two, sir.")
+    assert speaker._kokoro.asked[0]["lang"] == "en-us"
+
+
+def test_it_plays_what_was_synthesised(monkeypatch, tmp_path):
+    speaker, stream = kokoro(monkeypatch, tmp_path)
+    speaker.speak("Half past two, sir.")
+    assert stream.written == 24000 * 4, "a second of float32 at 24k"
+
+
+def test_stopping_lands_inside_the_sentence_rather_than_after_it(monkeypatch, tmp_path):
+    """Barge-in is the whole reason this is written a chunk at a time - a
+    backend that only checks between utterances talks over the interruption."""
+    speaker, _ = kokoro(monkeypatch, tmp_path)
+
+    class StopsAfterTheFirstChunk(FakeStream):
+        def write(self, data):
+            super().write(data)
+            speaker.stop()
+
+    stopping = StopsAfterTheFirstChunk()
+    monkeypatch.setattr(speaker, "_open", lambda: stopping)
+    speaker.speak("A rather long answer nobody wants to sit through.")
+    assert stopping.written == 2400 * 4, "one tenth of a second, then it stopped"
+
+
+def test_the_volume_setting_reaches_the_samples(monkeypatch, tmp_path):
+    speaker, stream = kokoro(monkeypatch, tmp_path, volume=0.0)
+    speaker.speak("Quietly, sir.")
+    assert stream.written == 24000 * 4, "still played, just silent"

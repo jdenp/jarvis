@@ -12,3 +12,6 @@ config/jarvis.toml
 # how Windows behaves, and ships.
 context/memories/memories.md
 context/memories/navigation/user-navigation.md
+
+# Downloaded once, 330MB, and not this project's to carry.
+models/

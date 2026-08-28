@@ -74,6 +74,11 @@ class Typing:
         self.on_cancel = on_cancel or (lambda: False)
         # Set when escape was pressed on an empty line.
         self.cancelled = False
+        # What is on the row right now. Held here rather than in read_line
+        # because something permanent can land on top of it at any moment, and
+        # the terminal then asks for it back.
+        self._typed: list[str] = []
+        self._shown = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -117,13 +122,13 @@ class Typing:
         there is nothing to throw away, so it means the other thing you would
         want from that key: stop what you are doing.
         """
-        self.ui.hold()
+        self.ui.hold(self._repaint)
         self.cancelled = False
-        typed: list[str] = []
+        self._typed = []
         # Counted apart from what was typed, because escape empties the line
         # without unprinting it - and then the wipe below comes up short and
         # leaves half an abandoned sentence on screen.
-        shown = 0
+        self._shown = 0
         try:
             # The same blue as every other `you >`, because it is the same
             # thing: a line from them, on its way in.
@@ -135,23 +140,34 @@ class Typing:
                 elif key in ENTER:
                     break
                 elif key == CANCEL:
-                    self.cancelled = not typed
-                    typed = []
+                    self.cancelled = not self._typed
+                    self._typed = []
                     break
                 elif key in BACKSPACE:
-                    if typed:
-                        typed.pop()
-                        shown -= 1
+                    if self._typed:
+                        self._typed.pop()
+                        self._shown -= 1
                         # Back over the character, paint a space on it, back again.
                         self.ui.raw("\b \b")
                 elif key >= " ":
-                    typed.append(key)
-                    shown += 1
+                    self._typed.append(key)
+                    self._shown += 1
                     self.ui.raw(key)
         finally:
             # The whole line goes, whether it was sent or abandoned. What was
             # sent is redrawn properly a moment later as `you > ...`, and what
             # was abandoned should leave nothing behind at all.
-            self.ui.raw("\r" + " " * (len(self.prompt) + shown + 1) + "\r")
+            self.ui.raw("\r" + " " * (len(self.prompt) + self._shown + 1) + "\r")
             self.ui.release()
-        return "".join(typed).strip()
+        return "".join(self._typed).strip()
+
+    def _repaint(self) -> None:
+        """Draw the prompt and the half written line again, where the cursor is.
+
+        Called by the terminal when something permanent has taken the row out
+        from under it - a reply, a tool line, the note that says a turn was
+        cancelled. Without it, anything typed while JARVIS was working vanished
+        off the screen while still counting towards what gets sent.
+        """
+        self.ui.raw(paint("user", self.prompt, self.ui.colour) + "".join(self._typed))
+        self._shown = len(self._typed)
