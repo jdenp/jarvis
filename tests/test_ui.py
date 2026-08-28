@@ -219,22 +219,39 @@ def test_the_thinking_is_gone_once_there_is_an_answer():
 # ----------------------------------------------------------------- the meter
 
 
-def test_the_meter_sits_at_the_right_hand_end():
+def test_the_whole_live_line_sits_in_the_bottom_right():
+    """What is happening and what it has cost read as one thing in the corner,
+    rather than two things at opposite ends of an empty row."""
     ui, written = screen(colour=True)
-    ui.meter("ctx 12.3k/98k  out 192")
+    ui.meter("ctx 12.3k/98k - in 40k - out 1.9k")
     ui.status("listening")
     line = written.getvalue()
-    assert "listening" in line
-    assert line.rstrip().endswith("ctx 12.3k/98k  out 192" + COLOUR["reset"])
+    assert "listening - ctx 12.3k/98k - in 40k - out 1.9k" in line
+    assert line.rstrip().endswith("out 1.9k" + COLOUR["reset"])
 
 
-def test_a_narrow_window_drops_the_meter_rather_than_wrapping():
-    """A status line that wraps is two lines, and only one of them gets erased."""
+def test_a_narrow_window_cuts_the_status_and_keeps_the_numbers():
+    """A status line that wraps is two rows and only one of them gets erased, so
+    something has to go - and the numbers are the part worth keeping."""
     ui, written = screen(colour=True)
-    ui.meter("ctx 12.3k/98k  out 192")
-    ui.width = lambda: 20
+    ui.meter("ctx 12.3k/98k - in 40k - out 1.9k")
+    ui.width = lambda: 30
     ui.status("running look_at_screen")
-    assert "ctx" not in written.getvalue()
+    line = written.getvalue().strip()
+    assert line.endswith("out 1.9k" + COLOUR["reset"])
+    assert "running look_at_screen" not in line
+    assert ui._width == 29, "one short of the window, so it cannot wrap"
+
+
+def test_the_thinking_leaves_the_numbers_where_they_are():
+    """They are worth watching precisely because they hold still."""
+    ui, written = screen(colour=True)
+    ui.meter("ctx 12.3k/98k - in 40k - out 1.9k")
+    ui.width = lambda: 80
+    ui.status("thinking")
+    ui.thinking("a chain of reasoning long enough to run past the end of the window " * 3)
+    ui._draw()
+    assert written.getvalue().rstrip().endswith("out 1.9k" + COLOUR["reset"])
 
 
 def test_tokens_read_at_a_glance():

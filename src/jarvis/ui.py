@@ -230,7 +230,8 @@ class Ui:
         and the terminal is written to eight times a second instead of hundreds.
         """
         with self._lock:
-            self._status = tail(text, self.width() - 4)
+            # Room for the numbers on the right, which do not move for it.
+            self._status = tail(text, self.width() - len(self._meter) - 8)
 
     def width(self) -> int:
         try:
@@ -239,11 +240,11 @@ class Ui:
             return 80
 
     def meter(self, text: str) -> None:
-        """The right hand end of the live line: how full the context is.
+        """The numbers on the end of the live line: what the session has cost.
 
-        Separate from the status because it changes on a different clock - the
-        status every few seconds, this once a turn - and because it is the one
-        number worth having in the corner of your eye rather than in the log.
+        Set apart from the status because it changes on a different clock - the
+        status every few seconds, this once a turn - and because it is the thing
+        worth having in the corner of your eye rather than in the log.
         """
         with self._lock:
             self._meter = text
@@ -311,18 +312,23 @@ class Ui:
                 self._draw()
 
     def _draw(self) -> None:
-        """Repaint the live line. Caller holds the lock."""
+        """Repaint the live line. Caller holds the lock.
+
+        The whole thing sits at the right hand end - what is happening, then
+        what it has cost - so it reads as one status line in the corner rather
+        than two things at opposite ends of an empty row.
+        """
         if not self.live or not self._status or self._held:
             return
         frame = self.frames[self._tick % len(self.frames)]
         text = f"{frame} {self._status}"
-        # Right aligned on the same line, and dropped rather than wrapped when
-        # the window is too narrow - a status line that wraps is two lines that
-        # cannot be erased.
+        if self._meter:
+            text += f" - {self._meter}"
+        # Cut from the left rather than wrapped. A status line that wraps is two
+        # rows and only one of them can be erased; and the numbers on the right
+        # are the part worth keeping when the window is narrow.
         room = self.width() - 1
-        if self._meter and len(text) + len(self._meter) + 2 <= room:
-            text = text.ljust(room - len(self._meter)) + self._meter
-        text = text[:room]
+        text = text[-room:] if len(text) > room else text.rjust(room)
         self._erase()
         self.stream.write(paint("dim", text, self.colour))
         self.stream.flush()

@@ -877,6 +877,56 @@ def test_a_short_answer_that_hit_the_cap_is_still_an_answer():
 # ------------------------------------------------------- how big it may get
 
 
+class Meter:
+    """A terminal that only remembers the numbers in the corner."""
+
+    def __init__(self) -> None:
+        self.readings: list[str] = []
+
+    def meter(self, text: str) -> None:
+        self.readings.append(text)
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def test_the_numbers_say_what_the_session_has_cost():
+    """ctx is this call; in and out are every call so far. One request's usage
+    says nothing about whether an afternoon of this has been expensive."""
+    shown = Meter()
+    it = brain(box=toolbox(look_at_screen="Taskbar - 25 targets"))
+    it.ui = shown
+    it.model.replies = [
+        Reply(text="One.", tokens=(1000, 40), message={"role": "assistant", "content": "One."}),
+        Reply(text="Two.", tokens=(1200, 60), message={"role": "assistant", "content": "Two."}),
+    ]
+    it.turn(["first"])
+    it.turn(["second"])
+    assert shown.readings == [
+        "ctx 1.0k/98k - in 1.0k - out 40",
+        "ctx 1.2k/98k - in 2.2k - out 100",
+    ]
+
+
+def test_ctx_holds_still_when_the_tools_come_off():
+    """The last call of a turn drops about 1.8k of schemas, and a number that
+    halves at the end of every turn reads as the conversation being thrown away
+    rather than as two shapes of request. The totals still count it."""
+    shown = Meter()
+    it = brain(box=toolbox(look_at_screen="Taskbar - 25 targets"))
+    it.ui = shown
+    it.model.replies = [
+        Reply(text="Open, sir.", tokens=(3000, 20), message={"role": "assistant", "content": "x"})
+    ]
+    it.turn(["is spotify open"])
+    it.model.replies = [
+        Reply(text="Still open.", tokens=(1200, 30), message={"role": "assistant", "content": "x"})
+    ]
+    it._ask([])
+    assert [reading.split(" - ")[0] for reading in shown.readings] == ["ctx 3.0k/98k"] * 2
+    assert shown.readings[-1].endswith("in 4.2k - out 50")
+
+
 def test_a_conversation_that_gets_too_big_loses_its_oldest_turn():
     """history_turns counts turns and turns are not the same size. Twenty that
     each scan a crowded window twice would overflow the window and fail the

@@ -447,6 +447,11 @@ class Brain:
         # that _trim knows how big the conversation has actually got.
         self._room = ""
         self._spent = 0
+        # What the whole session has cost, which is the question the numbers in
+        # the corner are really answering - one call's usage says nothing about
+        # whether an afternoon of this has been expensive.
+        self._tokens_in = 0
+        self._tokens_out = 0
 
     def system_prompt(self) -> str:
         """Who JARVIS is, read from `context/soul/brain.md`.
@@ -644,17 +649,22 @@ class Brain:
                 limit or self.settings.max_tokens,
             )
         prompt, written = reply.tokens
-        # Only from a call that carried the tools. The last call of a turn drops
-        # them, which takes about 1.8k of schemas out of the prompt - and a
-        # meter that falls by half at the end of every turn reads as the
+        self._tokens_in += prompt
+        self._tokens_out += written
+        # ctx comes only from a call that carried the tools. The last call of a
+        # turn drops them, which takes about 1.8k of schemas out of the prompt,
+        # and a number that halves at the end of every turn reads as the
         # conversation being thrown away rather than as two shapes of request.
+        # The totals have no such problem: every call costs what it costs.
         if prompt and tools:
             self._spent = prompt
             self._room = f"ctx {count(prompt)}"
             if limit := self.model.context_limit():
                 self._room += f"/{count(limit)}"
         if prompt:
-            self.ui.meter(f"{self._room}  out {written}")
+            self.ui.meter(
+                f"{self._room} - in {count(self._tokens_in)} - out {count(self._tokens_out)}"
+            )
         return reply
 
     def _run(self, call: Call) -> str:
