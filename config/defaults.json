@@ -13,7 +13,7 @@
     "pause_threshold": 1.2,
     "pause_quiet_fraction": 0.85,
     "echo_guard_seconds": 0.5,
-    "listen_while_speaking": true
+    "listen_while_speaking": false
   },
   "stt": {
     "backend": "whisper",
@@ -37,8 +37,8 @@
     "max_wait_seconds": 55.0,
     "transcript_file": "heard.jsonl",
     "stale_after_seconds": 120.0,
-    "overhear": true,
-    "cline_sessions": "",
+    "agent_sessions": "",
+    "agent_rules": "",
     "overhear_poll_seconds": 1.0,
     "overhear_max_chars": 400,
     "hotkey": "num lock"
@@ -55,6 +55,36 @@
     "screenshot_file": "screen.png",
     "screenshot_max_width": 1600,
     "marks_file": "marks.png"
+  },
+  "brain": {
+    "enabled": true,
+    "url": "http://127.0.0.1:8081/v1",
+    "model": "local",
+    "api_key": "",
+    "temperature": 0.4,
+    "max_tokens": 2000,
+    "max_steps": 12,
+    "history_turns": 20,
+    "timeout_seconds": 180.0,
+    "stream": true,
+    "context_limit": 0,
+    "max_context_fraction": 0.7,
+    "preload": true,
+    "shell": true,
+    "thinking": true,
+    "web": true,
+    "search_url": "https://html.duckduckgo.com/html/",
+    "search_results": 5,
+    "page_chars": 6000,
+    "coding_agent": "",
+    "shell_timeout_seconds": 60.0,
+    "shell_output_chars": 4000,
+    "memories": true,
+    "memories_file": "context/memories/memories.md",
+    "navigation_file": "context/memories/navigation/user-navigation.md",
+    "consolidate": true,
+    "max_memory_chars": 2000,
+    "system_prompt_file": ""
   },
   "log_level": "INFO"
 }

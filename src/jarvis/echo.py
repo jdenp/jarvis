@@ -12,7 +12,16 @@ import time
 from collections import deque
 from difflib import SequenceMatcher
 
+# How long after a reply has finished being spoken it is still recognised coming
+# back. It has to outlast the speech itself: a phrase is only transcribed once it
+# ENDS, so a thirty second reply arrives thirty seconds after it was remembered.
+# A flat twenty seconds let a 379 character answer through, and JARVIS replied to
+# itself - "That's right. Is there anything else I can help you with?"
 MEMORY_SECONDS = 20.0
+
+# Slower than any voice here, because being generous costs nothing and being
+# short costs a conversation with yourself.
+CHARS_PER_SECOND = 10.0
 SIMILARITY = 0.75
 CONTAINED = 0.6  # of a transcript matching one run inside a reply
 LEAST_RUN = 12  # characters, so a short command cannot match by coincidence
@@ -52,6 +61,11 @@ def sounds_like(heard: str, spoken: str) -> bool:
     return longest >= LEAST_RUN and matched >= CONTAINED * len(heard)
 
 
+def speaking_seconds(text: str) -> float:
+    """Roughly how long this takes to say out loud."""
+    return len(text) / CHARS_PER_SECOND
+
+
 class EchoGuard:
     """Remembers what was spoken recently, and recognises it coming back."""
 
@@ -60,16 +74,17 @@ class EchoGuard:
         self._spoken: deque[tuple[float, str]] = deque(maxlen=keep)
 
     def remember(self, text: str) -> None:
+        """Note something said, and when it stops being worth recognising."""
         normalised = normalise(text)
         if normalised:
-            self._spoken.append((time.monotonic(), normalised))
+            expires = time.monotonic() + self.memory_seconds + speaking_seconds(normalised)
+            self._spoken.append((expires, normalised))
 
     def is_echo(self, heard: str) -> bool:
         candidate = normalise(heard)
         if not candidate:
             return False
-        cutoff = time.monotonic() - self.memory_seconds
+        now = time.monotonic()
         return any(
-            spoken_at >= cutoff and sounds_like(candidate, spoken)
-            for spoken_at, spoken in self._spoken
+            expires >= now and sounds_like(candidate, spoken) for expires, spoken in self._spoken
         )

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from jarvis.cli import apply_args, build_parser, privacy_report
+from jarvis.cli import GUIDE, apply_args, build_parser, privacy_report
 from jarvis.config import Config
 
 
@@ -69,9 +69,19 @@ def test_there_is_no_wake_word_machinery_left():
 
 
 def test_privacy_report_says_so_when_nothing_leaves():
-    line = privacy_report(Config(), stt_local=True, tts_local=True)
+    """With the web off, which is the only stage that is remote by nature."""
+    local = replace(Config(), brain=replace(Config().brain, web=False))
+    line = privacy_report(local, stt_local=True, tts_local=True)
     assert "Nothing leaves this machine." in line
     assert "REMOTE" not in line
+
+
+def test_searching_the_web_is_named_as_leaving_the_machine():
+    """It is the one thing in the default install that does, so the startup line
+    is what makes it honest rather than quiet."""
+    line = privacy_report(Config(), stt_local=True, tts_local=True)
+    assert "web: html.duckduckgo.com (REMOTE)" in line
+    assert "what you look up" in line
 
 
 def test_privacy_report_names_each_leak():
@@ -104,7 +114,7 @@ def test_installing_the_guide_makes_it_match(tmp_path, capsys):
 
     installed = tmp_path / "nested" / "jarvis.md"
     assert main(["rules", "--path", str(installed), "--install"]) == 0
-    assert installed.read_bytes() == (project_root() / "jarvis.md").read_bytes()
+    assert installed.read_bytes() == (project_root() / GUIDE).read_bytes()
     assert main(["rules", "--path", str(installed)]) == 0
     assert "matches" in capsys.readouterr().out
 

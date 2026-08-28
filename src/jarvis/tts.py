@@ -316,6 +316,23 @@ class SpeechEngine:
         self._thread.join(timeout=10)
 
 
+def for_speaking(text: str) -> str:
+    """Prose tidied into something a synthesiser can read.
+
+    Text written for a screen arrives with its emphasis and emoji intact, and
+    SAPI reads `**947 tokens**` as "asterisk asterisk nine four seven". Stripped
+    rather than rejected, because the sentence underneath is usually fine.
+    Newlines go too - a spoken line is one line.
+    """
+    cleaned = text
+    for marker in ("**", "__", "`", "*", "#"):
+        cleaned = cleaned.replace(marker, "")
+    # Anything outside the basic plane is an emoji or a symbol, and has no
+    # pronunciation worth hearing.
+    cleaned = "".join(character for character in cleaned if ord(character) < 0x2500)
+    return " ".join(cleaned.split())
+
+
 def iter_sentences(chunks: Iterable[str], min_chars: int = 12) -> Iterator[str]:
     """Regroup streamed tokens into speakable sentences."""
     buffer = ""

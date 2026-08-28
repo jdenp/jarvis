@@ -13,6 +13,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from . import ui as terminal
 from .config import Config
 from .echo import EchoGuard
 from .hotkey import HotkeyListener
@@ -38,8 +39,13 @@ class VoiceService:
         transcriber: Transcriber | None = None,
         speech: SpeechEngine | None = None,
         transcript: Transcript | None = None,
+        ui=None,
     ) -> None:
         self.config = config
+        # Both paths pass through here, so this is where the conversation is
+        # drawn: everything heard goes through _listen and everything spoken
+        # through say(). Rendering anywhere else would double up.
+        self.ui = ui or terminal.Silent()
         self.microphone = microphone
         self.transcriber = transcriber
         self.speech = speech
@@ -82,6 +88,7 @@ class VoiceService:
                 continue
             utterance = self.transcript.add(heard)
             logger.info("[%d] %s", utterance.id, heard)
+            self.ui.heard(heard)
 
     def _start_hotkey(self) -> None:
         """Register the configured key to toggle transcription."""
@@ -105,11 +112,17 @@ class VoiceService:
         self.transcript.pause()
         if self.microphone is not None:
             self.microphone.pause()
+        # Said on screen, not only logged. Pausing has no sound and no visible
+        # effect of its own, so with nothing drawn a working hotkey is
+        # indistinguishable from a dead one.
+        key = self.config.service.hotkey or "resume_transcription"
+        self.ui.note(f"  Not listening. {key} to start again.")
         return True
 
     def resume(self) -> None:
         """Start listening again."""
-        self.transcript.resume()
+        if self.transcript.resume():
+            self.ui.note("  Listening again.")
         if self.microphone is not None:
             self.microphone.resume()
 
@@ -121,6 +134,7 @@ class VoiceService:
         if not text or self.speech is None:
             return
         logger.info("say: %s", text)
+        self.ui.spoke(text)
         self._echo.remember(text)
 
         if self.config.audio.listen_while_speaking or self.microphone is None:

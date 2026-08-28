@@ -4,7 +4,7 @@ The last resort, and the only thing that worked. Four attempts to make an agent
 remember to speak are recorded in DESIGN.md; every one of them put words into a
 tool result, and a tool result is advice. This asks the agent for nothing.
 
-The message shape here is taken from a real Cline transcript, including the two
+The message shape here is taken from a real transcript, including the two
 lines from one session that were written and thrown away.
 """
 
@@ -28,20 +28,19 @@ LEAD_IN = "Spotify is open. Let me press play to start music."
 ANSWER = "Done - Spotify's open and Katy Perry's \"Harleys In Hawaii\" is playing now."
 
 
-def session(tmp_path, name, messages, *, age=0.0, envelope=True):
-    """One session directory, shaped as Cline writes them.
+def session(tmp_path, name, messages, *, age=0.0, unreadable=False):
+    """One session directory, in the layout this reads: a directory per session
+    holding `<id>.messages.json`.
 
-    The envelope is what marks a transcript as Cline's, and what this refuses to
-    read without - `origin` with a source, and a session id.
+    `unreadable` writes valid JSON of some other shape, which is what a file
+    that merely happens to sit in the configured directory looks like.
     """
     folder = tmp_path / name
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{name}.messages.json"
-    blob = {"version": 1, "messages": messages}
-    if envelope:
-        blob["sessionId"] = name
-        blob["agent"] = "lead"
-        blob["origin"] = {"source": "cli", "mode": "user", "sessionId": name, "version": "3.0.58"}
+    blob = {"version": 1, "sessionId": name, "messages": messages}
+    if unreadable:
+        blob = {"settings": {"theme": "dark"}, "messages": "somebody else's file"}
     path.write_text(json.dumps(blob), encoding="utf-8")
     if age:
         stamp = time.time() - age
@@ -267,18 +266,16 @@ def test_something_that_tidies_down_to_nothing_is_not_spoken(tmp_path):
     assert watcher.anything_new() == [for_speaking(ANSWER)]
 
 
-# --------------------------------------------------- Cline's format, and only
+# ------------------------------------------- only something it can read
 
 
-def test_clines_envelope_is_recognised():
-    from jarvis.overhear import looks_like_cline
+def test_a_list_of_messages_is_recognised():
+    from jarvis.overhear import looks_like_a_transcript
 
-    assert looks_like_cline(
+    assert looks_like_a_transcript(
         {
-            "messages": [],
             "sessionId": "1787820869065_pvlov",
-            "agent": "lead",
-            "origin": {"source": "cli", "version": "3.0.58"},
+            "messages": [{"role": "user", "content": "hello"}],
         }
     )
 
@@ -288,32 +285,33 @@ def test_clines_envelope_is_recognised():
     [
         {},
         {"messages": []},
-        {"messages": [], "sessionId": "x"},
-        {"messages": [], "origin": {"source": "cli"}},
-        {"messages": "not a list", "sessionId": "x", "origin": {"source": "cli"}},
-        {"messages": [], "sessionId": "x", "origin": "not a dict"},
+        {"messages": "not a list"},
+        {"messages": [{"text": "no role on it"}]},
+        {"messages": ["not even a dict"]},
+        {"settings": {"theme": "dark"}},
+        "not a dict at all",
     ],
 )
 def test_anything_else_is_not_read(blob):
     """Reading a format nobody has verified out loud is a worse failure than
     staying quiet, so an unfamiliar file is left alone rather than guessed at."""
-    from jarvis.overhear import looks_like_cline
+    from jarvis.overhear import looks_like_a_transcript
 
-    assert looks_like_cline(blob) is False
+    assert looks_like_a_transcript(blob) is False
 
 
-def test_a_transcript_without_the_envelope_is_left_alone(tmp_path, caplog):
+def test_somebody_elses_file_in_that_directory_is_left_alone(tmp_path, caplog):
     import logging
 
     watcher = Overheard(tmp_path)
-    session(tmp_path, "s1", [], envelope=False)
+    session(tmp_path, "s1", [], unreadable=True)
     watcher.catch_up()
-    session(tmp_path, "s1", [assistant(text(ANSWER))], envelope=False)
+    session(tmp_path, "s1", [assistant(text(ANSWER))], unreadable=True)
 
     with caplog.at_level(logging.WARNING, logger="jarvis.overhear"):
         assert watcher.anything_new() == []
-    assert "not in the format this understands" in caplog.text
-    assert "overhear.py" in caplog.text, "and where to go to teach it another one"
+    assert "not a list of messages" in caplog.text
+    assert "overhear.py" in caplog.text, "and where to go to teach it another format"
 
 
 def test_it_only_complains_once(tmp_path, caplog):
@@ -322,6 +320,6 @@ def test_it_only_complains_once(tmp_path, caplog):
     watcher = Overheard(tmp_path)
     with caplog.at_level(logging.WARNING, logger="jarvis.overhear"):
         for index in range(3):
-            session(tmp_path, "s1", [assistant(text(f"line {index}"))], envelope=False)
+            session(tmp_path, "s1", [assistant(text(f"line {index}"))], unreadable=True)
             watcher.anything_new()
-    assert caplog.text.count("not in the format") == 1
+    assert caplog.text.count("not a list of messages") == 1

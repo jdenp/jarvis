@@ -46,11 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(
         dest="command",
-        metavar="[serve | say | next | status | look | click | screenshot | rules | mcp]",
+        metavar="[serve | chat | say | next | status | look | click | screenshot | rules | mcp]",
     )
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
     serve.add_argument("--no-http", action="store_true", help="transcribe to file only, no API")
+
+    talk = sub.add_parser("chat", help="type to JARVIS instead of speaking - no microphone")
+    talk.add_argument(
+        "--verbose", action="store_true", help="show tool results and warnings on screen too"
+    )
 
     speak = sub.add_parser("say", help="speak text through the running service")
     speak.add_argument("text", nargs="+", help="what to say")
@@ -67,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--json", action="store_true", help="print the raw record")
     nxt.add_argument("--follow", action="store_true", help="keep printing as more arrives")
 
-    sub.add_parser("mcp", help="run as an MCP server over stdio, for Cline and friends")
+    sub.add_parser("mcp", help="run as an MCP server over stdio, for a connected agent")
     sub.add_parser("status", help="report on the running voice service")
 
     look = sub.add_parser("look", help="number what is clickable on screen, and save the map")
@@ -77,9 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
     look.add_argument("--marks", action="store_true", help="write the marked screenshot too")
     look.add_argument("--json", action="store_true", help="print the raw scan")
 
+    kit = sub.add_parser("tools", help="what the brain can do, as the model is told it")
+    kit.add_argument(
+        "--write", action="store_true", help="write context/tools/tools.md instead of printing"
+    )
+
     rules = sub.add_parser("rules", help="check the agent guide the client is loading")
-    rules.add_argument("--install", action="store_true", help="copy jarvis.md over the stale one")
-    rules.add_argument("--path", help="where the client reads its rules from")
+    rules.add_argument(
+        "--install", action="store_true", help="copy the current guide over the stale one"
+    )
+    rules.add_argument("--path", help="the file the agent reads its rules from")
 
     shot = sub.add_parser("screenshot", help="save a picture of a window")
     shot.add_argument("window", nargs="?", default="", help="part of a window title")
@@ -141,6 +153,18 @@ def privacy_report(config: Config, stt_local: bool, tts_local: bool) -> str:
         ("ears", config.stt.backend, stt_local, "your microphone audio"),
         ("voice", config.tts.engine, tts_local, "every reply"),
     ]
+    if config.brain.enabled or config.brain.web:
+        from urllib.parse import urlparse
+
+        from .brain import is_loopback
+    if config.brain.enabled:
+        where = urlparse(config.brain.url).netloc or config.brain.url
+        # Between the two, because that is the order the words travel in. An
+        # endpoint off this machine sees every word of every conversation.
+        stages.insert(1, ("brain", where, is_loopback(config.brain.url), "the conversation"))
+    if config.brain.web:
+        engine = urlparse(config.brain.search_url).netloc or config.brain.search_url
+        stages.append(("web", engine, is_loopback(config.brain.search_url), "what you look up"))
     summary = " -> ".join(
         f"{name}: {what} ({'local' if local else 'REMOTE'})" for name, what, local, _ in stages
     )
@@ -152,12 +176,17 @@ def privacy_report(config: Config, stt_local: bool, tts_local: bool) -> str:
 
 def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     """Own the microphone and expose it. This is what an agent talks to."""
+    from . import ui as terminal
     from .reap import reap_orphans
     from .service import VoiceService, build_server
 
     if cleared := reap_orphans():
         logger.info("Cleared %d stranded MCP server(s) from an earlier session.", cleared)
 
+    # Built now, handed to the service only once the brain is actually running -
+    # see below. Until then the boot lines go through plain logging, because a
+    # five second Whisper load with nothing on screen looks like a hang.
+    screen = terminal.Ui()
     service = VoiceService(config)
     try:
         service.start()
@@ -174,6 +203,19 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         )
     )
     logger.info("Transcript: %s", config.log_dir / config.service.transcript_file)
+
+    thinking = None
+    if config.brain.enabled:
+        from . import brain
+
+        thinking = brain.start(config, service, terminal=screen)
+
+    # Only once the brain is answering is there a conversation to draw. Without
+    # it the words belong to whatever agent is connected over MCP, and drawing
+    # them here as well as logging them would print everything twice.
+    if thinking is not None:
+        service.ui = screen
+        _hand_the_terminal_over(logger, screen)
 
     if getattr(args, "no_http", False):
         logger.info("Listening. Transcript file only, no API. Ctrl+C to stop.")
@@ -205,10 +247,25 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     except KeyboardInterrupt:
         logger.info("\nStopping.")
     finally:
+        screen.close()
         server.shutdown()
         server.server_close()
         service.stop()
     return 0
+
+
+def _hand_the_terminal_over(logger, screen) -> None:
+    """Swap the plain console handler for one that draws through the UI.
+
+    A stream handler writes straight to stdout, which walks over the live status
+    line and interleaves badly with the conversation above it.
+    """
+    from . import ui as terminal
+
+    for handler in list(logger.handlers):
+        if type(handler) is logging.StreamHandler:
+            logger.removeHandler(handler)
+    logger.addHandler(terminal.LogToUi(screen))
 
 
 def run_say(config: Config, args: argparse.Namespace) -> int:
@@ -324,9 +381,47 @@ def run_look(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-# Cline's global rules directory. A copy of jarvis.md lives here so the agent
-# reads it every turn, and a copy is a thing that goes stale.
-CLINE_RULES = "Documents/Cline/Rules/jarvis.md"
+# Generated, and committed, for the same reason config/defaults.json is: it is
+# the only readable account of what the model is actually told, and a test keeps
+# it honest.
+TOOLS_FILE = "context/tools/tools.md"
+
+
+def run_tools(config: Config, args: argparse.Namespace) -> int:
+    """Write out what the brain can do, or print it.
+
+    Every feature on, whatever this machine's config says - the file is a
+    description of the software rather than of one installation.
+    """
+    from .tools import as_markdown, build_toolbox
+
+    class Ears:
+        """Stands in for the microphone, which only the voice path has."""
+
+        def pause(self) -> bool:
+            return True
+
+        def resume(self) -> None:
+            pass
+
+    body = as_markdown(build_toolbox(Config(), ears=Ears()))
+    if not args.write:
+        print(body, end="")
+        return 0
+
+    target = project_root() / TOOLS_FILE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
+    print(f"Wrote {target}")
+    return 0
+
+
+# Who JARVIS is: the brain reads it as its system prompt, and it is what an
+# agent driving JARVIS over MCP should be handed as well. There used to be two
+# files here, one per path, and the difference between them was never clear
+# enough to be worth the duplication - the character is the same either way, and
+# the MCP mechanics are served over the protocol by mcp_server.INSTRUCTIONS.
+GUIDE = "context/soul/jarvis.md"
 
 
 def run_rules(config: Config, args: argparse.Namespace) -> int:
@@ -335,11 +430,24 @@ def run_rules(config: Config, args: argparse.Namespace) -> int:
     Worth a command of its own because the failure is invisible and total: a
     guide from before the tools were renamed names tools that do not exist, and
     the model believes it over the schemas. Nothing in the session says so.
+
+    Only the MCP path needs it, so there is no default location - clients keep
+    their rules wherever they like. `service.agent_rules`, or --path.
     """
     from pathlib import Path
 
-    source = project_root() / "jarvis.md"
-    installed = Path(args.path) if args.path else Path.home() / CLINE_RULES
+    source = project_root() / GUIDE
+    where = args.path or config.service.agent_rules
+    if not where:
+        print(
+            "Nowhere to check. Set service.agent_rules to the file your agent reads its "
+            f"rules from, or pass --path, and this will keep it in step with {GUIDE}. "
+            "Only needed when the microphone is handed to an agent over MCP.",
+            file=sys.stderr,
+        )
+        return 2
+
+    installed = Path(where).expanduser()
     current = source.read_bytes()
 
     if args.install:
@@ -353,7 +461,7 @@ def run_rules(config: Config, args: argparse.Namespace) -> int:
         print(f"No guide at {installed}. Install it with `jarvis rules --install`.")
         return 1
     if installed.read_bytes() == current:
-        print(f"{installed}\n  matches jarvis.md ({len(current)} bytes).")
+        print(f"{installed}\n  matches {GUIDE} ({len(current)} bytes).")
         return 0
     print(
         f"STALE: {installed} does not match {source}.\n"
@@ -454,7 +562,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # Clients print results for something else to read, and MCP in particular
     # must keep stdout clean - anything there is parsed as JSON-RPC.
-    if args.command in {"say", "next", "status", "config", "look", "click", "screenshot", "rules"}:
+    if args.command in {
+        "say",
+        "next",
+        "status",
+        "config",
+        "look",
+        "click",
+        "screenshot",
+        "rules",
+        "tools",
+    }:
         configure(config.log_dir, "WARNING")
         if args.command == "say":
             return run_say(config, args)
@@ -470,7 +588,18 @@ def main(argv: list[str] | None = None) -> int:
             return run_screenshot(config, args)
         if args.command == "rules":
             return run_rules(config, args)
+        if args.command == "tools":
+            return run_tools(config, args)
         return run_status(config)
+
+    if args.command == "chat":
+        # No microphone and no service, so this runs anywhere an ssh session
+        # does. Logging stays off the screen unless asked for - the tool calls
+        # are printed by the chat front end and duplicating them is noise.
+        configure(config.log_dir, config.log_level, console=args.verbose)
+        from .chat import run as run_chat
+
+        return run_chat(config, args.verbose)
 
     if args.command == "mcp":
         configure(config.log_dir, config.log_level, console=False)

@@ -1,22 +1,37 @@
 # JARVIS - design notes
 
-Why things are the way they are, for whoever works on this next. `jarvis.md` is the
-separate, shorter file you hand to an agent that is *using* JARVIS rather than changing it.
+Why things are the way they are, for whoever works on this next. `context/` holds three kinds
+of file: `soul/jarvis.md` is character, `tools/tools.md` is generated from the code, and
+`memories/` is everything about the desk - `navigation.md` by hand, `memories.md` by JARVIS.
 
 ## What this is
 
-Ears and a mouth, and nothing else. An agent on the other end is the brain.
+A voice assistant that owns its own loop, and a microphone anything else can borrow.
 
 ```
-mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ GET /heard (blocks)
-     ▲                                                              │
-     └──── muted while speaking ◀── speech thread ◀── POST /say ◀───┘ agent
+mic thread ──▶ queue ──▶ STT ──▶ transcript ──┬──▶ brain ──▶ tools ──▶ speech
+     ▲                                        │       (same process)
+     └──── muted while speaking ◀─────────────┴──▶ GET /heard (blocks) ──▶ MCP agent
 ```
 
-There used to be a standalone assistant here - its own LLM, a skills registry with tool
-calling, a persona. It was removed deliberately, not abandoned: two things that can answer
-the user is one too many, and everything it did the connected agent already does better.
-If you are tempted to add a model back, add it on the agent's side of the socket.
+Both halves of that diagram are real and only one should be switched on at a time. The
+brain is `brain.py`; the socket is what a coding agent connects to over MCP. With both
+running, both answer.
+
+This is a reversal and it is worth being straight about. There used to be a standalone
+assistant here - its own LLM, a skills registry, a persona - and it was removed
+deliberately, with a note in this file saying that if you are tempted to add a model back,
+add it on the agent's side of the socket. The argument was that two things which can answer
+the user is one too many. That argument was right and still is, which is why `brain.enabled`
+turns one of them off.
+
+What changed is the position, not the count. The removed assistant answered *alongside* an
+agent; this one *is* the agent. And the reason to move it inside is the whole of the
+enforcement section further down: while an agent held the loop, speaking was a tool it had
+to remember to call, and nothing in MCP can make a call happen. Owning the loop does not
+solve that problem, it deletes it - the model's reply text is the speech, so there is no
+call to forget. Four mechanisms were built and removed trying to get that guarantee from
+outside the loop before it was got by moving the loop.
 
 `jarvis serve` is a daemon rather than three separate programs for one reason: **only one
 process can own the microphone.** `jarvis say` from an agent's terminal has to mute the same
@@ -307,6 +322,371 @@ Elicitation and `InputRequiredResult` do not help - both route to the human, not
 model. Absent sampling, an agent that ends its turn with prose and calls nothing at all is
 reachable only by the error flag, and that is a client behaviour rather than a guarantee.
 
+**0.8.0: own the loop, and the problem stops existing.** Everything above is JARVIS on the
+wrong side of the socket. It could only be called, so every mechanism it had was a string in
+a tool result, and a string in a tool result is advice. The way out was not a better string.
+
+`brain.py` holds the loop: hear, call the model with the tools attached, run them, speak the
+reply. **The reply is the speech.** There is no say tool, so there is nothing to forget - the
+`content` of the model's last message goes to the synthesiser, and a model that writes prose
+instead of calling a tool has, by doing exactly that, answered. The failure mode this repo
+spent five mechanisms on is not fixed; it is unrepresentable.
+
+Two holes remained after that and both are closed in the loop rather than in a prompt. A
+turn can run out of tool calls without ever writing prose, so the last call of any turn is
+made with `tools` omitted from the request: with nothing to call, prose is the only thing
+the model can emit. And a model can return an empty message, so an empty answer *after work
+was done* is spoken as a failure - reporting that beats silence, which sounds identical to a
+crash. What is deliberately still possible is staying quiet, because there is no wake word
+and some of what arrives is other people. That takes a positive act now: a reply with no
+letters or digits in it, which the prompt asks for as a single hyphen.
+
+Two things came free that were listed as impossible under MCP. The loop drains the
+transcript between tool calls, so speech that arrives mid-task is read before the next step
+rather than after the wrong thing has been done - the "nothing preempts an agent" limit was
+a property of not owning the loop, not of the transport. And the two-model problem goes
+away: one context during voice work instead of an agent's and JARVIS's, which on a
+single-slot llama-server is the difference between reprocessing a prompt every turn and not.
+
+What it costs is everything an agent framework was doing for free: a system prompt, history
+that does not grow, malformed tool calls, retries, and a model that loops. `Toolbox.run`
+turns every one of those into a result string rather than an exception, because a tool call
+with no result leaves the conversation unable to continue at all. The MCP path stays exactly
+as it was, for handing the microphone to something that is a better coding agent than a 35B
+model driving a desktop.
+
+**The learnings are the model's to write, not ours to guess.** Almost everything that makes
+this desk workable is discoverable only by getting it wrong: a window whose tree is empty
+until it has been focused once, an application that reports 25 elements and no targets
+because it is still building itself, which of four identically labelled Close buttons is the
+one that works. Every one of those was found by watching a session fail, and every one of
+them is different on the next machine.
+
+Writing that into the system prompt by hand does not scale and does not travel. So
+`memories.py` gives the model a `remember()` tool, the whole list is read back into the
+prompt at the top of every turn, and a lesson written at half past two applies at half past
+three. Re-read rather than cached, which also means editing the file by hand takes effect on
+the next thing anyone says.
+
+Three decisions inside that are worth keeping. It is plain markdown bullets under
+`context/memories/`, so a memory that has gone wrong is fixed by deleting a line and a human
+can add their own - nothing parses it beyond reading the bullets. It is capped, because it is
+prompt paid for on every single call, and the cap drops the *oldest*: the desk changes, so a
+lesson about an application that has since been updated is worse than no lesson. And the
+only nudge to write anything down comes attached to a refusal, which is rare and is exactly
+the moment there is something to learn - nudging after every call would fill the list with
+notes about things that worked.
+
+What it must not become is a diary. The tool description says so explicitly, because a model
+asked to remember things will happily write down what the user likes for breakfast, and that
+is context spent every turn forever on something no tool call needs.
+
+**The tool descriptions are generated into `context/tools/tools.md`, not read from it.**
+Asked where JARVIS remembers its own tools, the answer is that it does not: the schemas are
+in every single request, so there is nothing to load and nothing to forget. But `context/`
+having a soul and memories and no account of what the thing can actually do was a fair
+complaint, and after the system prompt these descriptions are the largest influence on
+behaviour - reading them should not mean reading Python.
+
+So `jarvis tools --write` generates it and a test fails if it has drifted, exactly as
+`config/defaults.json` works. The direction matters: making the file authoritative would
+split each tool's prose from its signature, and that is precisely the failure `jarvis rules`
+exists to catch - prose out of date with a signature is believed over the signature. Keeping
+it generated means the file is always right and is never load-bearing.
+
+**The web, and the promise it costs.** `search_web` and `read_page` are the first things here
+that leave the machine, which is why they are a switch and why `privacy_report` names
+DuckDuckGo in the startup line. They are on by default anyway, and that is a departure worth
+justifying: `stt.backend = "google"` and `tts.engine = "edge"` are opt in because each
+replaces something that already works locally, and there is no local version of the web. Off,
+the feature does not exist rather than falling back. The line printed at every startup is what
+keeps that honest, so it is not a comment on the promise, it is the mechanism.
+
+The HTML endpoint rather than an API because every search API worth using wants a key, and
+this is meant to work from `uv sync`. The trade is real - it is somebody's page rather than
+somebody's contract - so the parse fails towards "no results came back, say you could not find
+it" rather than towards nonsense, and `brain.search_url` takes a SearXNG instead. Adverts are
+filtered on the way out: they arrive first, and a model reads the first result as the best
+answer and repeats it out loud as fact.
+
+The rate limit is one query a second and is kept rather than discovered. Waiting 300ms before
+a search is invisible in a conversation; being refused costs a whole turn, and the refusal is
+the nasty kind - a **202** carrying a challenge page, a success code that `raise_for_status`
+and every other client is perfectly happy to wave through as an empty result. So the status is
+checked explicitly, one retry covers being throttled anyway, and the message says which of the
+two it was, because "slow down" and "no such thing" are different answers to say out loud.
+
+**One soul file, and the desk is not part of it.** There were two, one for the brain and one
+for an agent over MCP, and nobody could say where the line was - because there is not one. The
+character is identical whoever is driving; only the mechanics differ, and those are already
+served over the protocol by `mcp_server.INSTRUCTIONS`. So there is one `soul/jarvis.md`, and
+`jarvis rules` installs that.
+
+The second split is the useful one: character in `soul/`, the desk in `memories/`. How to open
+an application is not part of who JARVIS is, and keeping it in the prompt is how it came to be
+deleted during a rewrite for looking tool-adjacent - after which a session decided Teams was
+not installed and went shopping in the Microsoft Store. Every markdown file under `memories/`
+is read, at any depth, so a new one is a new file rather than a code change.
+
+The same distinction repeats one level down, in `memories/navigation/`. `os-navigation.md`
+ships and is edited by hand: how Windows behaves, true on any machine, and therefore worth
+committing. `user-navigation.md` is JARVIS's own and is gitignored, because it is about one
+desk. Promoting a line from the second to the first is a text edit, which is the whole reason
+they are separate files rather than one with a convention inside it.
+
+Only the two files JARVIS writes are capped. The rest are bounded by whoever wrote them, and
+trimming the curated half to make room for the accumulated half would be the wrong way round.
+
+**The prompt is a file, and shorter is better.** It lives in `context/soul/brain.md` rather
+than as a string in `brain.py`, because it is prose: it is tuned by reading it out loud and
+changing a word, not by editing Python, and it is the largest single influence on behaviour in
+the repository. There is no copy in the code to drift from, and a missing file stops the brain
+with the filename rather than substituting a stand-in personality nobody asked for. The
+microphone paragraph sits inline behind `<!-- ears -->` markers, so whoever opens the file
+reads the whole thing instead of a prompt with a hole in it.
+
+It was cut in half on the same argument that shrank the accessibility tree: the more
+instructions it carries the more carelessly each one is followed. What went was everything the
+tool schemas already say - `expecting` is explained in `click`'s own description, and the
+"nothing clickable, use the keyboard" advice arrives in the scan result at exactly the moment
+it applies. What stayed is what only the prompt can say: that words end the turn, that silence
+is a hyphen, and how to sound.
+
+**The last word of a turn needs the same guard as every other.** With the step budget gone
+after eight calls, a model carries on in the shape it has been writing in - so the answer that
+came back from the tools-removed call was `<tool_call> <function=look_at_screen> </function>`,
+and it went through the speakers with the tags in it. Removing the tools from the request does
+not stop a model typing one out; only checking what it said does. It now gets one chance to
+say it in English and then the failure is reported out loud, because silence after eight tool
+calls is worse than admitting it could not manage.
+
+**It writes its own notes, after the answer has gone out.** A lesson only outlives the
+conversation it was learned in if somebody writes it down, and asking a model to remember
+mid-turn competes with the thing it is actually doing. So a turn that used its hands is
+followed by one more call: look back, and is there anything about how this desktop behaves
+that would have saved a step? It runs after `_speak`, and speech is queued and played on
+another thread, so it happens in time nobody is waiting through.
+
+Three things make it work rather than fill the file with rubbish. It is told that most turns
+teach nothing and that replying with nothing is the expected answer. It gets at most two lines
+and they must be bullets. And crucially it runs with reasoning OFF and a 200 token leash -
+left thinking, it spent four thousand characters weighing up whether one line was worth
+keeping and then ran out of room before writing it. Reasoning earns its cost when a tool has
+to be chosen; this call has no tools.
+
+It never touches the conversation: the question is asked over a copy of the history and the
+answer is thrown away. What it writes goes to `user-navigation.md`, not to the file
+`remember()` uses, because a note about how to minimise a window is not the same kind of thing
+as a note about this machine.
+
+**Reasoning and the answer share one budget, which is how a turn ends in silence.** The worst
+failure so far had no symptom at all: `brain.max_tokens` was 600, sized for a forty word
+reply, and a hard think produced 2473 characters of reasoning that stopped mid sentence with
+no answer written. What reached the speakers was "Sorry sir, I could not put an answer
+together", and nothing in the log said why, because nothing read `finish_reason`.
+
+Three changes, and the order matters. It is read now, and a truncated generation logs a
+warning naming the cap - that alone turns an unexplainable failure into an obvious one. The
+cap went to 2000, because it is a ceiling rather than a reservation and being tight buys
+nothing. And an answer that is empty *because* it ran out of room is asked again with twice
+the room, which is the only recovery that makes sense: asking again inside the same cap gets
+the same nothing.
+
+A reply cut off after a complete sentence is still that sentence. Truncation only matters when
+it left nothing to say.
+
+**The second identical refusal has to say something else.** "Look again and use the new
+numbers" is right the first time and useless the second, because looking again gives back the
+same numbers: a session clicked `System` in a terminal, looked again, clicked `System` again,
+and spent the rest of its budget going round. `Toolbox` remembers the last refusal, clears it
+on anything that works, and on a word for word repeat says to stop clicking, that the keyboard
+reaches what the pointer cannot, and that a shell command is usually the shorter way round
+anything to do with a program running or not running. The MCP server had this and it was lost
+in the port; a failure mode that has been solved once should not have to be found twice.
+
+**Talking over it works because the reply is read a token at a time.** The stream is what
+makes it possible at all: `Model._streamed` checks the room every 300ms, and anything heard
+raises `Interrupted` out of the middle of the read. Abandoning the request is what stops the
+server generating too, so it costs nothing to change your mind. Everything found so far is
+kept - "no, the other one" should build on the look that already happened rather than start
+the turn from nothing - and only calls carrying tools are interruptible, because the last call
+of a turn is one sentence from being spoken and losing it would throw away the work.
+
+Two smaller decisions inside that. The check is every 300ms rather than every token, because
+at fifty tokens a second that would be fifty transcript reads to shorten a delay nobody can
+perceive. And the interruption is not drawn on screen by the loop - the service already drew
+it when it was transcribed, and twice on screen reads as having been said twice.
+
+**An interruption gives the step budget back.** Steering worked exactly as built and the turn
+still failed: eleven of twelve steps went on opening the wrong thing, "no, go in the taskbar"
+arrived and was understood, and there was one step left to do it in. The budget is meant to
+stop a model going round in circles, and a person changing their mind is the opposite of that
+- it is the best evidence available that the next steps are worth taking. So the counter goes
+back to zero, and there is a first step again, which also means a lead-in is worth saying
+again. The only thing that can spend the budget this way is somebody choosing to keep talking.
+
+**Tool results go in the log, not only on screen.** `run_command("start teams")` returned "the
+system cannot find the file", the model concluded Teams was not installed, and the log recorded
+only the command. Half a post mortem is no post mortem: the first line of every result is
+logged now.
+
+**A long reply outlives the memory of having said it.** JARVIS answered a search with 379
+characters, heard itself thirty seconds later, and replied "That's right. Is there anything
+else I can help you with?" The matching was never the problem - fed both strings it recognises
+them perfectly. The window was: `MEMORY_SECONDS` was a flat 20 seconds, and a phrase is only
+transcribed once it *ends*, so a thirty second reply arrives thirty seconds after it was
+remembered. The memory now lasts as long as the speech plus the window, which is the only
+version of this that is right for both a two word acknowledgement and a paragraph.
+
+**Being refused is worth remembering.** The search engine cuts you off for minutes, not
+seconds, and every further request extends it - so a live session spent eight attempts and
+forty seconds rediscovering the same refusal. `_blocked_until` is module level, the next
+search does not go out at all, and the result says how long is left and offers the route that
+did work, which was opening a browser and searching there.
+
+**Nothing shortens the reasoning except asking it to.** Measured against the real endpoint:
+temperature does nothing to thinking length (359 to 545 characters across 0.0 to 0.7, no
+trend), and `reasoning_budget` and `thinking_budget` are ignored by this build. Fewer tools
+does not help either - with none at all it thought the longest of the lot. One paragraph in the
+prompt, telling it that a greeting is not worth deliberating over, took the median from 525
+characters to 182 and the completion from 150 tokens to 64, with the tool calls intact. That
+is the whole dial, and it is the cheapest one in the file.
+
+**What everything costs, measured.** Against the real tokeniser, on a 98,304 window:
+
+| | tokens |
+| --- | --- |
+| system prompt | 622 |
+| twelve tool schemas | 2,042 |
+| **every request starts at** | **2,664** |
+| one target in a scan | 15 |
+| a full 200 target scan | 3,057 |
+| a page at `page_chars` | ~500 per 1000 characters |
+
+Two things fall out of that. The base is under 3% of the window, so almost every cap in
+`BrainConfig` was set cautiously against a budget that turned out not to exist -
+`page_chars` and `shell_output_chars` were cutting answers in half to save a thousand tokens
+of ninety-five thousand spare. And the only figure that is charged on *every single request*
+is `max_memory_chars`, which makes it the one to be careful with; the rest are paid once and
+then carried as history.
+
+`max_targets` is the exception that stays where it is. Two hundred targets is 3k tokens and
+affordable, but the argument for the cap was never the tokens - it is that a model chooses
+worse from a longer list, which is the whole accessibility tree lesson. Affording more is not
+a reason to offer more.
+
+**There is no compaction, and `_trim` is not one.** It keeps the system prompt and the last
+`brain.history_turns` turns whole and deletes everything before them. Cutting at a turn
+boundary is the load-bearing part, because half a turn leaves a tool result whose call is gone
+and some endpoints reject that outright. Nothing is summarised: ask about something from ten
+turns ago and it is gone without trace.
+
+Turns are not the same size, which the turn count quietly assumed: a greeting is fifty tokens
+and a turn that scans a crowded window twice is six thousand, so twenty of the second kind
+would overflow a 98k window - and an overflowing request fails outright rather than degrading.
+So there are two limits and whichever bites first wins. The measured prompt size is the
+backstop, dropping one turn per turn taken, which is enough because the conversation only
+grows one turn at a time.
+
+That was chosen on the grounds that voice conversations are short, and it is still mostly
+true, but it is dropping rather than compacting and the meter in the corner now makes it
+visible. It also made the old default look silly: the prompt sits at 2.6k of a 98k window, so
+six turns was throwing conversation away to save nothing, and 20 is the number now. Trimming
+is the one thing that invalidates a cached prefix - everything after the system prompt shifts
+- so trimming rarely is faster as well as more useful. Every real alternative costs something a voice loop can feel. Summarising on eviction
+means a model call between turns, at the moment somebody is waiting. A rolling summary means
+the summary is in every request forever, growing, and being rewritten by a model that will
+eventually rewrite it wrongly. It is in the README's "not done yet" rather than half built.
+
+**Chat mode is a front end, not a second implementation.** `jarvis chat` is the same
+`Brain`, the same `Toolbox` and the same memories, with `ConsoleVoice` in place of
+`ServiceVoice` - two methods, `hear(timeout)` and `say(text)`, and `run_forever` cannot tell
+them apart. A test compares the two signatures so that adding an argument to one breaks
+loudly rather than only at runtime in the other.
+
+It earns its place twice. Over SSH there is no audio device, so a keyboard is the only way
+in. And a voice session is a terrible place to debug a model: the tool calls are invisible,
+there is nothing to scroll back through, and every experiment costs a sentence read out loud
+at conversational pace. Chat mode prints each call as it goes, which is how most of the
+prompt wording in `brain.py` got settled.
+
+`hear(0.0)` - the loop's mid-task check for somebody talking over the work - returns nothing
+here rather than reading stdin. One line is read at a time in a chat, so barge-in is
+genuinely absent rather than faked, and pretending otherwise would mean a half-typed line
+being snatched mid-task.
+
+**One terminal, and no dependency for it.** `ui.py` draws both front ends, because there is
+one conversation whether it arrived by microphone or keyboard, and two renderers would drift.
+Permanent lines scroll and a single live line under them says what is happening now, redrawn
+in place and erased before anything permanent is written - that last part is the whole trick,
+and getting it wrong splices a half-drawn status into the middle of the conversation.
+
+`rich` and `textual` would both do more. Neither is worth an install for a status line and
+five colours, and an alternate-screen application would be actively wrong here: the point is
+a scrolling record you can pipe, redirect and scroll back through, which is also why
+everything degrades to plain lines the moment the output is not a terminal.
+
+**The live line shows the model thinking, and then it does not.** Streaming exists here for
+exactly one reason: a spinner says a model is busy, and the last line of what it is actually
+reasoning about says whether it is busy on the right thing. It is set without redrawing -
+tokens arrive far faster than anybody can read them, so the animation thread picks the text up
+at its own pace and the terminal is written to eight times a second instead of hundreds.
+Nothing keeps it. That is the whole of "collapsed": shown while it happens, gone when there is
+an answer, and never in the scrollback.
+
+Everything is reassembled into the same `Reply` a single response would have produced, tool
+calls included - keyed by the delta's `index`, because a model can start a second call before
+finishing the first and the arguments arrive a few characters at a time. A half-read stream is
+a failure rather than a short answer. `brain.stream = false` for an endpoint whose SSE cannot
+be trusted; nothing else depends on it, and with no terminal to draw on it does not stream at
+all.
+
+**One throwaway request at startup.** The system prompt and the tool schemas are most of every
+request and never change, so a server that reuses a cached prefix processes them once. Doing
+that at startup spends a second or two of nobody's time instead of putting it on the first
+answer, which is the one that would otherwise feel broken. A one token limit, and it never
+enters the history: that conversation did not happen.
+
+**Speaking ends the turn, so nothing may be announced in advance.** Two tool descriptions said
+"say what you are about to do before you do it", carried over from the MCP design where a
+lead-in and the work were separate calls. In this loop prose *is* the end of the turn, so that
+instruction is not merely unhelpful, it is impossible to follow - and it was followed exactly.
+Asked to stop listening, the model replied "Pausing transcription, sir. Just call my name to
+start me up again", called nothing, and went back to listening. It also invented a wake word.
+
+The fix is the ordering, everywhere: do it, then say what happened, or write the sentence in
+the same message as the call. The system prompt now says so in as many words, because it is
+the one rule of this loop that no other agent has - anywhere else, saying you are about to do
+something is normal and harmless.
+
+**Reasoning off is fast and worse at choosing.** `brain.thinking = false` sends
+`chat_template_kwargs: {"enable_thinking": false}`, and it is a genuine improvement on latency:
+a greeting comes back in 0.4s against 2.2s. Probed against one simple tool it still emits a
+proper call. With all ten in front of it, it began writing calls as prose -
+`search_web(query="weather in Melbourne today")` in the content, which on this path is read
+out loud. That is the same lesson as the accessibility tree in a different costume: the model
+is fine at choosing between few things and degrades across many.
+
+So thinking stays on, and the *failure* is guarded rather than the setting forbidden. A reply
+that is entirely a call to a tool that exists is caught before it reaches the speakers and
+sent back with a note that it did not run. It costs one round trip and turns the worst
+possible output into a retry, which also makes `thinking = false` safe to choose.
+
+**A status line must not lie.** The first version said "listening" unconditionally, which was
+wrong the moment the microphone was shut - by the hotkey or by the model - and made a working
+Num Lock look like a dead one. It asks the voice what it is waiting for now. The same
+regression had a second half: pausing only logged at INFO, and INFO stopped reaching the
+terminal when the UI took it over, so the key worked and said nothing. Pausing draws a line
+of its own now. Both were the same mistake, which is that moving output to a new place is not
+free - anything that only reported through the old one goes quiet.
+
+The other half of it is that logging had to stop competing for the same screen. A stream
+handler writes straight to stdout and walks over the live line, so once the brain is running,
+`_hand_the_terminal_over` swaps that handler for `LogToUi` - warnings appear as part of the
+conversation, and everything at INFO stays in the file where the detail belongs. The boot
+lines still go through plain logging, because a five second Whisper load with nothing on
+screen looks like a hang.
+
 **Name the decision, not the mechanism.** The pair used to be `say` and `wait_for_speech`,
 and the second name stopped being true the moment `then="listen"` became the ordinary way to
 hear someone: it read as the canonical listening primitive while actually being the minority
@@ -523,11 +903,17 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   transcribes everything first, so every cough costs a Whisper inference. Local, so it is
   wasted CPU rather than a privacy problem, but still wasteful
 - Speaker identification, so a room with two people in it does not confuse the agent
-- Acoustic echo cancellation. `audio.listen_while_speaking` exists but is off by default,
-  because without AEC the microphone hears the speakers and the only defence is the text
-  comparison in `echo.py`. Real AEC would make barge-in workable
-- Nothing tells the agent that speech arrived while it was busy. It only finds out when it
-  next calls `converse`. An MCP notification could improve that, if clients honour it
+- Acoustic echo cancellation, and it is now the biggest thing left.
+  `audio.listen_while_speaking` had to go back off: with no AEC an open microphone on
+  speakers transcribes JARVIS, and it answered its own weather forecast once. The text
+  comparison in `echo.py` is the only defence and a long reply beat it. Headphones make it
+  free and it can be turned on there. Real AEC on the capture path is what makes cutting a
+  reply off work in a room with speakers in it - note that talking over the *thinking* works
+  either way, since the microphone is only shut while a reply is actually being spoken
+- Nothing tells a connected MCP agent that speech arrived while it was busy; it only finds
+  out when it next calls `converse`. An MCP notification could improve that, if clients
+  honour it. The brain has no such problem - it reads the transcript between its own tool
+  calls
 - Nothing fills the silence if the agent forgets to speak before slow work. That is
   deliberate - see above - but it does mean a forgetful agent sounds broken
 - Screen control has no undo and no dry run. `expecting` catches the wrong target but

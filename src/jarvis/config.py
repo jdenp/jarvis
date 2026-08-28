@@ -62,12 +62,17 @@ class AudioConfig:
     pause_quiet_fraction: float = 0.85
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
-    # Full duplex: the microphone stays open while JARVIS talks, so you can cut
-    # it off mid sentence. There is no acoustic echo cancellation here, so on
-    # speakers it hears its own voice and the only thing between that and JARVIS
-    # answering itself is the text comparison in echo.py. Headphones make it
-    # free. If it starts replying to itself, this is the setting.
-    listen_while_speaking: bool = True
+    # Full duplex: the microphone stays open while JARVIS talks, so a reply can
+    # be cut off mid sentence. OFF, because on speakers it transcribes itself -
+    # there is no acoustic echo cancellation here, and the only thing between
+    # that and JARVIS answering its own voice is the text comparison in echo.py,
+    # which has already been beaten once by a long reply. On headphones there is
+    # nothing to hear and this is free; turn it on there.
+    #
+    # It costs less than it sounds. Talking over JARVIS while it is thinking
+    # still works either way - the microphone is only shut while a reply is
+    # actually being spoken, which is seconds at the end of a turn.
+    listen_while_speaking: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,18 +115,18 @@ class ServiceConfig:
     # Past this, an utterance is flagged as backlog rather than a live
     # request. 0 disables the flag.
     stale_after_seconds: float = 120.0
-    # Read Cline's own prose off disk and speak it, when it wrote an answer as
-    # text instead of calling converse(). Nothing else works: the schema shapes a
-    # call that happens and cannot cause one, so four attempts to make an agent
-    # remember to speak were built and removed. This one needs no cooperation
-    # from it. Cline only - the transcript format is Cline's, and a file without
-    # its envelope is left alone rather than guessed at. See DESIGN.md.
-    overhear: bool = True
-    # Where Cline keeps its session transcripts. Empty means its own location
-    # under ~/.cline. Overriding it covers a portable install or a version that
-    # moves the directory; it does not make this work with another client, which
-    # needs a reader for their format rather than a different path.
-    cline_sessions: str = ""
+    # Where a connected agent writes its conversation, one directory per session
+    # holding a JSON file of messages. Set it and JARVIS reads that file and
+    # speaks any answer the agent typed instead of saying - which is the only
+    # thing that ever worked, since the schema shapes a call that happens and
+    # cannot cause one, and four attempts to make an agent remember were built
+    # and removed. Empty switches it off, which is right when the brain is
+    # answering: it exists for the MCP path. See DESIGN.md and overhear.py.
+    agent_sessions: str = ""
+    # Where that agent reads its rules from, for `jarvis rules` to keep the copy
+    # of context/soul/jarvis.md there in step with this repository. Empty means
+    # pass --path instead.
+    agent_rules: str = ""
     # How often that transcript is checked, and only while a reply is owed - so
     # one stat() a second while somebody is actually waiting, and none otherwise.
     overhear_poll_seconds: float = 1.0
@@ -189,9 +194,165 @@ class ScreenConfig:
     # Where the marked screenshot goes, under logs/, overwritten each scan. It is
     # what send_image transmits and what to look at when a click goes somewhere
     # unexpected. Costs a full screen grab, about half a second, on every scan -
-    # set it to "" for the text-only path and the latency back. `jarvis look
-    # --marks` writes one regardless.
+    # set it to "" for the text-only path and the latency back. Only the MCP path
+    # draws one: the brain never sends an image, so it would be paying half a
+    # second a look for a file nothing reads. `jarvis look --marks` writes one
+    # regardless.
     marks_file: str = "marks.png"
+
+
+@dataclass(frozen=True)
+class BrainConfig:
+    """JARVIS's own agent loop, and the model behind it.
+
+    With this on, JARVIS answers for itself: it hears you, calls a model with
+    the desktop tools, and speaks the reply. Speaking is not a tool here - the
+    model's reply IS what goes through the speakers - which is the whole reason
+    this exists. See brain.py, and DESIGN.md for the five mechanisms it replaced.
+    """
+
+    # On. Nothing happens without a model to talk to, and if `url` does not
+    # answer at startup the brain stays off with one line in the log while the
+    # microphone, the CLI and the MCP server all carry on working.
+    enabled: bool = True
+    # Any OpenAI-compatible chat endpoint. llama-server with --jinja is what
+    # this was built against; --jinja is the part that parses tool calls.
+    url: str = "http://127.0.0.1:8081/v1"
+    # Sent as `model`, and llama-server ignores it - it serves whatever was
+    # loaded. Only matters for an endpoint that hosts more than one.
+    model: str = "local"
+    # Bearer token, for an endpoint that wants one. Loopback does not.
+    api_key: str = ""
+    # Low on purpose. Choosing a tool is a one-right-answer decision with no
+    # creative upside, and a plausible-but-wrong tool at 0.6 is a real failure.
+    temperature: float = 0.4
+    # Everything one call may generate. Not just the answer: with `thinking` on
+    # the reasoning comes out of the same allowance, and a spoken reply of forty
+    # words is nothing beside two thousand characters of deliberation. 600 was
+    # sized for the answer alone and a hard think ate all of it, stopping mid
+    # sentence with nothing left to say - which reached the speakers as "I could
+    # not put an answer together". It is a cap rather than a reservation, so
+    # generous costs nothing.
+    max_tokens: int = 2000
+    # Tool calls allowed in one turn before the loop stops and asks for the
+    # answer. This costs patience rather than context - somebody is waiting
+    # through every one of them - so it is the one cap not set by the token
+    # budget. Twelve, because eight ran out on a real request: look, focus,
+    # look, click, look, type, look, check is already eight with nothing
+    # having gone wrong.
+    max_steps: int = 12
+    # Turns of conversation kept. Cut whole turns rather than messages - half a
+    # turn leaves a tool result whose call is gone, which some endpoints reject.
+    # 20 rather than 6 because the meter said so: the prompt sits at 2.6k of a
+    # 98k window, so six turns was throwing away conversation to save nothing.
+    # Trimming is also the one thing that invalidates a cached prefix, since
+    # everything after the system prompt shifts - so trimming rarely is faster
+    # than trimming often, on top of remembering more.
+    history_turns: int = 20
+    # Longest wait for one completion. Prompt processing on a local model is the
+    # slow part, and a 100k context reprocessing from cold takes most of a minute.
+    timeout_seconds: float = 180.0
+    # Read the reply as it is generated rather than waiting for all of it. The
+    # answer is spoken at the end either way; what this buys is a terminal
+    # showing the model think instead of a spinner, which is the difference
+    # between waiting and watching. Turn it off for an endpoint whose streaming
+    # is unreliable - nothing else depends on it.
+    stream: bool = True
+    # Context window, for the meter in the corner of the terminal and for the
+    # ceiling below. 0 asks the server, which llama.cpp answers on /props; set it
+    # for an endpoint that does not, or to correct one that lies.
+    context_limit: int = 0
+    # Most of the window the conversation may take up. history_turns counts
+    # turns and turns are not the same size: a greeting is 50 tokens and a turn
+    # that scans a crowded window twice is 6000, so twenty of the second kind
+    # would overflow a 98k window and the request would simply fail. Whichever
+    # of the two bites first wins. 0 leaves only the turn count.
+    max_context_fraction: float = 0.7
+    # Send one throwaway request at startup, so the system prompt and the tool
+    # schemas are already in the server's cache when somebody first speaks. It
+    # costs a second or two of nobody's time and takes it off the first answer,
+    # which is the one that would otherwise feel broken.
+    preload: bool = True
+    # The shell tool, which is how anything that is not the desktop gets done -
+    # files, git, and a coding agent if one is named below. It runs whatever the
+    # model asks for, as you, with no confirmation: that is the point of it and
+    # also the reason it is a switch. Everything else works with it off.
+    shell: bool = True
+    # Let the model reason before answering. On, and the measurement is worth
+    # keeping: off, a greeting comes back in 0.4s rather than 2.2s, which is a
+    # real difference in a conversation - but with ten tools in front of it the
+    # model started writing calls as prose, `search_web(query="...")` in the
+    # text where the answer should be. The loop catches that and asks again
+    # rather than reading it out, so this is safe to turn off; it costs a round
+    # trip when it happens. Sent as chat_template_kwargs, which is what
+    # llama.cpp's --jinja passes to the model's own template.
+    thinking: bool = True
+    # Searching and reading the web. THE ONLY THING IN THE DEFAULT INSTALL THAT
+    # LEAVES THIS MACHINE - a query goes to the search engine below and a page
+    # request goes to whatever site it names. On because there is no local
+    # equivalent: off, the feature simply does not exist. The startup line says
+    # so every time, and everything else still works without it.
+    web: bool = True
+    # DuckDuckGo's HTML endpoint, which needs no key. It is somebody's page
+    # rather than somebody's contract, so it can change shape - point this at
+    # your own SearXNG for the version that cannot.
+    search_url: str = "https://html.duckduckgo.com/html/"
+    # Results offered per search. Five is a screenful of context and about as
+    # much as is worth reading before picking one to open.
+    search_results: int = 5
+    # Characters kept from a page - about 1500 tokens per 3000, measured. An
+    # article is a few thousand characters of sentences and forty thousand of
+    # navigation, and cutting in the middle of the paragraph with the answer in
+    # it is the expensive mistake, not the tokens.
+    page_chars: int = 6000
+    # A command line coding agent to hand real code changes to, if you have one -
+    # JARVIS is told to run `<this> "the whole request"` rather than editing
+    # source a line at a time through the shell. Empty and it is simply told
+    # coding is not its job.
+    coding_agent: str = ""
+    # A command is waited on, so an interactive one has to be killed rather than
+    # sat with. Nothing in a voice conversation should take longer than this.
+    shell_timeout_seconds: float = 60.0
+    # Output kept per command, cut out of the middle. The head says what ran and
+    # the tail carries the error, so a prefix loses the half that mattered.
+    # About 500 tokens per 1000 characters.
+    shell_output_chars: int = 4000
+    # Lessons JARVIS writes down for itself with the remember tool, and reads
+    # back into its prompt at the start of every turn. The desk is full of things
+    # only discoverable by getting them wrong, and none of them are the same on
+    # the next machine - so the list is grown rather than shipped. Plain
+    # markdown: edit or delete any of it, or add your own.
+    memories: bool = True
+    # The file remember() writes to, under the project root unless it is an
+    # absolute path. Not in git - it is about this desktop. Every other markdown
+    # file beside it is read as well and read whole: those are reference,
+    # written by hand and bounded by hand, and navigation.md is the one that
+    # ships. Only this one grows on its own, so only this one is capped.
+    memories_file: str = "context/memories/memories.md"
+    # Where the looking back below writes what it works out about getting
+    # around. Beside it, and shipped, is os-navigation.md - how Windows behaves
+    # everywhere, edited by hand. Anything here that turns out to be general
+    # belongs there, and moving it is a text edit.
+    navigation_file: str = "context/memories/navigation/user-navigation.md"
+    # After a turn that used its hands, and while the answer is being read out,
+    # JARVIS looks back over what it did and writes down anything that would
+    # have saved it a step. It costs one model call of nobody's time, because
+    # the speech is still playing - and it is the only way a lesson outlives the
+    # conversation it was learned in without somebody typing it up.
+    consolidate: bool = True
+    # How much of the written file is read back. This is prompt, paid on every
+    # single call - the only setting here that is - so it is capped, and past it
+    # the oldest go, which is the right end to lose since the desk changes and a
+    # lesson can go stale. The reference files beside it are not counted.
+    max_memory_chars: int = 2000
+    # Who JARVIS is. Empty means context/soul/jarvis.md, which is where the
+    # prompt lives - prose, tuned by reading it out loud and changing a word,
+    # with no copy in the code to drift from. Character and behaviour only:
+    # anything about how the desk works belongs in context/memories, which is
+    # read in at the end of it. Missing, the brain does not start and says which
+    # file it wanted, because a JARVIS with a stand-in personality and no obvious
+    # cause is worse than one that stops.
+    system_prompt_file: str = ""
 
 
 @dataclass(frozen=True)
@@ -203,6 +364,7 @@ class Config:
     tts: TtsConfig = field(default_factory=TtsConfig)
     service: ServiceConfig = field(default_factory=ServiceConfig)
     screen: ScreenConfig = field(default_factory=ScreenConfig)
+    brain: BrainConfig = field(default_factory=BrainConfig)
     log_level: str = "INFO"
 
     @property
@@ -242,7 +404,7 @@ CONFIG_FILES = (
     "jarvis.toml",
 )
 
-_SECTIONS = frozenset({"audio", "stt", "tts", "service", "screen"})
+_SECTIONS = frozenset({"audio", "stt", "tts", "service", "screen", "brain"})
 
 # Where to look, not what to set. Without this JARVIS_CONFIG=x is read as a
 # setting called "config" and startup fails on the file it was meant to load.

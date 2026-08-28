@@ -1,4 +1,4 @@
-"""Reading the agent's own prose off disk, and speaking what it never said.
+"""Reading a connected agent's own prose off disk, and speaking what it never said.
 
 Every other attempt to make an agent speak its answer failed the same way: the
 schema shapes a call that happens and cannot cause one, so anything JARVIS puts
@@ -15,24 +15,26 @@ written and thrown away:
 A lead-in and a closing report, both perfectly sayable. This reads them and says
 them. It needs no cooperation from the agent, no protocol feature, and no
 capability the client has to advertise - which is the whole point, because
-sampling is deprecated and Cline never offered it anyway.
+sampling is deprecated and no client here has ever offered it.
 
 Jank, unarguably: it depends on another program's on-disk format. Hence
 `service.overhear`, and hence everything here failing quietly rather than loudly.
 
-**This reads Cline, and only Cline.** The layout is its own - one directory per
-session under `~/.cline/data/sessions`, holding `<id>.messages.json` beside
-`<id>.json` - and so is the envelope, which carries `origin.source`, an `agent`
-name and Cline's own version string. A transcript without that envelope is left
-alone rather than guessed at, because the alternative is reading somebody's
-half-understood file out loud.
+**You point it at the directory.** `service.agent_sessions` is a directory of
+session directories, each holding `<id>.messages.json` - which is one common
+layout and not a standard, so there is no default and an empty setting simply
+switches this off. Nothing is guessed at: a file that is not a list of messages
+is left alone and logged once, because reading somebody's half-understood format
+out loud is a worse failure than staying quiet.
 
-Adapting it to another client is a small job and a real one: the content shape
-inside `messages` is the ordinary Anthropic API shape - parts typed `text`,
-`thinking`, `tool_use` - so anything storing raw API messages needs only a new
-reader, and `looks_like_cline` plus `transcripts` are the seam. What it cannot be
-adapted to is a client that never writes the conversation down. There has to be a
-transcript to overhear.
+The message shape expected inside is the ordinary Anthropic API one - parts typed
+`text`, `thinking`, `tool_use` - so any client storing raw API messages works as
+is, and `transcripts` is the seam for one that lays its files out differently.
+What nothing can be done for is a client that never writes the conversation down.
+There has to be a transcript to overhear.
+
+Only the MCP path needs any of this. With the brain answering, the reply is the
+speech and there is nothing to overhear.
 """
 
 from __future__ import annotations
@@ -40,6 +42,11 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+
+# Tidying prose for a synthesiser is tts.py's job, not this module's - the brain
+# needs the same thing done to its own replies. Re-exported because the tests
+# and the reasoning for it live here.
+from .tts import for_speaking
 
 logger = logging.getLogger("jarvis.overhear")
 
@@ -55,18 +62,19 @@ NOT_FOR_SPEAKING = ("```", "<function")
 NOT_AT_A_LINE_START = ("#", "- ", "* ", "|", ">")
 
 
-def looks_like_cline(blob: dict) -> bool:
-    """Whether this is a transcript in the format this module understands.
+def looks_like_a_transcript(blob: dict) -> bool:
+    """Whether this is something this module knows how to read.
 
-    Cline stamps its own envelope on: an `origin` with a source and its version,
-    and a session id. Checked so that a file which merely happens to sit in the
-    configured directory is left alone. Reading a format nobody has verified out
-    loud is a worse failure than staying quiet.
+    A list of messages, each with a role. Checked so that a file which merely
+    happens to sit in the configured directory is left alone - reading a format
+    nobody has verified out loud is a worse failure than staying quiet.
     """
-    if not isinstance(blob, dict) or not isinstance(blob.get("messages"), list):
+    if not isinstance(blob, dict):
         return False
-    origin = blob.get("origin")
-    return isinstance(origin, dict) and "source" in origin and bool(blob.get("sessionId"))
+    messages = blob.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+    return all(isinstance(message, dict) and "role" in message for message in messages)
 
 
 def transcripts(root: Path) -> list[Path]:
@@ -137,23 +145,6 @@ def worth_speaking(text: str, limit: int = MAX_SPOKEN_CHARS) -> bool:
     return True
 
 
-def for_speaking(text: str) -> str:
-    """Prose tidied into something a synthesiser can read.
-
-    It was typed for a screen, so emphasis and emoji come through as themselves:
-    SAPI reads `**947 tokens**` as "asterisk asterisk nine four seven". Stripped
-    rather than rejected, because the sentence underneath is a perfectly good
-    answer. Newlines go too - a spoken line is one line.
-    """
-    cleaned = text
-    for marker in ("**", "__", "`", "*", "#"):
-        cleaned = cleaned.replace(marker, "")
-    # Anything outside the basic plane is an emoji or a symbol, and has no
-    # pronunciation worth hearing.
-    cleaned = "".join(character for character in cleaned if ord(character) < 0x2500)
-    return " ".join(cleaned.split())
-
-
 class Overheard:
     """Remembers how much of a transcript has already been read.
 
@@ -179,7 +170,7 @@ class Overheard:
         if path is None:
             return
         blob = self._read(path)
-        if blob is not None and looks_like_cline(blob):
+        if blob is not None and looks_like_a_transcript(blob):
             self._seen[path] = len(assistant_prose(blob))
 
     def anything_new(self) -> list[str]:
@@ -202,13 +193,12 @@ class Overheard:
         blob = self._read(path)
         if blob is None:
             return []
-        if not looks_like_cline(blob):
+        if not looks_like_a_transcript(blob):
             if not self._complained:
                 self._complained = True
                 logger.warning(
-                    "%s is not in the format this understands - Cline's, with an origin "
-                    "and a session id. Staying quiet rather than reading it out. See "
-                    "overhear.py if you want to teach it another client's transcript.",
+                    "%s is not a list of messages, so it is not being read out. See "
+                    "overhear.py if you want to teach it another transcript format.",
                     path,
                 )
             return []
@@ -230,12 +220,10 @@ class Overheard:
             return None
 
 
-def default_sessions_dir() -> Path:
-    """Where Cline keeps its transcripts: one directory per session, each holding
-    `<session-id>.messages.json`.
+def catching_up(root: Path) -> bool:
+    """Whether there is anything at that path worth watching.
 
-    `service.cline_sessions` overrides it, for a portable install or a version
-    that moves the directory. It does not make this work with another client -
-    that needs a reader for their format, not a different path.
+    No default location: one client's layout is not a standard, so the path is
+    configured or the feature is off.
     """
-    return Path.home() / ".cline" / "data" / "sessions"
+    return bool(transcripts(root))

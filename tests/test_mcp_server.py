@@ -806,8 +806,8 @@ def test_capabilities_are_read_as_a_property_not_called():
     assert "SAMPLING=no" in _capabilities(Ctx())
 
 
-def cline_session(root, name, prose):
-    """A Cline transcript with the given assistant prose, envelope and all."""
+def agent_session(root, name, prose):
+    """A transcript with the given assistant prose, in the shape this reads."""
     folder = root / name
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{name}.messages.json").write_text(
@@ -815,8 +815,6 @@ def cline_session(root, name, prose):
             {
                 "version": 1,
                 "sessionId": name,
-                "agent": "lead",
-                "origin": {"source": "cli", "version": "3.0.58"},
                 "messages": [
                     {"role": "assistant", "content": [{"type": "text", "text": line}]}
                     for line in prose
@@ -832,8 +830,7 @@ def overhearing_server(tmp_path, voice):
         Config(),
         service=replace(
             Config().service,
-            cline_sessions=str(tmp_path),
-            overhear=True,
+            agent_sessions=str(tmp_path),
             overhear_poll_seconds=0.05,
         ),
     )
@@ -846,14 +843,14 @@ def test_prose_the_agent_typed_gets_spoken(tmp_path):
     import time
 
     voice = FakeVoice()
-    cline_session(tmp_path, "s1", ["from an earlier turn"])
+    agent_session(tmp_path, "s1", ["from an earlier turn"])
     server = overhearing_server(tmp_path, voice)
 
     asyncio.run(server.call_tool("converse", LISTEN))  # a reply now falls due
     time.sleep(0.2)
     assert voice.said == [], "nothing from before the request"
 
-    cline_session(tmp_path, "s1", ["from an earlier turn", "Half past two, sir."])
+    agent_session(tmp_path, "s1", ["from an earlier turn", "Half past two, sir."])
     time.sleep(0.3)
     assert voice.said == ["Half past two, sir."]
 
@@ -866,11 +863,11 @@ def test_overheard_words_are_not_said_a_second_time(tmp_path):
 
     answer = "Spotify is open and playing, sir."
     voice = FakeVoice()
-    cline_session(tmp_path, "s1", [])
+    agent_session(tmp_path, "s1", [])
     server = overhearing_server(tmp_path, voice)
 
     asyncio.run(server.call_tool("converse", LISTEN))
-    cline_session(tmp_path, "s1", [answer])
+    agent_session(tmp_path, "s1", [answer])
     time.sleep(0.3)
     assert voice.said == [answer], "overheard and spoken once"
 
@@ -884,11 +881,11 @@ def test_a_different_reply_is_still_spoken(tmp_path):
     import time
 
     voice = FakeVoice()
-    cline_session(tmp_path, "s1", [])
+    agent_session(tmp_path, "s1", [])
     server = overhearing_server(tmp_path, voice)
 
     asyncio.run(server.call_tool("converse", LISTEN))
-    cline_session(tmp_path, "s1", ["Looking into it now, sir."])
+    agent_session(tmp_path, "s1", ["Looking into it now, sir."])
     time.sleep(0.3)
 
     voice.next_heard = []
@@ -902,19 +899,19 @@ def test_the_refusal_stops_once_jarvis_has_spoken_for_it(tmp_path):
     import time
 
     voice = FakeVoice()
-    cline_session(tmp_path, "s1", [])
+    agent_session(tmp_path, "s1", [])
     server = overhearing_server(tmp_path, voice)
 
     asyncio.run(server.call_tool("converse", LISTEN))
-    cline_session(tmp_path, "s1", ["All done, sir."])
+    agent_session(tmp_path, "s1", ["All done, sir."])
     time.sleep(0.3)
 
     assert "did not listen" not in text_of(asyncio.run(server.call_tool("converse", LISTEN)))
 
 
 def test_the_transcript_directory_comes_from_config(tmp_path):
-    """Cline only, but not hardcoded to one path - a portable install or a
+    """Pointed at a directory rather than guessing one: a portable install or a
     version that moves the directory still works."""
-    config = replace(Config(), service=replace(Config().service, cline_sessions=str(tmp_path)))
-    assert config.service.cline_sessions == str(tmp_path)
-    assert Config().service.cline_sessions == "", "empty means Cline's own location"
+    config = replace(Config(), service=replace(Config().service, agent_sessions=str(tmp_path)))
+    assert config.service.agent_sessions == str(tmp_path)
+    assert Config().service.agent_sessions == "", "empty switches overhearing off"

@@ -21,7 +21,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from .client import ServiceUnavailable, VoiceClient
 from .config import Config
 from .echo import sounds_like
-from .overhear import Overheard, default_sessions_dir
+from .overhear import Overheard
 from .screen import (
     Screen,
     ScreenUnavailable,
@@ -250,12 +250,8 @@ def build_server(
                 logger.exception("Overhearing failed; carrying on without it.")
 
     watcher = None
-    if config.service.overhear:
-        root = (
-            Path(config.service.cline_sessions)
-            if config.service.cline_sessions
-            else default_sessions_dir()
-        )
+    if config.service.agent_sessions:
+        root = Path(config.service.agent_sessions)
         watcher = Overheard(root, config.service.overhear_max_chars)
         threading.Thread(target=overhear_forever, daemon=True, name="jarvis-overhear").start()
         logger.info("Overhearing the agent's prose from %s", root)
@@ -1025,7 +1021,7 @@ def _initial_cursor(voice: VoiceClient) -> int:
 
 
 def main(config: Config | None = None) -> int:
-    """Run over stdio, which is how Cline and friends launch an MCP server."""
+    """Run over stdio, which is how a client launches an MCP server."""
     from .reap import exit_when_orphaned
 
     # Covers the client being killed rather than closing the pipe, where the

@@ -62,9 +62,11 @@ def test_unknown_option_is_rejected(tmp_path):
 
 
 def test_unknown_section_is_rejected(tmp_path):
+    """This used to say [brain], which 0.8.0 turned into a real section - so the
+    example is now a name nothing is ever going to claim."""
     path = tmp_path / "jarvis.toml"
-    path.write_text('[brain]\nmodel = "gone"\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="brain"):
+    path.write_text('[telepathy]\nrange = "3m"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="telepathy"):
         Config.load(path=path, environ={})
 
 

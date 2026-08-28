@@ -68,8 +68,8 @@ class FakeSpeech:
 def half_duplex(**overrides) -> tuple[VoiceService, FakeMicrophone, FakeSpeech]:
     """A service that mutes while speaking.
 
-    Full duplex is the default now, so anything testing the echo gate has to ask
-    for the mode it is testing rather than inheriting it.
+    Half duplex is the default, and this stays explicit anyway: anything testing
+    the echo gate should say which mode it means rather than inherit it.
     """
     audio = replace(Config().audio, listen_while_speaking=False, **overrides)
     return make_service(audio=audio)
@@ -341,7 +341,7 @@ def test_full_duplex_is_the_default_now():
     speakers the microphone hears its own voice and only echo.py stands between
     that and JARVIS answering itself."""
     service, microphone, speech = make_service()
-    assert service.config.audio.listen_while_speaking is True
+    assert service.config.audio.listen_while_speaking is False
     service.say("Talking over myself.")
     assert microphone.muted is False, "never muted"
     assert speech.said == ["Talking over myself."]

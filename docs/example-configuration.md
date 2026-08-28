@@ -1,8 +1,7 @@
 # Example configuration
 
-One real setup, in full. Nothing here is required - JARVIS has no model of its own and does
-not care which agent connects to it - but a working set of numbers is easier to adapt than a
-list of options.
+One real setup, in full. Nothing here is required, but a working set of numbers is easier
+to adapt than a list of options.
 
 ## Hardware
 
@@ -14,7 +13,9 @@ list of options.
 ## Software
 
 - **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 100k context, `--n-cpu-moe 22`
-- **Agent** - Cline CLI over MCP, `openai-compatible` provider at `127.0.0.1:8081`
+- **Brain** - JARVIS's own loop against the same server, `brain.url = "http://127.0.0.1:8081/v1"`
+- **Agent** - Cline CLI over MCP at the same endpoint, for when the microphone is handed over
+  instead
 - **STT** - `small.en` on CUDA, `int8_float16`
 - **TTS** - SAPI, Microsoft Hazel
 
@@ -71,6 +72,12 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
 :: Brief pause to let the server spin up its port
 timeout /t 2 /nobreak >nul
 ```
+
+The same server serves both paths, which is the point of one slot. With the brain on there
+is one context in flight instead of two, so the KV cache is not being evicted and refilled
+by an agent prompt and a JARVIS prompt taking turns - `--cache-reuse 256` then does what it
+is there for. Everything below about telling Cline when to compact only applies with
+`brain.enabled = false`.
 
 Context and `--n-cpu-moe` trade against each other: more context is more KV cache, and moving
 another MoE layer off the GPU is how you pay for it. 100k loads in about 35 seconds here.
@@ -144,7 +151,9 @@ vision, there being no `--mmproj` in the launcher above. Two notes on that now:
 
 - Nothing in the JARVIS loop wants pixels. Targets come back as ids and labels, so the
   text-only endpoint is missing nothing. `logs/marks.png` is written on request, for a
-  human to look at when a click goes somewhere unexpected, and `screen.send_image` is off.
+  human to look at when a click goes somewhere unexpected. `screen.send_image` is on by
+  default and is the first thing to turn off against an endpoint with no vision - it is a
+  megabyte of payload for something unreadable. The brain sends no images at all.
 - Vision is available if wanted: there is an `mmproj` beside each GGUF, and
   `--mmproj <file> --no-mmproj-offload` loads it without touching VRAM - the ~860 MB of
   projector weights stay in system RAM and encoding runs on the CPU. The cost is a CPU
