@@ -13,7 +13,7 @@ import io
 import pytest
 
 from jarvis.typed import CANCEL as CANCEL_KEY
-from jarvis.typed import ENTER, Typing
+from jarvis.typed import ENTER, PREFIXES, Typing
 from jarvis.ui import Ui
 
 
@@ -224,12 +224,33 @@ def test_stopping_something_asks_straight_away_what_they_meant_instead():
     assert said == ["open spotify"], "read without waiting to be woken again"
 
 
-def test_escape_with_nothing_to_stop_leaves_no_prompt_behind():
+def test_escape_with_nothing_to_stop_opens_no_prompt_at_all():
     written = io.StringIO()
     reader, said = typing(CANCEL_KEY, written=written, on_cancel=lambda: False)
     reader.run()
     assert said == []
-    assert written.getvalue().count("you > ") == 1, "the one they opened, and no more"
+    assert "you > " not in written.getvalue()
+
+
+def test_a_key_that_types_nothing_leaves_no_prompt_behind():
+    """Num lock pauses transcription and the console sees the press too, so an
+    empty `you >` was left sitting under the status line every time."""
+    # A function or arrow key is a prefix and then its code; a toggle is a
+    # control character the console has no letter for. None of them open a line.
+    presses = [prefix + "H" for prefix in PREFIXES] + [chr(14), chr(3)]
+    for press in presses:
+        written = io.StringIO()
+        reader, said = typing(press, written=written)
+        reader.run()
+        assert "you > " not in written.getvalue(), repr(press)
+        assert said == []
+
+
+def test_the_key_that_opened_the_line_is_the_first_character_on_it():
+    """Read before anything is drawn, so it has to be put back afterwards."""
+    reader, said = typing("open spotify" + ENTER[0])
+    reader.run()
+    assert said == ["open spotify"]
 
 
 # ------------------------------------------------------------------ the loop

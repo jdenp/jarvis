@@ -91,14 +91,32 @@ class Typing:
         self._stop.set()
 
     def run(self) -> None:
-        """Wait for somebody to start typing, read what they type, repeat."""
-        prompt_again = False
+        """Wait for somebody to start typing, read what they type, repeat.
+
+        Nothing appears until a key that would put a character on the line. Num
+        lock is why: it pauses transcription, the console sees the press as well
+        as the hotkey listener does, and an empty `you >` was left sitting under
+        the status line every time anybody used it.
+        """
+        reopen = False
         while not self._stop.is_set():
-            if not prompt_again and (self._stop.wait(POLL_SECONDS) or not self.keyboard.waiting()):
-                continue
-            prompt_again = False
+            first = ""
+            if not reopen:
+                if self._stop.wait(POLL_SECONDS) or not self.keyboard.waiting():
+                    continue
+                try:
+                    first = self._opening_key()
+                except Exception:
+                    logger.exception("Reading a keypress failed; carrying on without it.")
+                    continue
+                if first == CANCEL:
+                    reopen = self.on_cancel()
+                    continue
+                if not first:
+                    continue
+            reopen = False
             try:
-                line = self.read_line()
+                line = self.read_line(first)
             except Exception:
                 logger.exception("Reading a typed line failed; carrying on without it.")
                 self.ui.release()
@@ -107,14 +125,32 @@ class Typing:
                 # Straight back into a prompt, without waiting for a keypress
                 # this time. Stopping something is nearly always followed by
                 # saying what you wanted instead.
-                prompt_again = self.on_cancel()
+                reopen = self.on_cancel()
                 continue
             if line:
                 logger.info("Typed: %s", line)
                 self.on_line(line)
 
-    def read_line(self) -> str:
+    def _opening_key(self) -> str:
+        """The character a line starts with, escape, or "" for neither.
+
+        Read before anything is drawn, so a key that types nothing costs
+        nothing. Function and arrow keys arrive as a prefix and then a code,
+        and the toggles come through as something the console has no character
+        for - all of them go, silently, with no prompt opened for them.
+        """
+        key = self.keyboard.read()
+        if key in PREFIXES:
+            self.keyboard.read()
+            return ""
+        if key == CANCEL:
+            return CANCEL
+        return key if key >= " " else ""
+
+    def read_line(self, first: str = "") -> str:
         """One line, echoed as it is typed. Empty if it was abandoned.
+
+        `first` is the character that opened it, already read.
 
         Escape throws the line away, which is the way out for somebody who
         pressed a key by accident - and pressing a key by accident is the whole
@@ -124,15 +160,15 @@ class Typing:
         """
         self.ui.hold(self._repaint)
         self.cancelled = False
-        self._typed = []
+        self._typed = list(first)
         # Counted apart from what was typed, because escape empties the line
         # without unprinting it - and then the wipe below comes up short and
         # leaves half an abandoned sentence on screen.
-        self._shown = 0
+        self._shown = len(self._typed)
         try:
             # The same blue as every other `you >`, because it is the same
             # thing: a line from them, on its way in.
-            self.ui.raw(paint("user", self.prompt, self.ui.colour))
+            self.ui.raw(paint("user", self.prompt, self.ui.colour) + first)
             while not self._stop.is_set():
                 key = self.keyboard.read()
                 if key in PREFIXES:
