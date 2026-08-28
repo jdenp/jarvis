@@ -253,7 +253,8 @@ def test_jarvis_speaks_in_orange_and_they_speak_in_blue():
     body = written.getvalue()
     assert COLOUR["user"] + "you >" in body
     assert COLOUR["jarvis"] + "jarvis >" in body
-    assert "38;5;215" in COLOUR["jarvis"], "light orange, which the basic sixteen do not have"
+    assert COLOUR["jarvis"].endswith(COLOUR["art"][2:]), "the same orange as the name at startup"
+    assert "38;5;208" in COLOUR["art"], "which the basic sixteen do not have at all"
 
 
 def test_the_name_is_painted_before_anything_else_is_written():

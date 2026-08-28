@@ -111,13 +111,51 @@ def test_the_live_line_is_given_back():
     assert "thinking" in written.getvalue(), "and it draws again"
 
 
-def test_the_status_stays_out_of_the_way_while_typing():
-    """It and a half typed sentence want the same row."""
+def test_the_listening_line_stays_put_while_you_type():
+    """It takes the row beneath rather than the row itself. Erasing it meant
+    that the moment you started typing the terminal stopped saying whether
+    JARVIS was listening or thinking, and looked dead for as long as you took."""
+    from jarvis.ui import UP
+
+    written = io.StringIO()
+    reader, _ = typing("hello\r", written=written)
+    reader.ui.status("listening")
+    before = written.getvalue()
+    reader.read_line()
+
+    during = written.getvalue()[len(before) :]
+    assert during.startswith("\n"), "a new row, rather than wiping the old one"
+    assert UP in during, "and the row is given back afterwards"
+
+
+def test_nothing_is_pushed_when_there_is_nothing_to_keep():
+    """With no status drawn there is no reason to put a blank row in front of
+    whoever is typing."""
+    written = io.StringIO()
+    reader, _ = typing("hi\r", written=written)
+    reader.read_line()
+    assert not written.getvalue().startswith("\n")
+
+
+def test_the_status_does_not_draw_over_what_is_being_typed():
     written = io.StringIO()
     reader, _ = typing("hi", written=written)
     reader.ui.hold()
     reader.ui.status("thinking")
     assert "thinking" not in written.getvalue()
+
+
+def test_a_reply_arriving_mid_sentence_cancels_the_way_back():
+    """Something permanent moves every row down, so the way up is no longer
+    where it was. Forgetting costs the status a redraw; guessing costs a line
+    of whatever it lands on."""
+    written = io.StringIO()
+    reader, _ = typing("hi", written=written)
+    reader.ui.status("listening")
+    reader.ui.hold()
+    assert reader.ui._stepped is True
+    reader.ui.spoke("Half past two, sir.")
+    assert reader.ui._stepped is False
 
 
 # ------------------------------------------------------------------ the loop

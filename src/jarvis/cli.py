@@ -239,7 +239,7 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
 
         typing = Typing(screen, service.typed)
         typing.start()
-        screen.note("  Type a line and press enter to say it without speaking.")
+        screen.note("Type a line and press enter to say it without speaking.")
 
     if getattr(args, "no_http", False):
         logger.info("Listening. Transcript file only, no API. Ctrl+C to stop.")

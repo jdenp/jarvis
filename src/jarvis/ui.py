@@ -35,11 +35,15 @@ TICK_SECONDS = 0.12
 # there - yellow is as close as that palette gets, and it is not close. Every
 # terminal that takes escape codes at all takes these, and the palette entries
 # are the same shade on every machine.
+#
+# `jarvis` and `art` are deliberately the same 208: the name at startup and the
+# name in front of every reply are one thing, and two oranges a shade apart read
+# as a mistake rather than as a distinction.
 COLOUR = {
     "reset": "\033[0m",
     "dim": "\033[2m",
     "user": "\033[36m",
-    "jarvis": "\033[1;38;5;215m",
+    "jarvis": "\033[1;38;5;208m",
     "art": "\033[38;5;208m",
     "loud": "\033[1m",
     "warn": "\033[33m",
@@ -51,6 +55,10 @@ COLOUR = {
 # dark terminal, which is the whole reason this is here.
 RUNS = ">"
 GAVE = " "
+
+# Up one row, leaving the column alone. What gives the live line back its place
+# after somebody has typed on the row beneath it.
+UP = "\033[A"
 
 
 def tail(text: str, width: int) -> str:
@@ -140,6 +148,8 @@ class Ui:
         # still scrolls above; only the live line stands aside, because it and a
         # half typed sentence want the same row.
         self._held = False
+        # Whether hold() pushed a row, and so whether release() owes one back.
+        self._stepped = False
 
     def _frames(self) -> str:
         encoding = getattr(self.stream, "encoding", None) or "ascii"
@@ -154,6 +164,11 @@ class Ui:
     def line(self, text: str = "") -> None:
         """Write something that stays, above the live line."""
         with self._lock:
+            # Something permanent arriving mid-sentence moves every row down,
+            # so the way back up is no longer where it was. Forgetting the debt
+            # costs the status one redraw; paying it wrongly costs a line of
+            # whatever it lands on.
+            self._stepped = False
             self._erase()
             self.stream.write(text + "\n")
             self.stream.flush()
@@ -241,16 +256,29 @@ class Ui:
             self.stream.flush()
 
     def hold(self) -> None:
-        """Give the bottom line to whoever is typing on it."""
+        """Take the row beneath the live line, for somebody to type on.
+
+        Beneath rather than over: the first version erased the status, so the
+        moment you started typing the terminal stopped saying whether JARVIS was
+        listening or thinking, and looked dead for as long as you took. It stays
+        where it is and typing happens on a new row under it.
+        """
         with self._lock:
             self._held = True
-            self._erase()
-            self.stream.flush()
+            # Only if there is something to keep. With nothing drawn there is
+            # no reason to push a blank row in front of whoever is typing.
+            self._stepped = self.live and self._width > 0
+            if self._stepped:
+                self.stream.write("\n")
+                self.stream.flush()
 
     def release(self) -> None:
-        """Take it back, and carry on saying what is happening."""
+        """Give the row back and carry on saying what is happening."""
         with self._lock:
             self._held = False
+            if self._stepped:
+                self._stepped = False
+                self.stream.write(UP)
             self._draw()
 
     def raw(self, text: str) -> None:
