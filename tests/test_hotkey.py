@@ -1,9 +1,12 @@
-"""The global key that stops and starts listening.
+"""The key that stops and starts listening, from anywhere.
 
-The library accepts several spellings of a key name and delivers events under
-one of them, so the spelling in the config and the spelling on the event are not
-the same string. That mismatch registers a hotkey that never fires - no error,
-no log line, just a key that does nothing.
+Two mechanisms with one meaning. A lock key is watched - Windows keeps its lamp
+state and any thread can read it - because a low level hook is not delivered
+while an elevated window has the foreground, and one press swallowed by Task
+Manager inverted the key for the rest of the session. Everything else still
+hooks, where the trap is spelling: the library accepts several names for a key
+and delivers events under one of them, so comparing against the configured
+spelling registers a hotkey that never fires.
 """
 
 from __future__ import annotations
@@ -21,19 +24,30 @@ class Event:
 
 
 def listener(key: str) -> tuple[HotkeyListener, list[str]]:
+    """One with a stateful service behind it, because pause() returning False
+    when it was already paused is what makes the key a toggle."""
     calls: list[str] = []
-    return (
-        HotkeyListener(
-            on_pause=lambda: (calls.append("pause"), True)[1],
-            on_resume=lambda: calls.append("resume"),
-            key=key,
-        ),
-        calls,
-    )
+    paused = [False]
+
+    def pause() -> bool:
+        if paused[0]:
+            return False
+        paused[0] = True
+        calls.append("pause")
+        return True
+
+    def resume() -> None:
+        paused[0] = False
+        calls.append("resume")
+
+    return HotkeyListener(on_pause=pause, on_resume=resume, key=key), calls
 
 
-def handler_for(key: str):
-    """The hook callback, without registering anything with the real keyboard."""
+def handler_for(key: str = "f13"):
+    """The hook callback, without registering anything with the real keyboard.
+
+    A key with no lamp by default, since that is the only kind that hooks now.
+    """
     hotkey, calls = listener(key)
     captured = {}
 
@@ -53,33 +67,153 @@ def handler_for(key: str):
     return captured.get("handler"), calls
 
 
-@pytest.mark.parametrize("spelling", ["num lock", "numlock", "num_lock", "NUM LOCK"])
-def test_any_accepted_spelling_of_the_key_still_fires(spelling):
-    """hook_key takes all of these; the events it delivers are named "num lock".
-    Comparing against the configured spelling would register and never fire."""
-    handler, calls = handler_for(spelling)
+# ------------------------------------------------------------------ the lamp
+
+
+@pytest.mark.parametrize("spelling", ["num lock", "numlock", "num_lock", "NUM LOCK", " Num Lock "])
+def test_a_lock_key_is_watched_however_it_is_spelled(spelling, monkeypatch):
+    """Falling through to the hook here is the bug this replaced: it works until
+    somebody opens Task Manager, and then it silently does not."""
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: 0)
+    hotkey, _calls = listener(spelling)
+    hotkey.start()
+    try:
+        assert hotkey._watcher is not None, "watched, not hooked"
+        assert hotkey._unhook is None
+    finally:
+        hotkey.stop()
+
+
+def test_the_lamp_changing_is_a_press(monkeypatch):
+    lamp = [0]
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: lamp[0])
+    hotkey, calls = listener("num lock")
+    hotkey._lamp = 0
+
+    lamp[0] = 1
+    assert hotkey._look(0x90) is True
+    assert calls == ["pause"]
+
+    hotkey._last_fired = 0.0  # past the debounce
+    lamp[0] = 0
+    hotkey._look(0x90)
+    assert calls == ["pause", "resume"], "on and off again are two presses, not one"
+
+
+def test_the_lamp_holding_still_is_nothing(monkeypatch):
+    """Eight reads a second, and all but a couple of them see no change."""
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: 1)
+    hotkey, calls = listener("num lock")
+    hotkey._lamp = 1
+    for _ in range(10):
+        hotkey._look(0x90)
+    assert calls == []
+
+
+def test_a_press_missed_for_a_moment_is_still_seen(monkeypatch):
+    """The old hook dropped presses while an elevated window was in front and
+    never caught up, so the lamp and JARVIS disagreed from then on. A level read
+    cannot drift: whenever it next looks, the lamp is the truth."""
+    lamp = [0]
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: lamp[0])
+    hotkey, calls = listener("num lock")
+    hotkey._lamp = 0
+    lamp[0] = 1  # pressed while nothing was looking
+    hotkey._look(0x90)
+    assert calls == ["pause"]
+
+
+def test_two_presses_nobody_saw_are_rightly_nothing(monkeypatch):
+    """Pressed twice behind a locked screen is back where it started."""
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: 0)
+    hotkey, calls = listener("num lock")
+    hotkey._lamp = 0
+    hotkey._look(0x90)
+    assert calls == []
+
+
+def test_a_read_that_fails_stops_the_watch(monkeypatch):
+    def broken(code):
+        raise OSError("no user32")
+
+    monkeypatch.setattr("jarvis.hotkey._lock_state", broken)
+    hotkey, calls = listener("num lock")
+    assert hotkey._look(0x90) is False
+    assert calls == []
+
+
+def test_a_machine_that_cannot_read_the_lamp_falls_back_to_the_hook(monkeypatch):
+    def broken(code):
+        raise OSError("no user32")
+
+    monkeypatch.setattr("jarvis.hotkey._lock_state", broken)
+    hotkey, _calls = listener("num lock")
+    captured = {}
+
+    class FakeKeyboard:
+        def hook_key(self, _key, callback):
+            captured["handler"] = callback
+            return object()
+
+    import sys
+
+    sys.modules["keyboard"] = FakeKeyboard()  # type: ignore[assignment]
+    try:
+        hotkey.start()
+    finally:
+        del sys.modules["keyboard"]
+    assert captured.get("handler") is not None
+    assert hotkey._watcher is None
+
+
+def test_stopping_ends_the_watch(monkeypatch):
+    monkeypatch.setattr("jarvis.hotkey._lock_state", lambda code: 0)
+    hotkey, _calls = listener("num lock")
+    hotkey.start()
+    watcher = hotkey._watcher
+    assert watcher is not None and watcher.is_alive()
+    hotkey.stop()
+    assert not watcher.is_alive()
+
+
+def test_it_can_be_read_on_this_machine():
+    """Not a mock. The whole approach rests on a queue independent read working
+    off a thread with no message pump, so it is worth asking Windows."""
+    from jarvis.hotkey import LOCK_KEYS, _lock_state
+
+    assert _lock_state(LOCK_KEYS["num lock"]) in (0, 1)
+
+
+# ------------------------------------------------------------------- the hook
+
+
+def test_any_accepted_spelling_of_the_key_still_fires():
+    """hook_key takes several spellings; the events it delivers are named one
+    way. Comparing against the configured spelling would register and never
+    fire."""
+    handler, calls = handler_for("F13")
     assert handler is not None
-    handler(Event("num lock"))
+    handler(Event("f13"))
     assert calls == ["pause"]
 
 
 def test_a_different_key_is_ignored():
-    handler, calls = handler_for("num lock")
+    handler, calls = handler_for()
     handler(Event("end"))
     assert calls == []
 
 
 def test_key_up_is_ignored():
     """Otherwise one press pauses and immediately resumes."""
-    handler, calls = handler_for("num lock")
-    handler(Event("num lock", event_type="up"))
+    handler, calls = handler_for()
+    handler(Event("f13", event_type="up"))
     assert calls == []
 
 
 def test_auto_repeat_while_held_only_fires_once():
-    handler, calls = handler_for("num lock")
+    handler, calls = handler_for()
     for _ in range(5):
-        handler(Event("num lock"))
+        handler(Event("f13"))
     assert calls == ["pause"], "the debounce swallowed the repeats"
 
 

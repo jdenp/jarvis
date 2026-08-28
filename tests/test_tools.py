@@ -663,3 +663,36 @@ def test_with_images_off_neither_tool_is_there():
     config = replace(Config(), brain=replace(Config().brain, images=False))
     assert "screenshot" not in box(config).names
     assert "look_at_image" not in box(config).names
+
+
+# ------------------------------------------------------------------ elevation
+
+
+def test_a_window_with_nothing_in_it_is_told_to_wait():
+    """A window still drawing itself is the ordinary reason for this, and looking
+    again a moment later is the right answer to it."""
+    kit = box(screen=desk(button("", width=2, height=2)))
+    said = kit.run("look_at_screen", {})
+    assert "still building itself" in said
+
+
+def test_an_elevated_window_is_told_the_truth_instead(monkeypatch):
+    """Waiting is exactly wrong here. A live session waited, focused, scrolled,
+    screenshotted and alt+f4'd Task Manager over four minutes, wrote four
+    memories blaming its render time, and never once said the one true thing."""
+    monkeypatch.setattr("jarvis.tools.runs_as_admin", lambda hwnd: True)
+    kit = box(screen=desk(button("", width=2, height=2)))
+    said = kit.run("look_at_screen", {})
+
+    assert "runs as administrator" in said
+    assert "Waiting will not change that" in said
+    assert "taskkill" in said, "the one route that does work"
+    assert "still building itself" not in said
+
+
+def test_our_own_window_is_not_elevated():
+    """Not a mock - the check has to be right about this machine, and a False
+    that is really an error would put the message on every empty window."""
+    from jarvis.screen import runs_as_admin
+
+    assert runs_as_admin(0) is False, "no such window is not an elevated one"

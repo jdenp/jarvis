@@ -79,7 +79,19 @@ The prose around them is for whoever opens the file.
 - Some windows report a full tree of coordinates while minimised, left over from
   wherever they were last drawn. Focusing one is the only thing that fixes it.
 - A window that reports elements but no targets is still building itself. Wait
-  and look again rather than deciding it is empty.
+  and look again rather than deciding it is empty - unless it runs as
+  administrator, in which case waiting never helps and the scan says so.
+- Anything running as administrator is out of reach. Task Manager, an admin
+  terminal, regedit: Windows shows an unelevated process one element and no
+  targets, refuses its clicks and its keystrokes silently, and swallows the
+  hotkey while such a window has focus. Nothing about that changes with time,
+  and it is not the window still loading.
+- So say so. "That is a window I cannot touch" is the honest answer and it takes
+  one sentence. Four minutes of focusing, scrolling, screenshotting and alt+f4
+  is the wrong answer given at length.
+- If one has to be closed, taskkill /F /IM name.exe through run_command does it,
+  and they will get a prompt from Windows to approve. Worth mentioning before
+  running it, because somebody has to be at the desk to click it.
 - To close a program, name the window: press_keys(keys="alt+f4",
   window="Google Chrome"). Sent without a window it goes wherever the focus
   happens to be, and looking at a window does not focus it - that is how JARVIS

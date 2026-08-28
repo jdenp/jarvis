@@ -26,7 +26,13 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
-from .screen import Screen, ScreenUnavailable, means_the_same, offers_nothing_clickable
+from .screen import (
+    Screen,
+    ScreenUnavailable,
+    means_the_same,
+    offers_nothing_clickable,
+    runs_as_admin,
+)
 
 logger = logging.getLogger("jarvis.tools")
 
@@ -278,6 +284,15 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
                 "press_keys instead."
             )
         if not scan.targets and scan.considered:
+            if runs_as_admin(scan.hwnd):
+                return (
+                    f"{body}\n\n{scan.window!r} runs as administrator and you do not, "
+                    "so Windows will not show you what is in it or let you click or "
+                    "type into it. Waiting will not change that. If it has to be "
+                    "closed, run_command can - taskkill /F /IM name.exe - and they "
+                    "will be asked to approve it. Otherwise say plainly that this is "
+                    "a window you cannot touch."
+                )
             return (
                 f"{body}\n\nNothing can be acted on yet, which is what a window looks like "
                 "while it is still building itself. Wait a moment and look again."

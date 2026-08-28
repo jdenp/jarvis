@@ -633,6 +633,26 @@ means a model call between turns, at the moment somebody is waiting. A rolling s
 the summary is in every request forever, growing, and being rewritten by a model that will
 eventually rewrite it wrongly. It is in the README's "not done yet" rather than half built.
 
+**A lock key is watched, not hooked.** `keyboard`'s low level hook lives in this process, and
+Windows does not deliver input to an unelevated process while an elevated window has the
+foreground. Task Manager, an admin terminal, regedit: presses there were dropped silently, and
+because the old code counted presses rather than reading state, one dropped press inverted the
+key for the rest of the session - the lamp said one thing and JARVIS believed the other.
+
+Num Lock, Caps Lock and Scroll Lock each have a state Windows keeps for itself, and
+`GetKeyState` reads it from any thread with nothing to pump. So a press is a lamp that differs
+from the lamp before it, read eight times a second. It cannot be denied, it cannot drift, and
+it drops the `keyboard` dependency for the default configuration. Anything without a lamp still
+hooks, and that is the only thing the extra is for now.
+
+**The same elevation wall is why Task Manager cannot be clicked.** An unelevated process is
+shown one element and no targets, forever, and its clicks and keystrokes go nowhere with no
+error. A live session read that as a window still drawing itself and spent four minutes
+waiting, focusing, scrolling, screenshotting and pressing alt+f4, then wrote four memories
+blaming its render time. So the scan asks: `runs_as_admin` on a window offering nothing, and
+the answer says which of the two it is. Being refused the process handle counts as elevated,
+because that refusal is the same news.
+
 **Chat mode is a front end, not a second implementation.** `jarvis chat` is the same
 `Brain`, the same `Toolbox` and the same memories, with `ConsoleVoice` in place of
 `ServiceVoice` - two methods, `hear(timeout)` and `say(text)`, and `run_forever` cannot tell

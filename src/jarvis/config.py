@@ -152,10 +152,13 @@ class ServiceConfig:
     # headings - and reading it aloud is worse than saying nothing.
     overhear_max_chars: int = 400
     # Key that toggles transcription. Empty disables it. Avoid keys you type
-    # with - the hook is global and does not swallow the keypress, so whatever
-    # is chosen still does its normal job everywhere else. Num Lock earns it by
-    # being a key nothing else wants; the cost is that pausing also flips the
-    # numeric keypad, which is the same keypress doing both things.
+    # with - nothing is swallowed, so whatever is chosen still does its normal
+    # job everywhere else. Num Lock earns it by being a key nothing else wants;
+    # the cost is that pausing also flips the numeric keypad, which is the same
+    # keypress doing both things.
+    #
+    # The three lock keys are watched rather than hooked, which is why they work
+    # with an elevated window in front and anything else does not. See hotkey.py.
     hotkey: str = "num lock"
 
 

@@ -368,6 +368,61 @@ def confirms(target: Target, chain: Sequence[Element]) -> bool:
     return False
 
 
+def runs_as_admin(hwnd: int) -> bool:
+    """Whether that window belongs to a process above this one.
+
+    Windows will not let an unelevated process read an elevated window's
+    accessibility tree or send it input. The tree comes back with one element and
+    no targets - forever, not until it finishes loading - and clicks and
+    keystrokes go nowhere with no error at all. Task Manager is the everyday one;
+    an admin terminal and regedit are the same.
+
+    Being refused the handle is itself the answer, so a denial here reads as True
+    rather than as nothing.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    QUERY_LIMITED, TOKEN_QUERY, TOKEN_ELEVATION = 0x1000, 0x0008, 20
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        pid = wintypes.DWORD()
+        ctypes.WinDLL("user32").GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return False
+        process = kernel32.OpenProcess(QUERY_LIMITED, False, pid.value)
+        if not process:
+            return True
+        try:
+            token = wintypes.HANDLE()
+            if not advapi32.OpenProcessToken(process, TOKEN_QUERY, ctypes.byref(token)):
+                return True
+            try:
+                elevated, size = wintypes.DWORD(), wintypes.DWORD()
+                got = advapi32.GetTokenInformation(
+                    token, TOKEN_ELEVATION, ctypes.byref(elevated), 4, ctypes.byref(size)
+                )
+                return True if not got else bool(elevated.value) and not _we_are_admin()
+            finally:
+                kernel32.CloseHandle(token)
+        finally:
+            kernel32.CloseHandle(process)
+    except (OSError, AttributeError):
+        logger.debug("Could not tell whether window %s is elevated.", hwnd)
+        return False
+
+
+def _we_are_admin() -> bool:
+    """Elevated ourselves, in which case an elevated window is no obstacle."""
+    import ctypes
+
+    try:
+        return bool(ctypes.WinDLL("shell32").IsUserAnAdmin())
+    except (OSError, AttributeError):
+        return False
+
+
 def offers_nothing_clickable(targets, bounds: tuple[int, int, int, int]) -> bool:
     """Whether a scan found a window that exposes no real controls.
 

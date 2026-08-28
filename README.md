@@ -101,9 +101,12 @@ it was saying is cut off, the turn is dropped out of the conversation entirely, 
 comes straight back for what you meant instead - there is no sense making you press a key
 twice to say the thing that made you interrupt.
 
-Press Num Lock to stop listening from anywhere. The microphone stops being read, so nothing
-is transcribed, logged or written to `heard.jsonl` until you press it again - not merely
-withheld. Needs `uv sync --extra hotkey`; `service.hotkey = ""` disables it.
+Press Num Lock to stop listening from anywhere, and anywhere means anywhere - the key's own
+lamp is watched rather than the keyboard hooked, so it works with Task Manager or an admin
+terminal in front, which a hook does not. The microphone stops being read, so nothing is
+transcribed, logged or written to `heard.jsonl` until you press it again - not merely withheld.
+Caps Lock and Scroll Lock work the same way; any other key falls back to a hook and needs
+`uv sync --extra hotkey`. `service.hotkey = ""` disables it.
 
 Asking works too. "Stop listening, I'm on a call" is a tool it has, and it tells you which
 key brings it back, because from then on it cannot hear you ask. Either way the live line
@@ -450,7 +453,7 @@ setting is what it is. Copy only the bits you want; anything absent keeps its de
 | `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
-| `hotkey.py` | The global key that stops and starts listening |
+| `hotkey.py` | The key that stops and starts listening, from anywhere |
 | `overhear.py` | Reading a coding agent's prose off disk and speaking what it never said |
 | `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
 | `uia.py` | UI Automation through comtypes: the only Windows-specific module |
@@ -490,7 +493,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 673 tests, no hardware, model or network needed
+uv run pytest        # 686 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```
