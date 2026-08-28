@@ -65,7 +65,10 @@ Press a combination like ctrl+s, alt+f4, escape or f5, at whatever holds the key
 
 Two sets are worth reaching for before anything else, because neither needs a window, a scan or a target. The media keys - playpause, nexttrack, prevtrack, stop, volumeup, volumedown, mute - which Windows routes to whatever is playing. And the window keys: win+up maximises whatever is in front, win+down restores or minimises it, win+left and win+right put it against one side. That is how a window gets moved around; hunting for a title bar button is not.
 
+Pass `window` and it is focused first and checked before anything is pressed, which is the only safe way to send a combination to a particular window. Anything that closes one - alt+f4, ctrl+w - is refused without it.
+
 - `keys` (string, required) - e.g. ctrl+s, playpause
+- `window` (string) - part of the title of the window to send it to, focused first
 
 ## pause_transcription
 

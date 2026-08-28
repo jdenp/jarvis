@@ -490,3 +490,75 @@ def test_it_only_looks_back_so_far():
         box.run("look_at_screen", {})
     box.run("click", {"target": 1})
     assert "third time" not in box.run("click", {"target": 1})
+
+
+# ------------------------------------------------------------- closing a window
+
+
+def pressing(front_stays=False):
+    """A toolbox and the list of what actually reached the keyboard."""
+    import jarvis.hands
+
+    pressed: list[str] = []
+    original = jarvis.hands.press
+    jarvis.hands.press = pressed.append
+
+    class Stuck(FakeDesktop):
+        def activate(self, hwnd):
+            self.activations.append(hwnd)
+            return False
+
+    backend = (Stuck if front_stays else FakeDesktop)([button("Reply")], front=9)
+    toolbox = build_toolbox(Config(), Screen(Config().screen, backend=backend))
+    toolbox._restore = original  # type: ignore[attr-defined]
+    return toolbox, pressed
+
+
+@pytest.fixture(autouse=True)
+def _put_the_keyboard_back():
+    import jarvis.hands
+
+    original = jarvis.hands.press
+    yield
+    jarvis.hands.press = original
+
+
+def test_a_closing_combination_sent_blind_is_refused():
+    """The one that actually happened: it scanned Chrome, which focuses nothing,
+    then pressed alt+f4 at whatever was in front - its own console. The log ends
+    mid line."""
+    box, _ = pressing()
+    result = box.run("press_keys", {"keys": "alt+f4"})
+    assert result.startswith("Refused")
+    assert "Name the window" in result
+    assert "window=" in result
+
+
+def test_every_spelling_of_it_is_refused():
+    box, _ = pressing()
+    for keys in ("alt+f4", "ALT+F4", "alt-f4", "ctrl+w", "ctrl+shift+w", "ctrl+q"):
+        assert box.run("press_keys", {"keys": keys}).startswith("Refused"), keys
+
+
+def test_anything_that_does_not_close_a_window_still_goes_straight_through():
+    box, pressed = pressing()
+    for keys in ("ctrl+s", "escape", "playpause", "win+up", "f4"):
+        assert not box.run("press_keys", {"keys": keys}).startswith("Refused"), keys
+    assert pressed == ["ctrl+s", "escape", "playpause", "win+up", "f4"]
+
+
+def test_naming_the_window_focuses_it_first():
+    box, pressed = pressing()
+    result = box.run("press_keys", {"keys": "alt+f4", "window": "Notepad"})
+    assert pressed == ["alt+f4"]
+    assert "Notepad" in result
+
+
+def test_a_window_that_will_not_come_forward_presses_nothing():
+    """Focusing fails often enough to matter - the foreground lock refuses it -
+    and pressing anyway sends a close to whatever is there instead."""
+    box, pressed = pressing(front_stays=True)
+    result = box.run("press_keys", {"keys": "alt+f4", "window": "Notepad"})
+    assert result.startswith("Refused")
+    assert "would not come to the front" in result
+    assert pressed == []

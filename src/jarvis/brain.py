@@ -98,18 +98,21 @@ LOOK_BACK_TOKENS = 200
 LOOK_BACK = """That turn is over and they are hearing the answer now. Nobody is
 waiting on this.
 
-Look back at what you just did. Was there anything about how this DESKTOP
-behaves that would have saved you a step, and that is not already written down
-below? A window that behaves oddly, a route that works, one that never does, the
-name a program is really installed under.
+Something in it did not work first time - a refusal, a failure, or the same
+call coming round again. Look back at what happened. Is there anything about how
+this DESKTOP behaves that would have saved you that step, and that is not
+already written down below? A window that behaves oddly, a route that works, one
+that never does, the name a program is really installed under.
 
 Reply with nothing at all if there is nothing worth keeping, which is most
 turns. Otherwise reply with at most two lines, each beginning with "- " and each
 a single sentence somebody could act on months from now.
 
-Only what you actually saw happen, never why you think it happened. A turn that
-went badly usually teaches nothing except that it went badly, and a guess at the
-cause written down as fact is worse than an empty file.
+Only what you actually saw happen, never why you think it happened. A guess at
+the cause written down as fact is worse than an empty file.
+
+Nothing that was merely true at the time. What was open, what was running, what
+was on the taskbar and what the clock said are all gone by tomorrow.
 
 Never a target number: every scan numbers what it finds again from scratch, so a
 number written down here points at something else tomorrow. Never anything that
@@ -541,6 +544,7 @@ class Brain:
         so a model call made now costs nobody anything.
         """
         before = len(self.messages)
+        stumbles = self.toolbox.stumbles
         self.stopped.clear()
         self._working.set()
         try:
@@ -556,7 +560,11 @@ class Brain:
                 self.ui.note("Cancelled.")
                 return ""
             used_hands = any(message.get("role") == "tool" for message in self.messages[before:])
-            if self.settings.consolidate and self.settings.memories and used_hands:
+            # Only after a turn that hit something. Asked after every turn that
+            # touched a tool, it felt obliged to produce a lesson from a turn
+            # that went perfectly, and wrote down what was on the taskbar.
+            stumbled = self.toolbox.stumbles > stumbles
+            if self.settings.consolidate and self.settings.memories and used_hands and stumbled:
                 self._look_back()
             return spoken
         finally:

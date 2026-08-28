@@ -54,5 +54,10 @@ The prose around them is for whoever opens the file.
   wherever they were last drawn. Focusing one is the only thing that fixes it.
 - A window that reports elements but no targets is still building itself. Wait
   and look again rather than deciding it is empty.
+- To close a program, name the window: press_keys(keys="alt+f4",
+  window="Google Chrome"). Sent without a window it goes wherever the focus
+  happens to be, and looking at a window does not focus it - that is how JARVIS
+  once closed its own console instead of the browser. Stop-Process -Name chrome
+  through run_command needs no focus at all and is surer.
 - Close what you opened. A menu left up is a job half finished, and escape
   closes most of them.

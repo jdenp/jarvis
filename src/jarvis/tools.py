@@ -30,6 +30,18 @@ from .screen import Screen, ScreenUnavailable, means_the_same, offers_nothing_cl
 
 logger = logging.getLogger("jarvis.tools")
 
+# Combinations that shut something. Sent blind they go wherever the focus
+# happens to be, and a live session pressed alt+f4 straight after scanning
+# Chrome - which does not focus anything - and closed JARVIS's own console
+# instead. The log ends mid line. These have to name the window they mean.
+CLOSING = (
+    frozenset({"alt", "f4"}),
+    frozenset({"ctrl", "w"}),
+    frozenset({"ctrl", "f4"}),
+    frozenset({"ctrl", "shift", "w"}),
+    frozenset({"ctrl", "q"}),
+)
+
 # How far back a repeat still counts. Long enough to see through the look that
 # sits between two clicks, short enough that a button pressed once a minute for
 # a good reason is not nagged about.
@@ -78,6 +90,9 @@ class Toolbox:
         # nothing, which is what happens when the only target offered is not
         # the thing anybody wants pressed.
         self._recent: deque[str] = deque(maxlen=RECENT_CALLS)
+        # Refusals, failures and loops, counted. What decides whether a turn had
+        # anything to learn from: one that worked first time did not.
+        self.stumbles = 0
 
     def specs(self) -> list[dict]:
         return [tool.spec() for tool in self.tools.values()]
@@ -100,14 +115,17 @@ class Toolbox:
             result = tool.run(**arguments)
         except TypeError as exc:
             logger.warning("Bad arguments for %s(%r) - %s", name, arguments, exc)
+            self.stumbles += 1
             return f"{name} was called wrongly - {exc}. Check the arguments and try again."
         except (ScreenUnavailable, ValueError) as exc:
             # A refusal is the normal answer to a stale number or an unknown key
             # name, so it reads as one rather than as a stack trace.
             logger.info("%s refused - %s", name, exc)
+            self.stumbles += 1
             return self._refusal(f"Refused: {exc}")
         except Exception as exc:  # a tool failing must not end the conversation
             logger.exception("%s failed", name)
+            self.stumbles += 1
             return f"{name} failed - {type(exc).__name__}: {exc}"
         self._refused = ""
         return self._going_round(f"{name}({arguments!r})", result)
@@ -125,6 +143,7 @@ class Toolbox:
         self._recent.append(signature)
         if seen < 2:
             return result
+        self.stumbles += 1
         return (
             f"{result}\n\nThat is the third time you have run this exact call. It works "
             "and it is not getting you anywhere, so what you want is not here - very "
@@ -441,9 +460,26 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
         )
     )
 
-    def press_keys(keys: str) -> str:
+    def press_keys(keys: str, window: str = "") -> str:
+        if window:
+            desktop.focus(window)
+            front, title = desktop.backend.foreground()
+            wanted, _ = desktop.find_window(window)
+            if front != wanted:
+                return (
+                    f"Refused: {window!r} would not come to the front - {title!r} is there "
+                    f"instead, and {keys} would have gone to that. Nothing was pressed."
+                )
+        elif closes_something(keys):
+            return (
+                f"Refused: {keys} shuts whatever is in front, and nothing here knows what "
+                "that is - looking at a window does not focus it. Name the window: "
+                f"press_keys(keys={keys!r}, window='part of its title'). Nothing was pressed."
+            )
         hands.press(keys)
-        logger.info("Pressed %s", keys)
+        logger.info("Pressed %s%s", keys, f" at {window!r}" if window else "")
+        if window:
+            return f"Pressed {keys} at {window!r}. Look at the screen to see what it did."
         return (
             f"Pressed {keys}, at whatever had focus. Look at the screen to see what it did. "
             'If it opened something it is still open - press_keys("escape") closes it.'
@@ -462,10 +498,20 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
                 "routes to whatever is playing. And the window keys: win+up maximises "
                 "whatever is in front, win+down restores or minimises it, win+left and "
                 "win+right put it against one side. That is how a window gets moved "
-                "around; hunting for a title bar button is not."
+                "around; hunting for a title bar button is not.\n\n"
+                "Pass `window` and it is focused first and checked before anything is "
+                "pressed, which is the only safe way to send a combination to a "
+                "particular window. Anything that closes one - alt+f4, ctrl+w - is "
+                "refused without it."
             ),
             run=press_keys,
-            properties={"keys": {"type": "string", "description": "e.g. ctrl+s, playpause"}},
+            properties={
+                "keys": {"type": "string", "description": "e.g. ctrl+s, playpause"},
+                "window": {
+                    "type": "string",
+                    "description": "part of the title of the window to send it to, focused first",
+                },
+            },
             required=("keys",),
         )
     )
@@ -709,6 +755,12 @@ def shell(command: str, timeout: float = 60.0, limit: int = 2000) -> str:
     if done.returncode:
         return f"Exit code {done.returncode}.\n{body}"
     return body
+
+
+def closes_something(keys: str) -> bool:
+    """Whether this combination shuts a window, however it was spelled."""
+    pressed = frozenset(part.strip().lower() for part in keys.replace("-", "+").split("+"))
+    return any(combination == pressed for combination in CLOSING)
 
 
 def clip(text: str, limit: int) -> str:

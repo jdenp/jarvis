@@ -141,7 +141,11 @@ def brain(*replies, voice=None, config=None, box=None) -> Brain:
 
 
 def looking_back(tmp_path, *replies, box=None) -> Brain:
-    """One that does look back, writing somewhere harmless."""
+    """One that does look back, writing somewhere harmless.
+
+    Its tool refuses, because a turn that went perfectly is no longer looked
+    back at - there is nothing to learn from a route that worked first time.
+    """
     config = replace(
         Config(),
         brain=replace(
@@ -154,8 +158,17 @@ def looking_back(tmp_path, *replies, box=None) -> Brain:
         config,
         FakeVoice(),
         model=FakeModel(*replies),
-        toolbox=box or toolbox(look_at_screen="Taskbar - 25 targets"),
+        toolbox=box or refusing(),
     )
+
+
+def refusing() -> Toolbox:
+    """A toolbox whose one tool refuses, the way a stale target number does."""
+
+    def refuse(**arguments):
+        raise ValueError("Target 3 was 'Close', but something else is there now")
+
+    return Toolbox([Tool(name="look_at_screen", description="look", run=refuse)])
 
 
 # ------------------------------------------------------------------ escape
@@ -1154,6 +1167,37 @@ def test_a_lesson_about_a_target_number_is_thrown_away(tmp_path):
 
     kept = bullets(tmp_path / "navigation" / "user-navigation.md")
     assert kept == ["Explorer opens straight from run_command with no path."]
+
+
+def test_a_turn_that_went_perfectly_is_not_looked_back_at(tmp_path):
+    """Asked after every turn that touched a tool, it felt obliged to produce
+    something and wrote down what was on the taskbar and that Task Manager was
+    open. A route that worked first time has nothing to teach."""
+    it = looking_back(
+        tmp_path,
+        calling("look_at_screen"),
+        said("Teams is open, sir."),
+        said("- Something it would have learned."),
+        box=toolbox(look_at_screen="Taskbar - 25 targets"),
+    )
+    it.turn(["open teams"])
+    assert len(it.model.asked) == 2, "answered, and no third call to look back with"
+    assert not (tmp_path / "navigation" / "user-navigation.md").exists()
+
+
+def test_a_turn_that_hit_something_is(tmp_path):
+    from jarvis.memories import bullets
+
+    it = looking_back(
+        tmp_path,
+        calling("look_at_screen"),
+        said("I could not, sir."),
+        said("- The taskbar refuses a click while it is redrawing."),
+    )
+    it.turn(["open teams"])
+    assert bullets(tmp_path / "navigation" / "user-navigation.md") == [
+        "The taskbar refuses a click while it is redrawing."
+    ]
 
 
 def test_a_turn_that_used_no_tools_is_not_worth_looking_back_at(tmp_path):
