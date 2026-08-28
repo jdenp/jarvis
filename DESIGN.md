@@ -495,6 +495,20 @@ the same nothing.
 A reply cut off after a complete sentence is still that sentence. Truncation only matters when
 it left nothing to say.
 
+**Anything with a text answer is a shell question.** Asked to find a file on the desktop, it
+opened File Explorer and clicked: Downloads, scroll, a refusal, This PC, a COM error, several
+minutes. `Get-ChildItem` answers it in one call, on folders nobody has open, with exact names
+and nothing redrawing underneath. The pointer is for applications that only exist as a window,
+and that distinction now lives in both places it can be read - `os-navigation.md` and
+`run_command`'s own description. Tried afterwards, the same request became two commands and an
+answer.
+
+The same transcript threw a `COMError` out of `FindAllBuildCache`: "an event was unable to
+invoke any of the subscribers", which is what a window redrawing mid enumeration looks like.
+It succeeded immediately on the retry the model made itself. It is retried once inside
+`uia.elements` now, because spending a step and showing a model a stack trace is a lot to pay
+for a moment of bad timing.
+
 **The second identical refusal has to say something else.** "Look again and use the new
 numbers" is right the first time and useless the second, because looking again gives back the
 same numbers: a session clicked `System` in a terminal, looked again, clicked `System` again,

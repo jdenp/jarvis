@@ -9,6 +9,16 @@ between the two files.
 Every line is a bullet, because the bullets are what get read into the prompt.
 The prose around them is for whoever opens the file.
 
+- Files are a shell question, not a pointer question. Finding, listing,
+  reading, copying, renaming and deleting are all one run_command:
+  Get-ChildItem, Test-Path, Get-Content, Move-Item. Exact names, no scrolling,
+  no window that redraws under you, and it works on folders nobody has open.
+- File Explorer is for showing somebody a file, not for finding one. Clicking
+  through Quick Access to a Desktop folder is several minutes and a dozen
+  refusals for something Get-ChildItem answers in one call.
+- The same goes for anything else with a text answer: what is installed, what is
+  running, how much disk is left, when something was last changed. The pointer
+  is for applications that only exist as a window.
 - To open an application, press the Windows key, type its name and press enter.
   It needs no scan, it finds anything installed rather than only what is pinned,
   and it works for things with no name on the command line.

@@ -15,6 +15,8 @@ import contextlib
 import ctypes
 import logging
 import threading
+import time
+from _ctypes import COMError
 from ctypes import wintypes
 
 from .screen import Element
@@ -28,6 +30,10 @@ DWMWA_CLOAKED = 14
 # Ancestors walked up from whatever is under a point before giving up looking
 # for the element that was aimed at.
 CHAIN_DEPTH = 6
+
+# How long to wait before reading a tree again after it moved underneath us.
+# Long enough for a folder change to settle, short enough to be unnoticeable.
+REDRAW_SECONDS = 0.15
 
 # The shell's own windows carry no title at all, so the usual "visible and
 # titled" filter drops them - and the taskbar is where half of what anyone would
@@ -85,12 +91,28 @@ class UiaBackend:
         return rect.left, rect.top, rect.right, rect.bottom
 
     def elements(self, hwnd: int) -> list[Element]:
-        """Every descendant of a window, flattened."""
+        """Every descendant of a window, flattened.
+
+        Retried once, because a window that redraws mid enumeration fails the
+        whole call with "an event was unable to invoke any of the subscribers"
+        and succeeds immediately afterwards. Seen while File Explorer changed
+        folder. Left to the model it costs a step and a look at a stack trace,
+        for something that is only ever a moment of bad timing.
+        """
         uia, automation, cache = _automation()
-        root = automation.ElementFromHandle(wintypes.HWND(hwnd))
         every = automation.CreateTrueCondition()
-        found = root.FindAllBuildCache(uia.TreeScope_Descendants, every, cache)
-        return [_flatten(found.GetElement(index)) for index in range(found.Length)]
+        for attempt in range(2):
+            try:
+                root = automation.ElementFromHandle(wintypes.HWND(hwnd))
+                found = root.FindAllBuildCache(uia.TreeScope_Descendants, every, cache)
+            except COMError:
+                if attempt:
+                    raise
+                logger.debug("The tree moved while it was being read; looking again.")
+                time.sleep(REDRAW_SECONDS)
+                continue
+            return [_flatten(found.GetElement(index)) for index in range(found.Length)]
+        return []
 
     def chain_at(self, x: int, y: int) -> list[Element]:
         """What is under a point, then its ancestors, outermost last."""
