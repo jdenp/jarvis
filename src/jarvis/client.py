@@ -1,6 +1,6 @@
 """Client for a running voice service.
 
-Used by both the CLI and the MCP server, so the two cannot drift apart.
+Used by the CLI.
 """
 
 from __future__ import annotations

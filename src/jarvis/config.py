@@ -69,7 +69,8 @@ class AudioConfig:
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
     # Full duplex: the microphone stays open while JARVIS talks, so a reply can
-    # be cut off mid sentence. OFF, because on speakers it transcribes itself -
+    # be cut off mid sentence - late, once the phrase has ended, rather than on
+    # the first syllable. OFF, because on speakers it transcribes itself -
     # there is no acoustic echo cancellation here, and the only thing between
     # that and JARVIS answering its own voice is the text comparison in echo.py,
     # which has already been beaten once by a long reply. On headphones there is
@@ -125,32 +126,11 @@ class ServiceConfig:
 
     host: str = "127.0.0.1"
     port: int = 8770
-    # Longest a single converse() call may block. Keep it under the agent's own
-    # tool timeout so the agent re-calls rather than erroring.
+    # Longest a single /heard may block before it returns empty. Caps the wait a
+    # caller asks for, so a client with its own timeout asks again rather than
+    # erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
-    # Past this, an utterance is flagged as backlog rather than a live
-    # request. 0 disables the flag.
-    stale_after_seconds: float = 120.0
-    # Where a connected agent writes its conversation, one directory per session
-    # holding a JSON file of messages. Set it and JARVIS reads that file and
-    # speaks any answer the agent typed instead of saying - which is the only
-    # thing that ever worked, since the schema shapes a call that happens and
-    # cannot cause one, and four attempts to make an agent remember were built
-    # and removed. Empty switches it off, which is right when the brain is
-    # answering: it exists for the MCP path. See DESIGN.md and overhear.py.
-    agent_sessions: str = ""
-    # Where that agent reads its rules from, for `jarvis rules` to keep the copy
-    # of context/soul/jarvis.md there in step with this repository. Empty means
-    # pass --path instead.
-    agent_rules: str = ""
-    # How often that transcript is checked, and only while a reply is owed - so
-    # one stat() a second while somebody is actually waiting, and none otherwise.
-    overhear_poll_seconds: float = 1.0
-    # Longest overheard line that gets read out. Past this the agent was writing
-    # for a reader rather than a listener - a table, a diff, a summary with
-    # headings - and reading it aloud is worse than saying nothing.
-    overhear_max_chars: int = 400
     # Key that toggles transcription. Empty disables it. Avoid keys you type
     # with - nothing is swallowed, so whatever is chosen still does its normal
     # job everywhere else. Num Lock earns it by being a key nothing else wants;
@@ -203,7 +183,6 @@ class ScreenConfig:
     # screenshot_max_width first. It costs whatever the image costs on a model
     # that cannot see it - without --mmproj or its equivalent loaded, that is
     # payload for nothing, and this is the setting to turn off.
-    send_image: bool = True
     # Where `screenshot` writes, under logs/. Overwritten each time - it is the
     # latest picture, not an album.
     screenshot_file: str = "screen.png"
@@ -211,13 +190,10 @@ class ScreenConfig:
     # whole desk across two monitors is 4880px and 665KB, which is worth
     # narrowing before it goes anywhere.
     screenshot_max_width: int = 1600
-    # Where the marked screenshot goes, under logs/, overwritten each scan. It is
-    # what send_image transmits and what to look at when a click goes somewhere
-    # unexpected. Costs a full screen grab, about half a second, on every scan -
-    # set it to "" for the text-only path and the latency back. Only the MCP path
-    # draws one: the brain never sends an image, so it would be paying half a
-    # second a look for a file nothing reads. `jarvis look --marks` writes one
-    # regardless.
+    # Where `jarvis look --marks` writes the marked screenshot, under logs/. What
+    # to look at when a click lands somewhere unexpected. Nothing draws one
+    # automatically - a scan costs a full screen grab, about half a second, and
+    # the numbered list is what the model reads.
     marks_file: str = "marks.png"
 
 
@@ -235,10 +211,10 @@ class BrainConfig:
     # this was built against; --jinja is the part that parses tool calls.
     #
     # Required. JARVIS does not start without one, and there is no switch to
-    # turn the brain off. It used to carry on as ears and hands for an agent
-    # over MCP, which meant an unreachable model looked exactly like a working
-    # assistant that ignored everything said to it - a worse outcome than a
-    # process that refuses to start and says why.
+    # turn the brain off. It used to carry on as ears and hands, which meant an
+    # unreachable model looked exactly like a working assistant that ignored
+    # everything said to it - a worse outcome than a process that refuses to
+    # start and says why.
     url: str = "http://127.0.0.1:8081/v1"
     # Sent as `model`, and llama-server ignores it - it serves whatever was
     # loaded. Only matters for an endpoint that hosts more than one.

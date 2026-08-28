@@ -153,8 +153,7 @@ def test_no_config_file_means_everything_is_active():
     set. Nothing worth having should need a file to be created first."""
     config = Config.load(path=None, environ={})
     assert config.screen.control is True, "clicking and typing, not only looking"
-    assert config.screen.send_image is True
-    assert config.screen.marks_file, "the marked screenshot is drawn"
+    assert config.screen.marks_file, "the marked screenshot has somewhere to go"
     assert config.audio.listen_while_speaking is False, "half duplex, so it cannot hear itself"
     assert config.service.hotkey, "the toggle key is bound"
 

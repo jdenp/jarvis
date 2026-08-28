@@ -107,7 +107,8 @@ class Silent:
     """A terminal that says nothing.
 
     The default everywhere, so nothing has to check whether it has a screen -
-    the MCP server has stdout reserved for JSON-RPC and the tests have no
+    a command whose output is read by something else needs stdout to itself,
+    and the tests have no
     terminal at all.
     """
 

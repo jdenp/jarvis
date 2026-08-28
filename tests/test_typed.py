@@ -296,8 +296,8 @@ def test_a_broken_keyboard_does_not_take_the_session_down():
 
 
 def test_a_typed_line_is_recorded_as_though_it_were_heard():
-    """Same transcript, same line on screen. The brain and any connected agent
-    cannot tell the difference, and should not."""
+    """Same transcript, same line on screen. The brain cannot tell the
+    difference, and should not."""
     from jarvis.service import VoiceService
 
     written = io.StringIO()

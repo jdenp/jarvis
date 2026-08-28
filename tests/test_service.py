@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import replace
 
 import pytest
@@ -52,20 +54,97 @@ class FakeSpeech:
         self.muted_while_speaking: list[bool] = []
         self._microphone = microphone
         self.is_local = True
+        # Stays true until something interrupts it, which is the state anything
+        # about being talked over needs to be in.
+        self.speaking = False
+        self.interrupts = 0
 
     def say(self, text: str) -> None:
         # Record whether the mic was muted at the moment we spoke.
         self.muted_while_speaking.append(bool(self._microphone and self._microphone.muted))
         self.said.append(text)
+        self.speaking = True
 
     def wait(self, timeout=None) -> bool:
         return True
 
     def interrupt(self) -> None:
         self.said.clear()
+        self.speaking = False
+        self.interrupts += 1
 
     def close(self) -> None:
         pass
+
+
+class Phrases:
+    """A microphone and a transcriber in one, handing over canned phrases.
+
+    The audio it hands over is the text, which saves a second fake whose only
+    job would be turning one into the other. Muting does not stop it: a phrase
+    already captured is exactly the case worth testing.
+    """
+
+    def __init__(self, *said: str) -> None:
+        self.queued: queue.Queue[str] = queue.Queue()
+        for phrase in said:
+            self.queued.put(phrase)
+
+    def listen(self, timeout=None):
+        try:
+            return self.queued.get(timeout=timeout or 0.05)
+        except queue.Empty:
+            return None
+
+    def transcribe(self, audio):
+        return audio
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def mute(self) -> None:
+        pass
+
+    def unmute(self) -> None:
+        pass
+
+    def pause(self) -> None:
+        pass
+
+    def resume(self) -> None:
+        pass
+
+
+@contextmanager
+def listening(**audio_overrides):
+    """A service with its listen loop actually running on canned phrases."""
+    config = replace(Config(), audio=replace(Config().audio, **audio_overrides))
+    ears = Phrases()
+    speech = FakeSpeech()
+    service = VoiceService(
+        config, microphone=ears, transcriber=ears, speech=speech, transcript=Transcript()
+    )
+    service._running.set()
+    thread = threading.Thread(target=service._listen, name="test-listen", daemon=True)
+    thread.start()
+    try:
+        yield service, ears, speech
+    finally:
+        service._running.clear()
+        thread.join(timeout=2)
+
+
+def waited(until, seconds: float = 2.0) -> bool:
+    """Poll for something a background thread does. False if it never did."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if until():
+            return True
+        time.sleep(0.01)
+    return False
 
 
 def half_duplex(**overrides) -> tuple[VoiceService, FakeMicrophone, FakeSpeech]:
@@ -354,6 +433,47 @@ def test_half_duplex_is_still_available_on_request():
     service, _microphone, speech = half_duplex()
     service.say("Opening it now.")
     assert speech.muted_while_speaking == [True]
+
+
+def test_talking_over_a_reply_cuts_it_off():
+    """Late by the length of the pause that ended the phrase, because nothing
+    is heard until it has been said. It saves the rest of a wrong answer, which
+    is the point, not the first syllable."""
+    with listening(listen_while_speaking=True) as (service, ears, speech):
+        service.say("A long answer to a question nobody asked.")
+        ears.queued.put("no, stop, do the other one")
+
+        assert waited(lambda: speech.interrupts == 1), "the reply was not cut off"
+        assert waited(lambda: bool(service.transcript.since(0)))
+        assert [item.text for item in service.transcript.since(0)] == ["no, stop, do the other one"]
+
+
+def test_a_phrase_from_before_the_reply_does_not_cut_it_off():
+    """Half duplex shuts the microphone while it talks, so a phrase landing now
+    was recorded before the reply started. Nobody talked over anything."""
+    with listening(listen_while_speaking=False) as (service, _ears, speech):
+        service.say("Opening it now.")
+        service.microphone.queued.put("open spotify")
+
+        assert waited(lambda: bool(service.transcript.since(0)))
+        assert speech.interrupts == 0
+        assert speech.said == ["Opening it now."]
+
+
+def test_typing_cuts_a_reply_off_whatever_the_audio_settings():
+    """Nothing typed can be an echo and nothing typed arrives late, so this one
+    does not need the microphone to have been open."""
+    service, _, speech = half_duplex()
+    service.say("A long answer to a question nobody asked.")
+    service.typed("stop")
+    assert speech.interrupts == 1
+    assert speech.said == []
+
+
+def test_nothing_is_cut_off_when_it_is_not_talking():
+    service, _, speech = make_service()
+    service.typed("what is the time")
+    assert speech.interrupts == 0
 
 
 def test_hushing_drops_what_was_queued_and_cuts_off_what_is_playing():

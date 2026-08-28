@@ -6,12 +6,10 @@ A voice assistant for a Windows desktop that runs entirely on the machine it is 
 It listens, works out what you wanted, does it - clicking real buttons on real windows,
 running real commands - and says what happened. No wake word, no cloud, no API key.
 
-It used to have no model of its own: an agent connected over MCP and JARVIS was ears and a
-mouth for it. That is still supported, and it is where all the interesting failures came
-from, but as of 0.8.0 JARVIS owns the loop. **The reply is the speech.** There is no tool
-for talking, so there is nothing to forget - what the model writes is what comes out of the
-speakers. Four mechanisms trying to get that guarantee from outside are recorded in
-[`DESIGN.md`](DESIGN.md) as failures.
+JARVIS owns its own loop. **The reply is the speech.** There is no tool for talking, so
+there is nothing to forget - what the model writes is what comes out of the speakers. It used
+to have no model of its own, and everything that was tried to make something else speak
+reliably is recorded in [`DESIGN.md`](DESIGN.md) as a failure.
 
 **Windows only.** The ears would port - Whisper and PyAudio do not care - but the hands are
 UI Automation and `SendInput`. Linux is not off the table, it just is not started.
@@ -79,9 +77,13 @@ the turn carries on knowing what you just said. Everything it had already found 
 The last call of a turn is the exception: it is one sentence from being spoken, and abandoning
 it would lose the answer to work already done.
 
-Cutting it off once it is *speaking* is a different thing and is off by default, because with
-no echo cancellation an open microphone on speakers transcribes JARVIS itself. See
+Cutting it off once it is *speaking* is a different thing, and a later one: a phrase does not
+exist until you have stopped talking, so it lands a couple of seconds in rather than on the
+first syllable. Enough to escape the rest of a long wrong answer, which is the point. It needs
+the microphone open while JARVIS talks, and that is off by default, because with no echo
+cancellation an open microphone on speakers transcribes JARVIS itself. See
 `audio.listen_while_speaking` - on headphones there is nothing to hear, so turn it on there.
+Typing a line cuts a reply off whatever the audio settings say.
 
 **A turn that did work cannot end silent.** If the model runs out of tool calls without saying
 anything, it is asked once more with the tools taken away, so prose is the only move left.
@@ -260,7 +262,6 @@ than in the file: prose that drifts from a signature gets believed over it.
 .\jarvis.ps1 chat                  # type to it instead of speaking, no microphone
 .\jarvis.ps1 tools                 # what the brain can do, as the model is told it
 .\jarvis.ps1 config                # every setting in effect, and where it came from
-.\jarvis.ps1 mcp                   # MCP server over stdio, for a coding agent
 .\jarvis.ps1 --list-devices        # find your microphone
 ```
 
@@ -346,59 +347,6 @@ The two look identical from the outside and want opposite fixes.
 No new dependencies for any of it: UI Automation comes through `comtypes`, which was already
 here for SAPI, and input goes through `SendInput` in `ctypes`.
 
-## The MCP server, which is still here
-
-Everything before 0.8.0 was built for this: an agent connected over MCP, and JARVIS was ears
-and a mouth for it. `jarvis mcp` still runs and the tools still work, and the reasoning behind
-them is the most interesting thing in [`DESIGN.md`](DESIGN.md). But it is no longer a mode of
-operation - the brain always runs, so with a client connected as well, both would answer.
-Read this as the record of how the loop came to be owned rather than as a way to run it.
-
-Hand the agent [`context/soul/jarvis.md`](context/soul/jarvis.md) as context. Most clients
-want that as a copy in a rules directory, and a copy is a thing that goes stale - so point
-`service.agent_rules` at it:
-
-```powershell
-.\jarvis.ps1 rules              # does the guide the agent reads match this one?
-.\jarvis.ps1 rules --install    # make it
-```
-
-Worth its own command because the failure is invisible and total. A guide written before the
-tools were renamed names tools that no longer exist, the model reads it every turn and
-believes it over the schemas, and nothing in the session says so.
-
-```json
-{
-  "mcpServers": {
-    "jarvis": {
-      "command": "uv",
-      "args": ["run", "--no-sync", "--directory", "/absolute/path/to/jarvis", "jarvis", "mcp"]
-    }
-  }
-}
-```
-
-`--no-sync` matters. Without it `uv run` reinstalls the project whenever its metadata
-changes, which means replacing `.venv\Scripts\jarvis.exe` - and that exe is the running MCP
-server, which Windows will not let anything overwrite. Bumping the version then makes every
-start fail with "The process cannot access the file".
-
-Twelve tools appear. `converse(say, then)` is the whole conversation: it speaks and then
-blocks for the reply, so answering and listening cannot come apart. That design exists
-because two tools came apart repeatedly - and it still was not enough, which is the whole
-argument for 0.8.0. **A required argument constrains a call that happens, it cannot cause a
-call to happen.** Nothing in MCP can: elicitation routes to the human, and sampling is
-deprecated by SEP-2577 and no client tried here has ever offered it.
-
-So `overhear.py` stops asking and reads instead. A client that writes its conversation to
-disk as it goes leaves the reply it typed rather than spoke sitting in a file, and JARVIS
-watches for it and says it. Jank, and it works - every historical failure in this repo was
-checked against it and it recovers all of them. Point `service.agent_sessions` at the
-directory of sessions; empty, which is the default, switches it off. Nothing is guessed at,
-because one client's layout is not a standard: a file that is not a list of messages is left
-alone and logged once, since reading somebody's half-understood format out loud is worse than
-staying quiet. The messages themselves are expected in the ordinary Anthropic API shape.
-
 ## What leaves this machine
 
 Nothing, unless you ask for it. At startup JARVIS prints exactly what each stage is doing:
@@ -415,9 +363,8 @@ Three settings can change that, all of them opt in and all of them named in that
 | `tts.engine = "edge"` | every reply, as text | Microsoft |
 | `brain.url` off loopback | every word of every conversation | wherever it points |
 
-One thing is not JARVIS's to promise: `look_at_image` hands a picture to the model, and so
-does every scan on the MCP path while `screen.send_image` is on. A picture of your screen has
-whatever was on it at the time. Local model, local picture - `brain.url` on loopback means it
+One thing is not JARVIS's to promise: `look_at_image` hands a picture to the model, and a
+picture of your screen has whatever was on it at the time. Local model, local picture - `brain.url` on loopback means it
 goes no further than llama-server. Point that off the machine and every screenshot goes with
 it. `brain.images = false` takes both tools away.
 
@@ -442,9 +389,9 @@ setting is what it is. Copy only the bits you want; anything absent keeps its de
 ## Architecture
 
 ```
- mic thread ──▶ queue ──▶ STT ──▶ transcript ──┬──▶ brain ──▶ tools ──▶ speech
-      ▲                                        │       (in this process)
-      └──── muted while speaking ◀─────────────┴──▶ GET /heard (blocks) ──▶ MCP agent
+ mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ brain ──▶ tools ──▶ speech
+      ▲                                                                │
+      └──────────────── muted while speaking ◀─────────────────────────┘
 ```
 
 | Module | Role |
@@ -458,19 +405,16 @@ setting is what it is. Copy only the bits you want; anything absent keeps its de
 | `typed.py` | A line typed into the voice session, taken as though it were heard |
 | `memories.py` | The list JARVIS writes for itself and reads back every turn |
 | `transcript.py` | Append-only record with blocking reads |
-| `client.py` | Client for the service, shared by the CLI and MCP |
-| `mcp_server.py` | The tools a connected coding agent can call instead |
+| `client.py` | Client for the service, used by the CLI |
 | `microphone.py` | Background capture, phrase splitting, mute |
 | `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
 | `hotkey.py` | The key that stops and starts listening, from anywhere |
-| `overhear.py` | Reading a coding agent's prose off disk and speaking what it never said |
 | `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
 | `uia.py` | UI Automation through comtypes: the only Windows-specific module |
 | `hands.py` | Synthetic clicks and keystrokes, through SendInput |
 | `marks.py` | The numbered boxes drawn onto a screenshot |
-| `reap.py` | Clearing MCP servers that outlived their client |
 | `echo.py` | Recognising JARVIS's own voice coming back |
 | `config.py` | Defaults, TOML, environment |
 
@@ -499,12 +443,14 @@ all the things that were tried and removed.
   itself - which it did, answering its own weather forecast with "That's right. Is there
   anything else I can help you with?" The text comparison in `echo.py` is the only defence
   and a long reply beat it once already, so `audio.listen_while_speaking` is off and
-  headphones are the workaround. Doing it properly means real AEC on the capture path.
+  headphones are the workaround. It is late even there, by the length of the pause that ends
+  a phrase: a couple of seconds, not the first syllable. Doing it properly means real AEC on
+  the capture path, and cutting on speech onset rather than on a finished phrase.
 
 ## Development
 
 ```powershell
-uv run pytest        # 686 tests, no hardware, model or network needed
+uv run pytest        # 573 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

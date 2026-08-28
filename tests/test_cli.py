@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from jarvis.cli import GUIDE, apply_args, build_parser, privacy_report
+from jarvis.cli import apply_args, build_parser, privacy_report
 from jarvis.config import Config
 
 
@@ -50,7 +50,6 @@ def test_no_arguments_means_serve():
 def test_subcommands_parse():
     assert parse("say", "hello", "there").text == ["hello", "there"]
     assert parse("next", "--wait", "30").wait == 30
-    assert parse("mcp").command == "mcp"
     assert parse("status").command == "status"
 
 
@@ -96,39 +95,9 @@ def test_privacy_report_names_each_leak():
     assert "every reply" in line
 
 
-def test_a_stale_agent_guide_is_reported(tmp_path, capsys):
-    """The failure it catches is invisible: a guide written before the tools were
-    renamed names tools that no longer exist, every turn, and the model believes
-    it over the schemas. Nothing in the session says so."""
-    from jarvis.cli import main
-
-    installed = tmp_path / "jarvis.md"
-    installed.write_text("wait_for_speech() then say(answer)", encoding="utf-8")
-    assert main(["rules", "--path", str(installed)]) == 1
-    assert "STALE" in capsys.readouterr().err
-
-
-def test_installing_the_guide_makes_it_match(tmp_path, capsys):
-    from jarvis.cli import main
-    from jarvis.config import project_root
-
-    installed = tmp_path / "nested" / "jarvis.md"
-    assert main(["rules", "--path", str(installed), "--install"]) == 0
-    assert installed.read_bytes() == (project_root() / GUIDE).read_bytes()
-    assert main(["rules", "--path", str(installed)]) == 0
-    assert "matches" in capsys.readouterr().out
-
-
-def test_a_missing_guide_says_how_to_install_it(tmp_path, capsys):
-    from jarvis.cli import main
-
-    assert main(["rules", "--path", str(tmp_path / "absent.md")]) == 1
-    assert "--install" in capsys.readouterr().out
-
-
 def test_nothing_starts_without_a_model(tmp_path, monkeypatch, caplog):
     """A JARVIS that listens, transcribes and answers nobody looks entirely
-    well and is not. It used to carry on as ears and hands over MCP."""
+    well and is not. It used to carry on as ears and hands."""
     import logging
 
     from jarvis import brain, cli

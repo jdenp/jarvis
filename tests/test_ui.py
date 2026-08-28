@@ -149,8 +149,8 @@ def test_a_utf8_console_gets_the_smoother_one():
 
 
 def test_the_silent_terminal_does_nothing_at_all(capsys):
-    """The default. The MCP server has stdout reserved for JSON-RPC, and the
-    tests have no terminal to draw on."""
+    """The default. A command whose output is read by something else needs
+    stdout to itself, and the tests have no terminal to draw on."""
     quiet = Silent()
     for call in (quiet.heard, quiet.spoke, quiet.tool, quiet.note, quiet.warn, quiet.status):
         call("something")

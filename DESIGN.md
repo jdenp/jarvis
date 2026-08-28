@@ -6,67 +6,50 @@ of file: `soul/jarvis.md` is character, `tools/tools.md` is generated from the c
 
 ## What this is
 
-A voice assistant that owns its own loop, and a microphone anything else can borrow.
+A voice assistant that owns its own loop.
 
 ```
-mic thread ──▶ queue ──▶ STT ──▶ transcript ──┬──▶ brain ──▶ tools ──▶ speech
-     ▲                                        │       (same process)
-     └──── muted while speaking ◀─────────────┴──▶ GET /heard (blocks) ──▶ MCP agent
+mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ brain ──▶ tools ──▶ speech
+     ▲                                                               │
+     └─────────────── muted while speaking ◀─────────────────────────┘
 ```
 
 The brain is `brain.py` and it always runs - a missing model stops JARVIS starting rather
 than quietly leaving it as ears and hands, because listening, transcribing and answering
-nobody looks exactly like working. The socket underneath is still what an MCP client
-connects to, and it still works, but connecting one now means two things answer.
+nobody looks exactly like working.
 
-This is a reversal and it is worth being straight about. There used to be a standalone
-assistant here - its own LLM, a skills registry, a persona - and it was removed
-deliberately, with a note in this file saying that if you are tempted to add a model back,
-add it on the agent's side of the socket. The argument was that two things which can answer
-the user is one too many. That argument was right and still is, which is why there is one
-brain and no switch beside it: the MCP server is a record of how the loop came to be owned
-rather than a second way to run this.
-
-What changed is the position, not the count. The removed assistant answered *alongside* an
-agent; this one *is* the agent. And the reason to move it inside is the whole of the
-enforcement section further down: while an agent held the loop, speaking was a tool it had
-to remember to call, and nothing in MCP can make a call happen. Owning the loop does not
-solve that problem, it deletes it - the model's reply text is the speech, so there is no
-call to forget. Four mechanisms were built and removed trying to get that guarantee from
-outside the loop before it was got by moving the loop.
+There was a standalone assistant here once - its own LLM, a skills registry, a persona - and
+it was removed deliberately, on the argument that two things which can answer the user is one
+too many. That argument was right and still is, which is why there is one brain and no switch
+beside it. What changed since is the position, not the count: the model that answers is
+inside the loop rather than beside it, and **the model's reply text is the speech**, so there
+is no call to forget. Five mechanisms were built and removed trying to get that guarantee
+from outside the loop before it was got by moving the loop.
 
 `jarvis serve` is a daemon rather than three separate programs for one reason: **only one
-process can own the microphone.** `jarvis say` from an agent's terminal has to mute the same
+process can own the microphone.** `jarvis say` from another terminal has to mute the same
 microphone that is listening, or JARVIS transcribes itself. So the daemon holds the hardware
-and everything else - the CLI and the MCP server both - is a loopback HTTP client.
+and the CLI is a loopback HTTP client.
 
 ## The interrupt is a blocking read
 
 `GET /heard?since=N&wait=55` returns immediately if there is anything after `N`, and
-otherwise blocks on a `threading.Condition` that `Transcript.add` notifies. An agent listens
-once - `converse()` - and it returns the instant a sentence
-lands. No polling, no timer, no tokens spent asking "anything yet?".
+otherwise blocks on a `threading.Condition` that `Transcript.add` notifies. `jarvis next`
+asks once and returns the instant a sentence lands. No polling, no timer.
 
 Ids are monotonic and survive restarts - `Transcript._resume` reads the last id out of the
 JSONL rather than replaying it - so a client holding a cursor never misses or repeats an
 utterance across a reconnect.
 
-Two limits, neither fixable by changing the transport:
+The latency floor is whatever `pause_threshold` is set to, currently 1.2s, plus about 0.2s
+of Whisper. Measured cost from transcript to caller is ~0.0s, so optimising the transport is
+pointless. It is set high deliberately: being cut off mid sentence is a worse experience than
+waiting, and the two trade directly against each other. The ceiling is `phrase_time_limit` -
+see below.
 
-- **Nothing preempts an agent mid-turn.** There is no external interrupt for an agent loop
-  already running tools. Speech waits until the agent next chooses to listen. Cooperative
-  by nature, which is what `check_for_speech` is for: a non-blocking peek the agent is
-  told to make between the steps of a long task, so a change of mind reaches it before it
-  has finished doing the wrong thing.
-- **The latency floor is whatever `pause_threshold` is set to**, currently 1.2s, plus
-  about 0.2s of Whisper. Measured cost from transcript to agent is ~0.0s, so
-  optimising the transport is pointless. It is set high deliberately: being cut off mid
-  sentence is a worse experience than waiting, and the two trade directly against each
-  other. The ceiling is `phrase_time_limit` - see below.
-
-`max_wait_seconds` defaults to 55 because agent clients time out tool calls (Cline's is
-around 60s). The tool takes a timeout, returns empty on expiry, and the agent calls again -
-still not polling, just a long poll.
+`max_wait_seconds` caps the wait a single call may ask for, so a client with a timeout of its
+own gets an empty answer and asks again rather than erroring. Still not polling, just a long
+poll.
 
 ## Local is the default, and that is the point
 
@@ -86,11 +69,11 @@ startup line, so a new remote backend surfaces automatically rather than quietly
 calibration did nothing. One `Recognizer` and one `Microphone` now live for the session.
 
 **No wake word, and no fuzzy matching of one.** It went in three stages: required, then
-optional, then removed. Once the agent was deciding for itself what was meant for it, the
+optional, then removed. Once the model was deciding for itself what was meant for it, the
 matching only ever produced false positives - and `hotwords="JARVIS"` biased Whisper's
 decoder towards producing the word, so it manufactured "JARVIS" out of room noise and put
 it in the transcript. Passing everything through verbatim is both simpler and more
-accurate; the agent is better placed to judge than a string match.
+accurate; the model is better placed to judge than a string match.
 
 **Silence must never be the whole response.** An utterance with no wake word used to be
 dropped at DEBUG, so it vanished without trace and looked identical to a hang. It logs at
@@ -100,7 +83,7 @@ INFO now, naming the word to use.
 `speech_recognition` ends a phrase after `pause_threshold` of *consecutive* buffers below the
 energy threshold, and resets that count on any single buffer above it. One keyboard click a
 second therefore holds a phrase open indefinitely, and the only thing that ends it is
-`phrase_time_limit` - so a sentence spoken into a noisy room reaches the agent a minute
+`phrase_time_limit` - so a sentence spoken into a noisy room reaches the brain a minute
 later, or not until the speaker has given up.
 
 `PhraseEnd` in `microphone.py` still waits for a whole `pause_threshold` of quiet, but lets
@@ -124,215 +107,42 @@ is what `pause_threshold` is for. `scripts/measure-pause-tolerance.py` regenerat
 `phrase_time_limit` stays at 60s as the last resort. Reaching it means waiting a minute, but
 the alternative is cutting someone off mid sentence, and very little gets there now.
 
+**150ms of silence in front of every utterance.** Kokoro puts about 200ms of quiet before the
+first phoneme and `kokoro-onnx` trims it off, so that the batches of a long reply concatenate
+without a gap in the middle. Measured across eight lines at 210wpm, the trim stops 24 to 43ms
+short of the first sound - it never eats the word - but what it leaves in front of it is 25 to
+50ms and nothing else. `KokoroSpeaker.speak` then opens a fresh output stream per utterance and
+writes that first phoneme immediately, into an MME device reporting 93ms of output latency.
+Whatever the endpoint does while it wakes up lands on the first word, and "a" and "I" are the
+only words short enough to disappear into it entirely - a reply that begins "have opened
+Spotify". So the lead-in goes back on. It costs 150ms per reply and it is not decoration.
+
 **JARVIS never speaks on its own initiative.** There used to be an `Acknowledger`: a
-`threading.Timer` in the MCP server that spoke a canned phrase when `say()` had not been
-called within a couple of seconds, so a slow answer did not sound like a crash. It was the
-one place JARVIS decided *what* to say, and it is gone.
+`threading.Timer` that spoke a canned phrase when nothing had been said for a couple of
+seconds, so that a slow answer did not sound like a crash. It was the one place JARVIS
+decided *what* to say, and it is gone.
 
-Two attempts to keep it are worth not repeating. Letting the agent supply the phrase through
-a `hold=...` argument works mechanically but asks the wrong thing of a small model:
-composing a follow-up that lands ten seconds later, with no context to attach it to, is a
-judgement to make while it should be thinking about the actual question. And leaving the
-canned timer in alongside an agent that now speaks first means two holding lines in a row
-whenever the agent is a little slow, which is worse than either alone.
+Having the model supply the phrase in advance works mechanically and asks the wrong thing of
+a small one: composing a follow-up that lands ten seconds later, with no context to attach it
+to, is a judgement to make while it should be thinking about the actual question. And a
+canned timer left in alongside a model that now speaks first means two holding lines in a row
+whenever it is a little slow, which is worse than either alone.
 
-What replaced it is a rule in the instructions: if the answer is not immediate, say one line
-before starting. The agent knows what it is about to do, and a timer never can. If the agent
-forgets, there is silence - and silence is the honest signal that the agent forgot, rather
-than something JARVIS papers over.
+What replaced it is a rule in the prompt: if the answer is not immediate, say one line before
+starting. The model knows what it is about to do, and a timer never can. If it forgets, there
+is silence - and silence is the honest signal that it forgot, rather than something papered
+over.
 
-Note the constraint that shaped this: an agent only acts *between* tool calls, so nothing
-told to it can make it speak from *inside* a slow one. Anything that tries to fill that gap
-has to be JARVIS talking, which is the thing being removed.
-
-**The loop is closed by the tool, not by the agent's memory.** Moving the lead-in rule into
-the result fixed the silence before slow work, and left the other half untouched: the agent
-answered, then ended its turn, hanging up on someone still sitting at the microphone.
-Instructions could not reach it. `jarvis.md`, the server instructions and the tool result
-all said "always go straight back to listening", two of them in capitals, and it
-happened anyway - because it is a thing to remember at the end of a turn, and the end of a
-turn is exactly where a model stops remembering.
-
-So the tool does it instead. It takes a required `then`: `then="listen"` speaks and then
-performs the blocking read itself, returning the utterance in the same result, and
-`then="keep_working"` speaks and returns at once for the lead-in. Answering *is* listening,
-so there is no second call to forget. The argument has no default, so the schema rejects a
-call that omits it - the model is made to state which of the two it is doing, and the fork
-is one the lead-in rule already demanded, so it costs no judgement that was not already owed.
-
-**Two tools became one, after two live sessions said so.** The first version kept a split:
-`say(text, then=...)` to speak, `stay_silent(because=...)` to listen without speaking, with
-`because` an enum whose `already_spoke_my_reply` value the server could check against what
-had actually gone through the speakers. That much worked, and the checkable claim survives
-today in a different form.
-
-What did not work was the split itself. Twice, in a fresh session, the agent called the
-listening tool, got "Hey Jarvis" back, wrote "Hey there! What's up?" into its own reply text
-and ended its turn. Nothing was spoken either time. The lesson is narrow and worth stating
-plainly: **a required argument constrains a call that happens; it cannot cause a call to
-happen.** Everything downstream of "the model decided to use the tool" was already closed,
-and the failure was upstream of it.
-
-Diagnosing the second one turned up two contributing causes and one that was neither.
-
-The one that was neither: a copy of `jarvis.md` in the client's rules directory, three days
-stale, still naming `wait_for_speech` and showing a bare `say(answer)`. Fixing it did not
-fix the failure, which is how the split was ruled out rather than the prose. It is written
-up separately below because it is a real trap regardless.
-
-The two that were: the result. For a two word greeting the model received fourteen lines, of
-which eight were a `detail` block repeating the text with an id and a timestamp that nothing
-consumed, sitting between the words and the instruction. And the instruction opened with a
-question - "Can you answer right now, from what you know?" - which a model answers in prose,
-because answering questions in prose is the single strongest thing it knows how to do. It
-then closed on the name of the tool that does not speak. This repo had already learned that
-a small model picks whichever clause it read last; the clause it read last was wrong.
-
-**So: one tool, and the result is an instruction and nothing else.** `converse(say, then)`
-speaks and then listens. `say=""` listens without speaking. Both arguments required. The
-result is `heard` plus one imperative that opens and closes on `EMIT converse()`, six lines
-instead of fourteen.
-
-The argument for consolidating is not that it enforces anything - it does not, and nothing
-in MCP can. It is that the second call is now *identical in shape to the first*. Under the
-split, a model that had just listened had to notice it needed a different tool with
-different arguments, at the end of a turn, which is exactly where a model stops noticing
-things. Now there is one tool, its only interesting argument is the thing to say, and
-and entering voice mode is `converse(say="", then="listen")`, the same call with nothing
-to say.
-
-An earlier version had the entry speak - `say="Yes sir?"` - on the grounds that it
-establishes the pattern from call one, so the first *reply* is not also the first time the
-tool is used with content. That was reverted on request, and it costs less than it would
-have: `force_a_reply` below now catches exactly that transition, which is the work the
-greeting was doing. Entering voice mode is silent again, which is what someone who has just
-asked for it expects.
-
-**The checkable claim survives, and got broader.** `say=""` while a reply is owed is the
-claim to have answered, and it is refusable on the same evidence as before: `unanswered`
-holds the last utterance heard and is cleared only by actually speaking. It is better than
-the enum it replaces, because it is the behaviour itself rather than a self-report - there
-is no unfalsifiable value to pick instead.
-
-It bounces once rather than refusing outright. Returning immediately without listening,
-naming what went unanswered, and clearing the debt on the way out, so the next call goes
-through whichever way the agent decides. That is the whole difference from the version this
-repo tried first, which blocked until something was spoken and deadlocked against an agent
-that had correctly kept quiet. One cheap round trip is a cost worth paying; a hang is not.
-
-It now chases anything heard, not only what parses as a question. `looks_like_a_question`
-guarded the old bounce, and "Hey Jarvis" is not a question - it is precisely what went
-unanswered, twice. The cost is that a room with a television in it pays one bounce per
-utterance, which is why the message offers both ways out in the same breath rather than
-insisting on an answer: answering what nobody asked is the worse failure of the two.
-
-**Three attempts to force a spoken reply, all removed.** Worth writing down because each
-looked reasonable and each failed the same way, and the next idea should have to clear a
-higher bar than these did.
-
-The first handed speech back as `isError: true` on the result that delivered it, on the
-grounds that a client which will end a turn on a result will not end it on an error. That
-much was true - the turn did not end, and the agent went and did the work. It never spoke,
-because by the time the work was finished the error was eleven results back in the context.
-It also meant lying about a call that had succeeded, on every turn of every conversation.
-
-The second attached the outstanding reply to every screen result while it was owed. A note
-on everything is wallpaper: it stops being read, and it fires on tasks that were never
-going to be slow.
-
-The third made that note one-shot and gated it on twelve seconds of silence, so an agent
-that answered promptly never saw it. Better, and still a note - which is to say still
-something the model can decline to act on, which is the entire problem.
-
-The fourth, an action budget, was written and never committed: three clicks between spoken
-lines, then the acting tools refuse until something goes through the speakers. That one is
-genuinely unignorable, because ignoring it means the task stops progressing. It was pulled
-with the others on the same judgement - a wall the agent hits mid-task is a worse experience
-than the silence it prevents, and none of the four produce the thing actually wanted, which
-is a closing report.
-
-What survives from all of it is the one refusal that is not a nag: `say=""` while a reply is
-owed is a claim to have answered, the server knows whether anything went through the
-speakers, and a false claim is refused. That is a lie being caught rather than a memory
-being prompted, which is why it keeps working.
-
-**What worked: stop asking the agent and read what it wrote.** Every attempt above put
-words into a tool result, and a tool result is advice. The thing they were all reaching for
-was already on disk. Cline writes its whole conversation out as it goes - assistant
-messages, thinking, tool calls - so a reply typed instead of spoken is sitting in
-`~/.cline/data/sessions/<id>/<id>.messages.json`. `overhear.py` watches for new assistant
-prose while a reply is owed and speaks it.
-
-It asks the agent for nothing, which is the entire point. No schema argument to comply
-with, no note to read, no protocol feature, no capability to advertise. It was checked
-retroactively against every failure in this repo's history and recovers all of them,
-including the two lines from the Spotify session that were written and thrown away - a
-lead-in and a closing report, both perfectly sayable.
-
-Three things it does not do, deliberately. It does not read thinking, which is verbose,
-internal and frequently about the user rather than to them. It does not read prose written
-for the eye - code fences, tables, headings, numbered lists, anything past
-`overhear_max_chars` - because reading markdown aloud is worse than silence. And it strips
-emphasis and emoji from what survives, since SAPI pronounces `**947**` as "asterisk
-asterisk nine four seven".
-
-**Bound to Cline on purpose.** The directory layout is Cline's and so is the envelope -
-`origin.source`, an `agent` name, its own version string - so `looks_like_cline` checks for
-it and a transcript without one is left alone and logged once. The temptation is to parse
-anything with a `messages` array, and the failure mode of doing that is reading a stranger's
-file out loud. `service.cline_sessions` moves the path for a portable install; it does not
-make another client work.
-
-Which is not to say it cannot be adapted. The content inside `messages` is the ordinary
-Anthropic API shape, parts typed `text`, `thinking` and `tool_use`, so any client storing
-raw API messages needs a reader rather than a redesign, and the seam is `looks_like_cline`
-plus `transcripts`. The one thing no adapter can fix is a client that never writes the
-conversation down: there has to be a transcript to overhear.
-
-It is jank and the switch admits it. `service.overhear` turns it off, because this depends
-on someone else's on-disk format and that format can move without warning - when it does,
-this goes quiet rather than failing loudly. The session is picked by modification time,
-which is a guess: the MCP server is told nothing about which session spawned it, so two
-conversations at once means it may speak the wrong one's answer.
-
-**It delivers the reply; it does not resume the conversation.** Worth being exact, because
-the two are easy to conflate. Overheard speech goes through `say()` like anything else, so
-the echo guard remembers it and the microphone will not transcribe JARVIS hearing itself -
-that part is free. And if the agent later passes the same words to `converse()`, they are
-recognised and not spoken twice. What overhearing cannot do is make the agent listen again:
-the utterance the user speaks next lands in the transcript and waits there, and nothing
-reads it until the agent calls `converse()` of its own accord. So this turns silence into an
-answer, which is most of the value, and leaves the turn ended either way.
-
-The one thing it cannot do is listen. Speaking overheard prose delivers the reply but does
-not reopen the microphone, so the conversation stops there; `converse()` is still the only
-thing that keeps it going, and the guide says so. Which makes this a safety net rather than
-a route, and the right shape for a safety net: invisible when things work, and the
-difference between an answer and silence when they do not.
-
-**What is genuinely left, stated plainly.** Sampling is the only mechanism in MCP that
-would truly enforce this: `sampling/createMessage` lets the server ask the client to run a
-completion, so `converse()` could obtain the reply itself and speak it without ever
-returning - no turn boundary for the agent to end. It was not built, for two reasons.
-Whether a given client advertises `sampling` is unknown until it connects, which is why
-capabilities are now logged on the first tool call. And on a single-slot llama-server it
-would thrash the KV cache: an 80k agent prompt and a 500 token sampling prompt evicting
-each other means reprocessing the agent's prompt every turn. It also reintroduces JARVIS
-composing speech, which is the thing removed further up this file.
-
-Elicitation and `InputRequiredResult` do not help - both route to the human, not to the
-model. Absent sampling, an agent that ends its turn with prose and calls nothing at all is
-reachable only by the error flag, and that is a client behaviour rather than a guarantee.
-
-**0.8.0: own the loop, and the problem stops existing.** Everything above is JARVIS on the
-wrong side of the socket. It could only be called, so every mechanism it had was a string in
-a tool result, and a string in a tool result is advice. The way out was not a better string.
+**0.8.0: own the loop, and the problem stops existing.** Speaking used to be a tool the
+model had to remember to call, and everything built to make it remember was a string in a
+tool result - which is advice. It was forgotten anyway, at the end of a turn, which is
+exactly where a model stops remembering. The way out was not a better string.
 
 `brain.py` holds the loop: hear, call the model with the tools attached, run them, speak the
 reply. **The reply is the speech.** There is no say tool, so there is nothing to forget - the
 `content` of the model's last message goes to the synthesiser, and a model that writes prose
-instead of calling a tool has, by doing exactly that, answered. The failure mode this repo
-spent five mechanisms on is not fixed; it is unrepresentable.
+instead of calling a tool has, by doing exactly that, answered. The failure this repo spent
+five mechanisms on is not fixed; it is unrepresentable.
 
 Two holes remained after that and both are closed in the loop rather than in a prompt. A
 turn can run out of tool calls without ever writing prose, so the last call of any turn is
@@ -343,19 +153,16 @@ crash. What is deliberately still possible is staying quiet, because there is no
 and some of what arrives is other people. That takes a positive act now: a reply with no
 letters or digits in it, which the prompt asks for as a single hyphen.
 
-Two things came free that were listed as impossible under MCP. The loop drains the
-transcript between tool calls, so speech that arrives mid-task is read before the next step
-rather than after the wrong thing has been done - the "nothing preempts an agent" limit was
-a property of not owning the loop, not of the transport. And the two-model problem goes
-away: one context during voice work instead of an agent's and JARVIS's, which on a
+Two things came free that had looked impossible. The loop drains the transcript between
+tool calls, so speech that arrives mid-task is read before the next step rather than after
+the wrong thing has been done - nothing could preempt the old loop, and that was a property
+of not owning it. And there is one context during voice work rather than two, which on a
 single-slot llama-server is the difference between reprocessing a prompt every turn and not.
 
 What it costs is everything an agent framework was doing for free: a system prompt, history
 that does not grow, malformed tool calls, retries, and a model that loops. `Toolbox.run`
 turns every one of those into a result string rather than an exception, because a tool call
-with no result leaves the conversation unable to continue at all. The MCP path stays exactly
-as it was, for handing the microphone to something that is a better coding agent than a 35B
-model driving a desktop.
+with no result leaves the conversation unable to continue at all.
 
 **The learnings are the model's to write, not ours to guess.** Almost everything that makes
 this desk workable is discoverable only by getting it wrong: a window whose tree is empty
@@ -392,9 +199,9 @@ behaviour - reading them should not mean reading Python.
 
 So `jarvis tools --write` generates it and a test fails if it has drifted, exactly as
 `config/defaults.json` works. The direction matters: making the file authoritative would
-split each tool's prose from its signature, and that is precisely the failure `jarvis rules`
-exists to catch - prose out of date with a signature is believed over the signature. Keeping
-it generated means the file is always right and is never load-bearing.
+split each tool's prose from its signature, and prose out of date with a signature is
+believed over the signature. Keeping it generated means the file is always right and is never
+load-bearing.
 
 **The web, and the promise it costs.** `search_web` and `read_page` are the first things here
 that leave the machine, which is why they are a switch and why `privacy_report` names
@@ -418,11 +225,9 @@ and every other client is perfectly happy to wave through as an empty result. So
 checked explicitly, one retry covers being throttled anyway, and the message says which of the
 two it was, because "slow down" and "no such thing" are different answers to say out loud.
 
-**One soul file, and the desk is not part of it.** There were two, one for the brain and one
-for an agent over MCP, and nobody could say where the line was - because there is not one. The
-character is identical whoever is driving; only the mechanics differ, and those are already
-served over the protocol by `mcp_server.INSTRUCTIONS`. So there is one `soul/jarvis.md`, and
-`jarvis rules` installs that.
+**One soul file, and the desk is not part of it.** There were two for a while and nobody
+could say where the line was - because there is not one. The character does not change with
+the mechanics. So there is one `soul/jarvis.md`.
 
 The second split is the useful one: character in `soul/`, the desk in `memories/`. How to open
 an application is not part of who JARVIS is, and keeping it in the prompt is how it came to be
@@ -517,8 +322,8 @@ same numbers: a session clicked `System` in a terminal, looked again, clicked `S
 and spent the rest of its budget going round. `Toolbox` remembers the last refusal, clears it
 on anything that works, and on a word for word repeat says to stop clicking, that the keyboard
 reaches what the pointer cannot, and that a shell command is usually the shorter way round
-anything to do with a program running or not running. The MCP server had this and it was lost
-in the port; a failure mode that has been solved once should not have to be found twice.
+anything to do with a program running or not running. An earlier version had this and it was
+lost in a port; a failure mode that has been solved once should not have to be found twice.
 
 **Talking over it works because the reply is read a token at a time.** The stream is what
 makes it possible at all: `Model._streamed` checks the room every 300ms, and anything heard
@@ -540,6 +345,20 @@ stop a model going round in circles, and a person changing their mind is the opp
 - it is the best evidence available that the next steps are worth taking. So the counter goes
 back to zero, and there is a first step again, which also means a lead-in is worth saying
 again. The only thing that can spend the budget this way is somebody choosing to keep talking.
+
+**Cutting the speech off is a second interruption, and a later one.** The one above happens
+mid turn, while the model is still working, and it is quick because the stream is checked every
+300ms. Once the reply is being read out there is no stream left to check: what arrives is a
+finished phrase, and a phrase does not exist until somebody has stopped talking for
+`pause_threshold`. So `service._stop_talking` lands a couple of seconds after they began rather
+than on the first syllable. It buys the rest of a long wrong answer, which is worth having, and
+it is not barge-in on speech onset. Silero would give that, at about 0.3s, but it is
+volume-blind by design - the point of it - so bleed from the headphones scores as speech and
+JARVIS would cut itself off mid word.
+
+It is gated on `audio.listen_while_speaking`, because with the microphone shut through a reply
+a phrase landing now was recorded before that reply started and is nobody talking over
+anything. Typing is not gated: nothing typed can be an echo and nothing typed arrives late.
 
 **Tool results go in the log, not only on screen.** `run_command("start teams")` returned "the
 system cannot find the file", the model concluded Teams was not installed, and the log recorded
@@ -682,8 +501,8 @@ a scrolling record you can pipe, redirect and scroll back through, which is also
 everything degrades to plain lines the moment the output is not a terminal.
 
 **Typing goes in where speech does, and nowhere else.** `service.typed()` puts the line
-straight into the transcript, so the brain, the MCP path, `heard.jsonl` and the `you >` on
-screen all see the same thing and none of them can tell the difference. It skips exactly two
+straight into the transcript, so the brain, `heard.jsonl` and the `you >` on screen all see
+the same thing and none of them can tell the difference. It skips exactly two
 of the things speech goes through: the echo guard, since nothing typed can be JARVIS hearing
 itself, and the pause, since shutting the microphone is not a reason to ignore somebody who
 has chosen to type.
@@ -719,15 +538,15 @@ answer, which is the one that would otherwise feel broken. A one token limit, an
 enters the history: that conversation did not happen.
 
 **Speaking ends the turn, so nothing may be announced in advance.** Two tool descriptions said
-"say what you are about to do before you do it", carried over from the MCP design where a
-lead-in and the work were separate calls. In this loop prose *is* the end of the turn, so that
+"say what you are about to do before you do it", carried over from a design where a lead-in
+and the work were separate calls. In this loop prose *is* the end of the turn, so that
 instruction is not merely unhelpful, it is impossible to follow - and it was followed exactly.
 Asked to stop listening, the model replied "Pausing transcription, sir. Just call my name to
 start me up again", called nothing, and went back to listening. It also invented a wake word.
 
 The fix is the ordering, everywhere: do it, then say what happened, or write the sentence in
 the same message as the call. The system prompt now says so in as many words, because it is
-the one rule of this loop that no other agent has - anywhere else, saying you are about to do
+the one rule of this loop that nothing else has - anywhere else, saying you are about to do
 something is normal and harmless.
 
 **Reasoning off is fast and worse at choosing.** `brain.thinking = false` sends
@@ -758,19 +577,6 @@ conversation, and everything at INFO stays in the file where the detail belongs.
 lines still go through plain logging, because a five second Whisper load with nothing on
 screen looks like a hang.
 
-**Name the decision, not the mechanism.** The pair used to be `say` and `wait_for_speech`,
-and the second name stopped being true the moment `then="listen"` became the ordinary way to
-hear someone: it read as the canonical listening primitive while actually being the minority
-path. `stay_silent` fixed that by naming the choice rather than the mechanism.
-
-`converse` finishes the job, and this is a change of mind on the record. Asked directly
-whether the two should collapse into one call by that name, the answer here was no - `say`
-was short and blunt, rule 1 leaned on that, and `converse(text, then="keep_working")` looked
-self-contradictory. Two failed sessions later, the objection was about wording and the
-problem was about how many decisions a model makes at the end of a turn. `then="keep_working"`
-is a conversation with a pause in it, which is not a contradiction, and one tool that always
-looks the same beats two that are each individually well named.
-
 **The accessibility tree is not a prompt.** Handing the whole thing to a model does not
 work and the numbers say why: one Teams window is 810 nodes, Outlook in a browser 833,
 and in both cases the great majority are panes, groups, static text, images and
@@ -785,16 +591,15 @@ its keep is not the drawing: it is that the model names an id and the host owns 
 coordinate. Doing it in text costs nothing, works with no vision model loaded, and the
 signature makes the wrong answer unrepresentable - there is no x or y argument on any of
 these tools to get wrong. The marked screenshot is still drawn on request, for whoever is
-debugging a misclick, and `screen.send_image` will send it to a model that can read it.
+debugging a misclick.
 
 **Separate tools rather than one action verb.** The obvious shape is one `act(action,
 target, text)` call. It is worse here, because the schema can then only say "text is
 sometimes required" - where `click(target, expecting)` and `type_text(target, expecting,
 text, then)` each state exactly what their own call needs, and a missing argument is
-rejected before the tool body runs. Same reasoning as `converse(say, then)`.
+rejected before the tool body runs.
 
-**`expecting` is checked, the way an empty `say` is.** A target number is
-worthless on its own: a number from a scan taken before the list scrolled still resolves
+**`expecting` is checked.** A target number is worthless on its own: a number from a scan taken before the list scrolled still resolves
 to a perfectly good coordinate, and that is how automation presses delete on the wrong
 row. So clicking requires the label as well, and refuses if the two disagree. The check
 is deliberately loose - either string containing the other, case and whitespace ignored -
@@ -837,7 +642,7 @@ not hard, it was impossible, and nothing in the result said so.
 
 Two changes. The cap is 200, which no normal application reaches - Spotify 166, Outlook in
 a browser 177 - so truncation stops happening at all in practice, and 200 targets is around
-4k tokens, which any agent context can afford. And when it does happen the cut is an even
+4k tokens, which the context can afford. And when it does happen the cut is an even
 spread rather than a prefix, so every region of the window is represented and the result
 says it is a sample. A sample degrades; a prefix hides a third of the screen completely.
 
@@ -874,10 +679,10 @@ point says the target is not visible does the window get brought forward, and th
 checked again. The taskbar passes on the first check and is never touched.
 
 **Not every window has a tree, and the Start menu is one of them.** Asked to open Spotify
-and play, an agent pressed the Windows key, scanned what came up, and got one element: a
+and play, it pressed the Windows key, scanned what came up, and got one element: a
 target labelled "Search box" whose rectangle was the entire Start panel. Its centre is
 therefore not a control, so the point check refused three type_text calls in a row - each
-time correctly, each time with the same words, and each time the agent rescanned and got
+time correctly, each time with the same words, and each time it rescanned and got
 the same single target back. It got there in the end by pressing playpause, and reported
 that as having opened Spotify.
 
@@ -916,7 +721,7 @@ changed is the default.
 
 Off was the obvious choice and it was wrong. Three reasons, in ascending order of how much
 they cost. The point of the feature is to act, so the interesting half was disabled out of
-the box. An agent cannot discover the flag on its own; the best it can do is relay a message
+the box. The model cannot discover the flag on its own; the best it can do is relay a message
 asking the user to set it, which it did, correctly, and which nobody read. And the failure
 mode is indistinguishable from the feature being broken - a live session spent four calls
 refusing to touch a minimised window while `focus_window`, the tool that would have restored
@@ -933,8 +738,8 @@ exactly as it does under a real hand. Two consequences to live with: Windows sil
 refuses input from an unelevated process to an elevated window, and the pointer visibly
 moves.
 
-**One automation object per thread.** COM apartments do not share objects and an MCP
-client may call one tool from a different thread than the last. Rather than marshal,
+**One automation object per thread.** COM apartments do not share objects and a tool may
+be called from a different thread than the last. Rather than marshal,
 `_automation()` keeps a thread-local - a few milliseconds once per thread - and
 everything handed out of `uia.py` is plain data that crosses threads freely. That is the
 same flattening that makes the module testable, arrived at for a different reason.
@@ -950,15 +755,6 @@ to a process that has not declared it understands scaling, so on a 150% display 
 lands two thirds of the way to where it was aimed. It is set on first use of the backend,
 and failing means it was already set, which is the outcome wanted anyway.
 
-**The guide is a copy, and a copy goes stale.** The one failure mode in this whole design
-that no schema can reach. `jarvis.md` gets copied into the agent's rules directory so it is
-read every turn, and once the tools are renamed that copy is actively lying - it names tools
-that do not exist and shows call shapes that were removed. The model weighs authoritative
-prose against a schema and the prose wins, so it reverts to the loop the new signatures were
-built to delete, and nothing in the transcript says why. Observed here with a guide three
-days old, still teaching `wait_for_speech()` and a bare `say(answer)`. Hence `jarvis rules`,
-which just compares the two files: cheap, and the only way the drift is visible at all.
-
 ## Swapping a component
 
 Each is a Protocol or a factory, so a replacement only has to match the shape:
@@ -973,7 +769,7 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
 - Wake word detection on audio rather than transcript, e.g. openWakeWord. The current gate
   transcribes everything first, so every cough costs a Whisper inference. Local, so it is
   wasted CPU rather than a privacy problem, but still wasteful
-- Speaker identification, so a room with two people in it does not confuse the agent
+- Speaker identification, so a room with two people in it does not confuse it
 - Acoustic echo cancellation, and it is now the biggest thing left.
   `audio.listen_while_speaking` had to go back off: with no AEC an open microphone on
   speakers transcribes JARVIS, and it answered its own weather forecast once. The text
@@ -981,19 +777,18 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   free and it can be turned on there. Real AEC on the capture path is what makes cutting a
   reply off work in a room with speakers in it - note that talking over the *thinking* works
   either way, since the microphone is only shut while a reply is actually being spoken
-- Nothing tells a connected MCP agent that speech arrived while it was busy; it only finds
-  out when it next calls `converse`. An MCP notification could improve that, if clients
-  honour it. The brain has no such problem - it reads the transcript between its own tool
-  calls
-- Nothing fills the silence if the agent forgets to speak before slow work. That is
-  deliberate - see above - but it does mean a forgetful agent sounds broken
+- Cutting the speech off on speech onset rather than on a finished phrase, which would take
+  it from a couple of seconds down to about 0.3s. Needs a predicate that is not volume-blind,
+  or it cuts itself off on its own bleed
+- Nothing fills the silence if the model forgets to speak before slow work. That is
+  deliberate - see above - but it does mean a forgetful turn sounds broken
 - Screen control has no undo and no dry run. `expecting` catches the wrong target but
   nothing catches the right target with the wrong intent
-- Nothing reads text out of a control. An agent can see that an edit box exists and type
+- Nothing reads text out of a control. It can see that an edit box exists and type
   into it, but not what is already in it, so "read me the last message" is out of reach
 - The scan is per window. Anything spanning two windows, or a dialog opening over the one
   being scanned, needs a second look to notice
 - An application with no usable accessibility tree - a game, a canvas, a remote desktop
-  window - is invisible to all of this, and turning on `send_image` does not rescue it:
-  with no targets there is nothing to number. That case is what a vision model detecting
+  window - is invisible to all of this, and a picture does not rescue it: with no targets
+  there is nothing to number. That case is what a vision model detecting
   controls in pixels is actually for, and it is not built here

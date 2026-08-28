@@ -1,7 +1,7 @@
 """The voice service.
 
 One process owns the microphone, Whisper and the speakers, and exposes them over
-loopback HTTP. The CLI and the MCP server are thin clients of it.
+loopback HTTP. The CLI is a thin client of it.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from .tts import SpeechEngine, build_speaker
 logger = logging.getLogger("jarvis.service")
 
 # A client vanishing mid request. Normal here: /heard blocks for up to a minute,
-# and MCP servers get killed with a request in flight.
+# so a caller that gives up in the meantime is the ordinary case.
 GONE_AWAY = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
 
 
@@ -86,6 +86,9 @@ class VoiceService:
             if self._echo.is_echo(heard):
                 logger.debug("Ignored JARVIS hearing itself: %s", heard)
                 continue
+            # Only when the microphone was open through the reply. See _stop_talking.
+            if self.config.audio.listen_while_speaking:
+                self._stop_talking()
             utterance = self.transcript.add(heard)
             logger.info("[%d] %s", utterance.id, heard)
             self.ui.heard(heard)
@@ -94,15 +97,17 @@ class VoiceService:
         """Take a typed line as though it had been heard.
 
         Same transcript, same line on screen, same everything downstream - the
-        brain and any connected agent cannot tell the difference, and should
-        not. Two things speech goes through that this does not: the echo guard,
+        brain cannot tell the difference, and should not. Two things speech
+        goes through that this does not: the echo guard,
         because nothing typed can be JARVIS hearing itself, and the pause,
         because pausing shuts the microphone and somebody typing has plainly
-        chosen to say something.
+        chosen to say something. For that same reason it stops a reply in
+        progress whatever the audio settings say.
         """
         text = text.strip()
         if not text:
             return
+        self._stop_talking()
         utterance = self.transcript.add(text, always=True)
         logger.info("[%d] %s (typed)", utterance.id, text)
         self.ui.heard(text)
@@ -168,6 +173,25 @@ class VoiceService:
         """Stop talking now - drop what is queued and cut off what is playing."""
         if self.speech is not None:
             self.speech.interrupt()
+
+    def _stop_talking(self) -> None:
+        """Cut the reply off, because something was said over the top of it.
+
+        Late, and unavoidably so: a phrase does not exist until it has ended,
+        so this lands about two seconds after they began talking rather than on
+        the first syllable. What it buys is the rest of a long wrong answer,
+        which is worth having. It is not the same thing as stopping the moment
+        somebody opens their mouth, and it does not pretend to be.
+
+        Only worth doing where the microphone was open through the reply. With
+        it shut, a phrase arriving now was recorded before the reply started
+        and is nobody talking over anything.
+        """
+        if self.speech is None or not self.speech.speaking:
+            return
+        logger.info("Something was said over the reply, so it was cut off.")
+        self.ui.note("Interrupted.")
+        self.speech.interrupt()
 
     def _unmute_when_done(self) -> None:
         """Release the microphone once everything queued has been spoken.

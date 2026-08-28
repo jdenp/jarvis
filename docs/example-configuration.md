@@ -14,8 +14,6 @@ to adapt than a list of options.
 
 - **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 100k context, `--n-cpu-moe 22`
 - **Brain** - JARVIS's own loop against the same server, `brain.url = "http://127.0.0.1:8081/v1"`
-- **Agent** - Cline CLI over MCP at the same endpoint, for when the microphone is handed over
-  instead
 - **STT** - `small.en` on CUDA, `int8_float16`
 - **TTS** - SAPI, Microsoft Hazel
 
@@ -73,10 +71,9 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
 timeout /t 2 /nobreak >nul
 ```
 
-One slot is right because there is one context in flight: the brain's. The KV cache is not
-being evicted and refilled by an agent prompt and a JARVIS prompt taking turns, so
-`--cache-reuse 256` does what it is there for. The section below about telling a coding agent
-when to compact is history - it applied when an agent over MCP held the loop.
+One slot is right because there is one context in flight: the brain's. Nothing else is
+evicting and refilling the KV cache between turns, so `--cache-reuse 256` does what it is
+there for.
 
 Context and `--n-cpu-moe` trade against each other: more context is more KV cache, and moving
 another MoE layer off the GPU is how you pay for it. 100k loads in about 35 seconds here.
@@ -85,29 +82,6 @@ One thing to know if you copy this: `llama-server.exe` is called bare, relying o
 searching its own directory. That fails wherever `NoDefaultCurrentDirectoryInExePath` is
 set, which some sandboxed shells do, and the error is the unhelpful `'llama-server.exe' is
 not recognized as an internal or external command`. Writing `.\llama-server.exe` avoids it.
-
-## Telling Cline when to compact
-
-Cline cannot discover the context window from a custom endpoint, so `contextWindow` in
-`providers.json` has to tell it, and it compacts at 0.9 of whatever it is told. That figure
-has to be chosen from both ends. Too high and answers degrade before it ever compacts; too
-low and it compacts constantly, and every compaction is a chance to be interrupted:
-
-```json
-{ "contextWindow": 90112, "maxTokens": 32000 }
-```
-
-88k triggers compaction at about 81k tokens. Adding `maxTokens` for the reply comes to 113k,
-which still fits the server's 131,072 with room to spare - the ceiling worth watching, since
-`contextWindow` alone exceeding `-c` means requests overflow the server rather than being
-compacted.
-
-Compaction is the fragile part of a voice session. It runs as a hub command against a timeout
-hardcoded at 30 seconds, with no setting or environment variable behind it. In
-`hub-daemon.log` the calls that land take 21-32ms, so when one fails at 30s the command was
-never serviced rather than slow - and a `converse()` long poll holding a tool call open
-for up to `max_wait_seconds` is the obvious suspect. Compacting less often is the cheap
-mitigation.
 
 ## Local overrides
 
@@ -121,19 +95,19 @@ mitigation.
     "whisper_compute_type": "int8_float16"
   },
   "service": {
-    "_why": "Cline is configured with timeout 3600, so a long poll is safe and returns empty far less often",
+    "_why": "`jarvis next` waits as long as it is told to, so a long poll is safe here and returns empty far less often",
     "max_wait_seconds": 240
   }
 }
 ```
 
-## Computer use, on the same agent
+## Computer use
 
-This started with [open-computer-use](https://github.com/QwenLM/open-computer-use), an
-MCP server driving Windows through UI Automation. It did not work here, and the reason
-was not the transport: `get_app_state` hands the model the whole accessibility tree,
-which for anything real is hundreds of nodes of panes and static text. Qwen3.6-35B given
-the lot picked plausible wrong elements and could not reliably interact with anything.
+This started with [open-computer-use](https://github.com/QwenLM/open-computer-use), which
+drives Windows through UI Automation. It did not work here, and the reason was not the
+transport: `get_app_state` hands the model the whole accessibility tree, which for anything
+real is hundreds of nodes of panes and static text. Qwen3.6-35B given the lot picked
+plausible wrong elements and could not reliably interact with anything.
 
 JARVIS does that job itself now, filtered - see
 [Screen control](../README.md#screen-control). The tree never reaches the model; a
@@ -143,16 +117,14 @@ numbered list of the few dozen actionable elements does. On this machine:
 { "screen": { "control": true } }
 ```
 
-### The screenshot problem, in hindsight
+### Vision, and why it stays off
 
-The unresolved part used to be Cline sending a 1.39 MB base64 PNG to an endpoint with no
-vision, there being no `--mmproj` in the launcher above. Two notes on that now:
+Nothing in the screen loop wants pixels. Targets come back as ids and labels, so a text-only
+endpoint is missing nothing, and `logs/marks.png` is written on request for a human to look
+at when a click goes somewhere unexpected. Two notes on that:
 
-- Nothing in the JARVIS loop wants pixels. Targets come back as ids and labels, so the
-  text-only endpoint is missing nothing. `logs/marks.png` is written on request, for a
-  human to look at when a click goes somewhere unexpected. `screen.send_image` is on by
-  default and is the first thing to turn off against an endpoint with no vision - it is a
-  megabyte of payload for something unreadable. The brain sends no images at all.
+- `look_at_image` is the one tool that hands the model a picture, and there is no `--mmproj`
+  in the launcher above, so on this setup it has nothing to read one with.
 - Vision is available if wanted: there is an `mmproj` beside each GGUF, and
   `--mmproj <file> --no-mmproj-offload` loads it without touching VRAM - the ~860 MB of
   projector weights stay in system RAM and encoding runs on the CPU. The cost is a CPU
@@ -163,13 +135,8 @@ For screen control specifically it still is not worth turning on. The text list 
 exact labels and exact geometry; a vision model reading a marked screenshot is inferring
 both, and pays seconds and a thousand context tokens to do it worse. The case that would
 genuinely need pixels is an application with no usable accessibility tree at all - a
-game, a canvas, a remote desktop window - and `send_image` does not solve that one
-either, because with no targets there is nothing to number. See DESIGN.md.
-
-The Cline side of it was never solved. `supportsImages` is the right flag but belongs to
-a model entry rather than a provider, and setting it flat in `providers.json` achieves
-nothing - Cline drops keys outside that file's schema on the next save, without
-complaint. Where it persists the per-model flag has not been worked out here.
+game, a canvas, a remote desktop window - and a picture does not solve that one either,
+because with no targets there is nothing to number. See DESIGN.md.
 
 ### Notes
 
@@ -180,6 +147,6 @@ complaint. Where it persists the per-model flag has not been worked out here.
   The tree still reads perfectly and every click silently does nothing.
 - `jarvis look` and `jarvis click` are the fallback and the way to try it by hand:
   `jarvis look "outlook" --matching reply --marks` prints the numbers and writes the
-  marked screenshot. `screen.control` gates the agent's tools, not these.
+  marked screenshot. `screen.control` gates the brain's tools, not these.
 - The scan expires after 60s and is re-checked against what is under the pointer before
   anything is pressed, so a stale number is refused rather than clicked.

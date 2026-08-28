@@ -49,7 +49,7 @@ _local = threading.local()
 class UiaBackend:
     """Reads the accessibility tree. One automation object per thread.
 
-    COM apartments do not share objects, and an MCP client may well call one
+    COM apartments do not share objects, and a caller may well reach one
     tool from a different thread than the last. Rather than marshal, each
     thread gets its own - it costs a few milliseconds once, and everything
     handed out of here is plain data that crosses threads freely.

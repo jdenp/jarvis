@@ -16,7 +16,7 @@ left. Silence is now the thing that takes deliberate effort.
 
 The model is whatever OpenAI-compatible endpoint `brain.url` points at, which
 here is llama-server on loopback. The tools are the repo's own Python, called
-directly (`tools.py`). Nothing in this file knows about MCP; `mcp_server.py`
+directly (`tools.py`). Nothing in this file knows about the service; `service.py`
 still exists for handing the microphone to a coding agent instead, and the two
 should not be running at once - they would both answer.
 """
@@ -1144,10 +1144,10 @@ def start(config: Config, service, voice=None, terminal=None) -> Brain:
     something: the terminal needs a `cancel()` to call.
 
     Raises rather than carrying on without a model. It used to log a line and
-    leave the voice service up as ears and hands for an agent over MCP, and the
-    result was a JARVIS that listened, transcribed, said nothing and looked
-    entirely well - which is a worse thing to hand somebody than a process that
-    refuses to start and says why.
+    leave the voice service up as ears and hands, and the result was a JARVIS
+    that listened, transcribed, said nothing and looked entirely well - which is
+    a worse thing to hand somebody than a process that refuses to start and says
+    why.
     """
     model = Model(config.brain, terminal=terminal)
     if why := model.available():

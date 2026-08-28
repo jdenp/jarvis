@@ -2,7 +2,7 @@
 
 Schemas in OpenAI's shape and dispatch straight into the Python that already
 does the work - `screen.py` for looking, `hands.py` for acting, `subprocess` for
-the shell. No MCP anywhere in here: this is JARVIS calling its own hands, and a
+the shell. This is JARVIS calling its own hands, and a
 protocol between the two would only be something to serialise through.
 
 Results come back as lines of text rather than JSON. A scan of 200 targets is
@@ -269,9 +269,8 @@ def build_toolbox(config: Config, screen: Screen | None = None, ears=None) -> To
     tools: list[Tool] = []
     seeing: list[str] = []
 
-    # No marked screenshot on this path, deliberately. It exists for `send_image`
-    # and for a human to look at, the brain never sends an image, and a full
-    # screen grab is half a second on every look. `jarvis look --marks` draws one.
+    # No marked screenshot on this path, deliberately: a full screen grab is
+    # half a second on every look. `jarvis look --marks` draws one to look at.
     def look_at_screen(window: str = "", matching: str = "") -> str:
         scan = desktop.look(window, matching)
         others = [title for _, title in desktop.windows() if title != scan.window]

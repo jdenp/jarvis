@@ -2,8 +2,7 @@
 
 Written for whoever is debugging a misclick. "It pressed the wrong thing" is
 unanswerable from a log of labels, and obvious the moment you can see which box
-was numbered what. A vision model can read the same image - that is what
-`screen.send_image` is for - but the picture earns its keep either way.
+was numbered what.
 
 Needs Pillow: uv sync --extra screen
 """

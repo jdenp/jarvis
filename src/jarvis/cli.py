@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(
         dest="command",
-        metavar="[serve | chat | say | next | status | look | click | screenshot | rules | mcp]",
+        metavar="[serve | chat | say | next | status | look | click | screenshot]",
     )
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
@@ -72,7 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     nxt.add_argument("--json", action="store_true", help="print the raw record")
     nxt.add_argument("--follow", action="store_true", help="keep printing as more arrives")
 
-    sub.add_parser("mcp", help="run as an MCP server over stdio, for a connected agent")
     sub.add_parser("status", help="report on the running voice service")
 
     look = sub.add_parser("look", help="number what is clickable on screen, and save the map")
@@ -91,12 +90,6 @@ def build_parser() -> argparse.ArgumentParser:
     kit.add_argument(
         "--write", action="store_true", help="write context/tools/tools.md instead of printing"
     )
-
-    rules = sub.add_parser("rules", help="check the agent guide the client is loading")
-    rules.add_argument(
-        "--install", action="store_true", help="copy the current guide over the stale one"
-    )
-    rules.add_argument("--path", help="the file the agent reads its rules from")
 
     shot = sub.add_parser("screenshot", help="save a picture of a window")
     shot.add_argument("window", nargs="?", default="", help="part of a window title")
@@ -191,13 +184,9 @@ def privacy_report(config: Config, stt_local: bool, tts_local: bool) -> str:
 
 
 def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
-    """Own the microphone and expose it. This is what an agent talks to."""
+    """Own the microphone, and be JARVIS. This is the whole program."""
     from . import ui as terminal
-    from .reap import reap_orphans
     from .service import VoiceService, build_server
-
-    if cleared := reap_orphans():
-        logger.info("Cleared %d stranded MCP server(s) from an earlier session.", cleared)
 
     # Built now, handed to the service only once the brain is actually running -
     # see below. Until then the boot lines go through plain logging, because a
@@ -274,8 +263,8 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         return 2
 
     logger.info(
-        "Voice service on http://%s:%s - `jarvis say`, `jarvis next` and `jarvis mcp` all "
-        "talk to this. Ctrl+C to stop.",
+        "Voice service on http://%s:%s - `jarvis say` and `jarvis next` talk to this. "
+        "Ctrl+C to stop.",
         config.service.host,
         config.service.port,
     )
@@ -469,63 +458,6 @@ def run_tools(config: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-# Who JARVIS is: the brain reads it as its system prompt, and it is what an
-# agent driving JARVIS over MCP should be handed as well. There used to be two
-# files here, one per path, and the difference between them was never clear
-# enough to be worth the duplication - the character is the same either way, and
-# the MCP mechanics are served over the protocol by mcp_server.INSTRUCTIONS.
-GUIDE = "context/soul/jarvis.md"
-
-
-def run_rules(config: Config, args: argparse.Namespace) -> int:
-    """Whether the guide the agent is actually reading is the current one.
-
-    Worth a command of its own because the failure is invisible and total: a
-    guide from before the tools were renamed names tools that do not exist, and
-    the model believes it over the schemas. Nothing in the session says so.
-
-    Only the MCP path needs it, so there is no default location - clients keep
-    their rules wherever they like. `service.agent_rules`, or --path.
-    """
-    from pathlib import Path
-
-    source = project_root() / GUIDE
-    where = args.path or config.service.agent_rules
-    if not where:
-        print(
-            "Nowhere to check. Set service.agent_rules to the file your agent reads its "
-            f"rules from, or pass --path, and this will keep it in step with {GUIDE}. "
-            "Only needed when the microphone is handed to an agent over MCP.",
-            file=sys.stderr,
-        )
-        return 2
-
-    installed = Path(where).expanduser()
-    current = source.read_bytes()
-
-    if args.install:
-        installed.parent.mkdir(parents=True, exist_ok=True)
-        installed.write_bytes(current)
-        print(f"Wrote {installed} from {source}")
-        print("Start a new task - the old text is still in the open one's history.")
-        return 0
-
-    if not installed.is_file():
-        print(f"No guide at {installed}. Install it with `jarvis rules --install`.")
-        return 1
-    if installed.read_bytes() == current:
-        print(f"{installed}\n  matches {GUIDE} ({len(current)} bytes).")
-        return 0
-    print(
-        f"STALE: {installed} does not match {source}.\n"
-        "The agent is being told about tools that may no longer exist, every turn, "
-        "and it will believe that over the schemas.\n"
-        "Fix it with `jarvis rules --install`.",
-        file=sys.stderr,
-    )
-    return 1
-
-
 def run_screenshot(config: Config, args: argparse.Namespace) -> int:
     """A plain picture, for the times when the numbered list is not the question."""
     from pathlib import Path
@@ -613,8 +545,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"jarvis.toml is not valid - {exc}", file=sys.stderr)
         return 2
 
-    # Clients print results for something else to read, and MCP in particular
-    # must keep stdout clean - anything there is parsed as JSON-RPC.
+    # These print a result for something else to read, so warnings only -
+    # a log line in the middle of the output is somebody else's parse error.
     if args.command in {
         "say",
         "next",
@@ -623,7 +555,6 @@ def main(argv: list[str] | None = None) -> int:
         "look",
         "click",
         "screenshot",
-        "rules",
         "tools",
     }:
         configure(config.log_dir, "WARNING")
@@ -639,8 +570,6 @@ def main(argv: list[str] | None = None) -> int:
             return run_click(config, args)
         if args.command == "screenshot":
             return run_screenshot(config, args)
-        if args.command == "rules":
-            return run_rules(config, args)
         if args.command == "tools":
             return run_tools(config, args)
         return run_status(config)
@@ -653,12 +582,6 @@ def main(argv: list[str] | None = None) -> int:
         from .chat import run as run_chat
 
         return run_chat(config, args.verbose)
-
-    if args.command == "mcp":
-        configure(config.log_dir, config.log_level, console=False)
-        from .mcp_server import main as run_mcp
-
-        return run_mcp(config)
 
     logger = configure(config.log_dir, config.log_level)
     logger.info(_banner())

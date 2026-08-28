@@ -5,8 +5,8 @@
 #   .\jarvis.ps1 --admin          elevated, so it can drive Task Manager and friends
 #   .\jarvis.ps1 status           any other subcommand or flag is passed through
 #
-# -Windowed is what an agent should use: it returns immediately instead of
-# blocking the caller, and the live transcript stays visible in its own window.
+# -Windowed returns immediately instead of blocking the caller, and the live
+# transcript stays visible in its own window.
 #
 # --admin asks Windows for consent once, at launch, and never again: a child
 # process inherits its parent's token, so everything JARVIS starts after that is
@@ -35,10 +35,10 @@ function Get-JarvisCommand {
     #
     # --no-sync because `uv run` otherwise reinstalls the project whenever its
     # metadata changes, and reinstalling means replacing .venv\Scripts\jarvis.exe.
-    # An MCP server started by an agent is running from that exe, and Windows
-    # locks a running image - so bumping the version made every start fail with
-    # "The process cannot access the file". The project is installed editable, so
-    # source changes need no sync anyway; only changed dependencies do.
+    # Windows locks a running image, so with JARVIS up, bumping the version made
+    # every start fail with "The process cannot access the file". The project is
+    # installed editable, so source changes need no sync anyway; only changed
+    # dependencies do.
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         if (-not (Test-Path (Join-Path $root ".venv\Scripts\python.exe"))) {
             Write-Host "No virtual environment yet, running uv sync..."

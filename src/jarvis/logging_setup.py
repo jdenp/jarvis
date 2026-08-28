@@ -14,7 +14,8 @@ BACKUP_COUNT = 3
 def configure(log_dir: Path, level: str = "INFO", console: bool = True) -> logging.Logger:
     """Set up the ``jarvis`` logger. Safe to call more than once.
 
-    ``console=False`` keeps stdout clean, which an MCP server needs - anything
+    ``console=False`` keeps stdout clean, which a command whose output is read
+    by something else needs - anything
     printed there is parsed as JSON-RPC by the agent on the other end.
     """
     logger = logging.getLogger("jarvis")

@@ -241,7 +241,11 @@ def test_an_unknown_engine_lists_the_ones_there_are():
 
 
 class FakeKokoro:
-    """Synthesis without the 330MB. Returns a second of silence per call."""
+    """Synthesis without the 330MB. A second of full scale per call.
+
+    Full scale rather than silence so that silence added around it is
+    distinguishable from what was synthesised.
+    """
 
     def __init__(self) -> None:
         self.asked: list[dict] = []
@@ -250,15 +254,17 @@ class FakeKokoro:
         import numpy as np
 
         self.asked.append({"text": text, "voice": voice, "speed": speed, "lang": lang})
-        return np.zeros(24000, dtype="float32"), 24000
+        return np.ones(24000, dtype="float32"), 24000
 
 
 class FakeStream:
     def __init__(self) -> None:
         self.written = 0
+        self.data = bytearray()
 
     def write(self, data):
         self.written += len(data)
+        self.data += data
 
     def stop_stream(self):
         pass
@@ -303,7 +309,22 @@ def test_an_american_voice_is_not(monkeypatch, tmp_path):
 def test_it_plays_what_was_synthesised(monkeypatch, tmp_path):
     speaker, stream = kokoro(monkeypatch, tmp_path)
     speaker.speak("Half past two, sir.")
-    assert stream.written == 24000 * 4, "a second of float32 at 24k"
+    assert stream.written == (24000 + 3600) * 4, "a second of float32 at 24k, behind the lead-in"
+
+
+def test_the_lead_in_is_silence_and_nothing_synthesised_is_lost(monkeypatch, tmp_path):
+    """Kokoro leaves about 200ms of quiet in front of the first phoneme and
+    kokoro-onnx trims it off, which leaves 25 to 50ms. A device waking up eats
+    that, and "a" and "I" are short enough to go with it."""
+    import numpy as np
+
+    speaker, stream = kokoro(monkeypatch, tmp_path)
+    speaker.speak("I have opened Spotify.")
+
+    played = np.frombuffer(bytes(stream.data), dtype="float32")
+    lead_in = int(24000 * 0.15)
+    assert not played[:lead_in].any(), "silence first"
+    assert played[lead_in:].all(), "then every sample that was synthesised"
 
 
 def test_stopping_lands_inside_the_sentence_rather_than_after_it(monkeypatch, tmp_path):
@@ -323,6 +344,12 @@ def test_stopping_lands_inside_the_sentence_rather_than_after_it(monkeypatch, tm
 
 
 def test_the_volume_setting_reaches_the_samples(monkeypatch, tmp_path):
+    """Zero is the one volume that has to be applied, and `if volume:` skipped
+    it - a mute JARVIS played at full scale."""
+    import numpy as np
+
     speaker, stream = kokoro(monkeypatch, tmp_path, volume=0.0)
     speaker.speak("Quietly, sir.")
-    assert stream.written == 24000 * 4, "still played, just silent"
+    played = np.frombuffer(bytes(stream.data), dtype="float32")
+    assert len(played) == 24000 + 3600, "still played"
+    assert not played.any(), "just silent"

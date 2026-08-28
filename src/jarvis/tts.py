@@ -209,6 +209,8 @@ class KokoroSpeaker:
     # Played in tenths of a second, so barge-in is inside a syllable rather
     # than at the end of the sentence.
     CHUNK = 2400
+    # Silence written in front of every utterance. See speak().
+    HEAD_SILENCE = 0.15
 
     def __init__(self, config: TtsConfig) -> None:
         import numpy as np
@@ -275,13 +277,28 @@ class KokoroSpeaker:
         )
 
     def speak(self, text: str) -> None:
+        """Synthesise it and play it, with a little silence in front.
+
+        Kokoro leaves about 200ms of quiet before the first phoneme and
+        kokoro-onnx trims that off, so that the batches of a long reply
+        concatenate without a gap in the middle of it. Measured here, what is
+        left in front of the first word is 25 to 50ms.
+
+        That is not enough. The stream is opened fresh for each utterance and a
+        device that has been idle spends the start of one waking up, so the
+        lead-in goes back on: "a" and "I" are short enough to vanish into it
+        entirely, and a reply that begins "have opened Spotify" is the result.
+        """
         self._cancelled.clear()
         samples, rate = self._kokoro.create(
             text, voice=self._voice, speed=self._speed, lang=self._lang
         )
         samples = self._np.asarray(samples, dtype="float32")
-        if volume := max(0.0, min(1.0, self.config.volume)):
+        # Not `if volume:` - zero is the one setting that has to be applied.
+        if (volume := max(0.0, min(1.0, self.config.volume))) != 1.0:
             samples = samples * volume
+        lead_in = self._np.zeros(int(self.SAMPLE_RATE * self.HEAD_SILENCE), dtype="float32")
+        samples = self._np.concatenate([lead_in, samples])
         stream = self._open()
         try:
             for start in range(0, len(samples), self.CHUNK):
