@@ -901,32 +901,18 @@ def is_loopback(url: str) -> bool:
     return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 
 
-def start(config: Config, service, voice=None, terminal=None) -> threading.Thread | None:
-    """Start the loop against a running service, if there is a model to talk to.
+def start(config: Config, service, voice=None, terminal=None) -> threading.Thread:
+    """Start the loop against a running service.
 
-    Returns None and logs one line when there is not, leaving the voice service
-    up: the microphone, the CLI and the MCP server all still work, so a missing
-    llama-server costs the brain and nothing else.
+    Raises rather than carrying on without a model. It used to log a line and
+    leave the voice service up as ears and hands for an agent over MCP, and the
+    result was a JARVIS that listened, transcribed, said nothing and looked
+    entirely well - which is a worse thing to hand somebody than a process that
+    refuses to start and says why.
     """
-    try:
-        Brain(config, voice or ServiceVoice(service), model=object(), terminal=terminal)
-    except OSError as exc:
-        logger.error(
-            "The brain is off: %s. That file is JARVIS's prompt - restore it from the "
-            "repository, or point brain.system_prompt_file somewhere else.",
-            exc,
-        )
-        return None
-
     model = Model(config.brain, terminal=terminal)
     if why := model.available():
-        logger.warning(
-            "No model at %s - %s. The brain is off; JARVIS is ears and hands for whatever "
-            "agent connects over MCP. Start llama-server, or set brain.enabled false.",
-            config.brain.url,
-            why,
-        )
-        return None
+        raise ModelUnavailable(f"no model at {config.brain.url} - {why}")
 
     brain = Brain(config, voice or ServiceVoice(service), model=model, terminal=terminal)
     # Said before the thread exists, not after. The loop draws its status line

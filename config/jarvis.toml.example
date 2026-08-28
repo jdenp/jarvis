@@ -154,15 +154,15 @@ marks_file = "marks.png"
 # calls a model with the desktop tools, and speaks the reply. Speaking is not a
 # tool here - the model's reply IS what goes through the speakers - which is the
 # whole reason it exists. See DESIGN.md for the five mechanisms it replaced.
-# Nothing happens without a model to talk to: if url does not answer at startup
-# the brain stays off with one line in the log, and the microphone, the CLI and
-# the MCP server all carry on working. Turn it off to hand the microphone back
-# to a coding agent over MCP - with both on, both answer.
-enabled = true
 # Any OpenAI-compatible chat endpoint. llama-server with --jinja is what this
 # was built against, and --jinja is the part that parses tool calls. An endpoint
 # that is not on this machine sees every word of every conversation, and the
 # startup line says so.
+#
+# Required, and there is no switch to turn the brain off. JARVIS used to carry
+# on without a model as ears and hands for an agent over MCP, which meant an
+# unreachable endpoint looked exactly like a working assistant that ignored
+# everything said to it. It stops and says why instead.
 url = "http://127.0.0.1:8081/v1"
 model = "local"                # llama-server ignores it and serves what is loaded
 api_key = ""                   # for an endpoint that wants one. Loopback does not.

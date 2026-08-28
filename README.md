@@ -23,11 +23,14 @@ not started.
 uv sync
 ```
 
-That is it. Everything is on by default and no config file is needed. You also need an
-OpenAI-compatible endpoint for the brain to think with; this was built against llama.cpp on
-loopback, and [`docs/example-configuration.md`](docs/example-configuration.md) has the exact
-launcher, hardware and numbers. If nothing answers at `brain.url`, the brain stays off with
-one line in the log and everything else still works.
+That is it. Everything is on by default and no config file is needed.
+
+**You need an OpenAI-compatible endpoint running before you start it.** This was built
+against llama.cpp on loopback, and [`docs/example-configuration.md`](docs/example-configuration.md)
+has the exact launcher, hardware and numbers. If nothing answers at `brain.url`, JARVIS says
+so and stops - it does not come up half working. There is no switch to run it without a
+model, because a JARVIS that listens, transcribes and answers nobody looks entirely well and
+is not.
 
 ```powershell
 .\jarvis.ps1 -Windowed   # start it in its own window and return
@@ -262,12 +265,13 @@ which turns "why did it click the wrong thing" from unanswerable into obvious.
 No new dependencies for any of it: UI Automation comes through `comtypes`, which was already
 here for SAPI, and input goes through `SendInput` in `ctypes`.
 
-## Handing the microphone to a coding agent instead
+## The MCP server, which is still here
 
-`brain.enabled = false` and JARVIS goes back to being ears and hands over MCP, for a client
-that is a better coding agent than a 35B model driving a desktop. With both on, both answer.
-This is the path everything before 0.8.0 was built for, and it still works, but it is no
-longer the one being developed.
+Everything before 0.8.0 was built for this: an agent connected over MCP, and JARVIS was ears
+and a mouth for it. `jarvis mcp` still runs and the tools still work, and the reasoning behind
+them is the most interesting thing in [`DESIGN.md`](DESIGN.md). But it is no longer a mode of
+operation - the brain always runs, so with a client connected as well, both would answer.
+Read this as the record of how the loop came to be owned rather than as a way to run it.
 
 Hand the agent [`context/soul/jarvis.md`](context/soul/jarvis.md) as context. Most clients
 want that as a copy in a rules directory, and a copy is a thing that goes stale - so point
@@ -411,7 +415,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 590 tests, no hardware, model or network needed
+uv run pytest        # 592 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

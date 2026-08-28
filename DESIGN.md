@@ -14,16 +14,18 @@ mic thread ──▶ queue ──▶ STT ──▶ transcript ──┬──▶
      └──── muted while speaking ◀─────────────┴──▶ GET /heard (blocks) ──▶ MCP agent
 ```
 
-Both halves of that diagram are real and only one should be switched on at a time. The
-brain is `brain.py`; the socket is what a coding agent connects to over MCP. With both
-running, both answer.
+The brain is `brain.py` and it always runs - a missing model stops JARVIS starting rather
+than quietly leaving it as ears and hands, because listening, transcribing and answering
+nobody looks exactly like working. The socket underneath is still what an MCP client
+connects to, and it still works, but connecting one now means two things answer.
 
 This is a reversal and it is worth being straight about. There used to be a standalone
 assistant here - its own LLM, a skills registry, a persona - and it was removed
 deliberately, with a note in this file saying that if you are tempted to add a model back,
 add it on the agent's side of the socket. The argument was that two things which can answer
-the user is one too many. That argument was right and still is, which is why `brain.enabled`
-turns one of them off.
+the user is one too many. That argument was right and still is, which is why there is one
+brain and no switch beside it: the MCP server is a record of how the loop came to be owned
+rather than a second way to run this.
 
 What changed is the position, not the count. The removed assistant answered *alongside* an
 agent; this one *is* the agent. And the reason to move it inside is the whole of the

@@ -153,15 +153,14 @@ def privacy_report(config: Config, stt_local: bool, tts_local: bool) -> str:
         ("ears", config.stt.backend, stt_local, "your microphone audio"),
         ("voice", config.tts.engine, tts_local, "every reply"),
     ]
-    if config.brain.enabled or config.brain.web:
-        from urllib.parse import urlparse
+    from urllib.parse import urlparse
 
-        from .brain import is_loopback
-    if config.brain.enabled:
-        where = urlparse(config.brain.url).netloc or config.brain.url
-        # Between the two, because that is the order the words travel in. An
-        # endpoint off this machine sees every word of every conversation.
-        stages.insert(1, ("brain", where, is_loopback(config.brain.url), "the conversation"))
+    from .brain import is_loopback
+
+    where = urlparse(config.brain.url).netloc or config.brain.url
+    # Between the two, because that is the order the words travel in. An
+    # endpoint off this machine sees every word of every conversation.
+    stages.insert(1, ("brain", where, is_loopback(config.brain.url), "the conversation"))
     if config.brain.web:
         engine = urlparse(config.brain.search_url).netloc or config.brain.search_url
         stages.append(("web", engine, is_loopback(config.brain.search_url), "what you look up"))
@@ -204,27 +203,31 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
     )
     logger.info("Transcript: %s", config.log_dir / config.service.transcript_file)
 
-    thinking = None
-    if config.brain.enabled:
-        from . import brain
+    from . import brain
+    from .brain import ModelUnavailable
 
-        thinking = brain.start(config, service, terminal=screen)
+    try:
+        brain.start(config, service, terminal=screen)
+    except (ModelUnavailable, OSError) as exc:
+        # Nothing carries on without a brain. Listening, transcribing and saying
+        # nothing is a JARVIS that looks entirely well and answers no one, which
+        # is a worse thing to leave running than a process that stops here.
+        logger.error("JARVIS cannot start: %s.", exc)
+        logger.error("It only runs with a model. Start one, or point brain.url at another.")
+        service.stop()
+        return 2
 
-    # Only once the brain is answering is there a conversation to draw. Without
-    # it the words belong to whatever agent is connected over MCP, and drawing
-    # them here as well as logging them would print everything twice.
+    service.ui = screen
+    _hand_the_terminal_over(logger, screen)
+    # Only with a terminal to read from. Started after the takeover so that the
+    # first thing it does cannot land in the middle of the boot lines.
     typing = None
-    if thinking is not None:
-        service.ui = screen
-        _hand_the_terminal_over(logger, screen)
-        # Only with a terminal to read from. Started after the takeover so that
-        # the first thing it does cannot land in the middle of the boot lines.
-        if screen.colour:
-            from .typed import Typing
+    if screen.colour:
+        from .typed import Typing
 
-            typing = Typing(screen, service.typed)
-            typing.start()
-            screen.note("  Type a line and press enter to say it without speaking.")
+        typing = Typing(screen, service.typed)
+        typing.start()
+        screen.note("  Type a line and press enter to say it without speaking.")
 
     if getattr(args, "no_http", False):
         logger.info("Listening. Transcript file only, no API. Ctrl+C to stop.")

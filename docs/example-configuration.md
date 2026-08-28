@@ -73,11 +73,10 @@ llama-server.exe -m "..\Qwen3.6-35B-A3B-IQ4_XS-4.19bpw.gguf" ^
 timeout /t 2 /nobreak >nul
 ```
 
-The same server serves both paths, which is the point of one slot. With the brain on there
-is one context in flight instead of two, so the KV cache is not being evicted and refilled
-by an agent prompt and a JARVIS prompt taking turns - `--cache-reuse 256` then does what it
-is there for. Everything below about telling Cline when to compact only applies with
-`brain.enabled = false`.
+One slot is right because there is one context in flight: the brain's. The KV cache is not
+being evicted and refilled by an agent prompt and a JARVIS prompt taking turns, so
+`--cache-reuse 256` does what it is there for. The section below about telling a coding agent
+when to compact is history - it applied when an agent over MCP held the loop.
 
 Context and `--n-cpu-moe` trade against each other: more context is more KV cache, and moving
 another MoE layer off the GPU is how you pay for it. 100k loads in about 35 seconds here.

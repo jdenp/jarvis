@@ -211,12 +211,14 @@ class BrainConfig:
     this exists. See brain.py, and DESIGN.md for the five mechanisms it replaced.
     """
 
-    # On. Nothing happens without a model to talk to, and if `url` does not
-    # answer at startup the brain stays off with one line in the log while the
-    # microphone, the CLI and the MCP server all carry on working.
-    enabled: bool = True
     # Any OpenAI-compatible chat endpoint. llama-server with --jinja is what
     # this was built against; --jinja is the part that parses tool calls.
+    #
+    # Required. JARVIS does not start without one, and there is no switch to
+    # turn the brain off. It used to carry on as ears and hands for an agent
+    # over MCP, which meant an unreachable model looked exactly like a working
+    # assistant that ignored everything said to it - a worse outcome than a
+    # process that refuses to start and says why.
     url: str = "http://127.0.0.1:8081/v1"
     # Sent as `model`, and llama-server ignores it - it serves whatever was
     # loaded. Only matters for an endpoint that hosts more than one.
