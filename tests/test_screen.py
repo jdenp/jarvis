@@ -92,6 +92,44 @@ def test_a_button_enclosing_its_own_label_survives():
     assert [t.element.name for t in targets] == ["Save"]
 
 
+def test_a_button_holding_two_controls_is_still_a_button():
+    """Chrome's profile picker, copied out of a real scan. Each card is a Button
+    called "Open Casual profile" holding a rename box and a three dot menu, so
+    the wrapper pass cut both cards and left the three dots as the only thing on
+    the list. A live session pressed those six times while being told it was
+    pressing the wrong thing, because the right thing was not offered.
+    """
+    picker = [
+        Element("Who's using Chrome?", "Document", 557, 127, 1024, 758),
+        Element("Open Casual profile", "Button", 810, 474, 162, 178),
+        Element("Rename your profile", "Group", 810, 474, 162, 52),
+        Element("Rename your profile", "Edit", 836, 490, 110, 16),
+        Element("More actions for Casual", "Button", 944, 478, 24, 24),
+        Element("Open Work profile", "Button", 988, 474, 162, 178),
+        Element("Rename your profile", "Edit", 1014, 490, 110, 16),
+        Element("More actions for Work", "Button", 1122, 478, 24, 24),
+        Element("Add", "Button", 1166, 474, 162, 178),
+    ]
+    offered = [target.element.name for target in select(picker)[0]]
+    assert "Open Casual profile" in offered
+    assert "Open Work profile" in offered
+    assert "More actions for Casual" in offered, "and the menu is still there to choose against"
+    assert "Who's using Chrome?" not in offered, "the page itself is still a wrapper"
+
+
+def test_a_container_holding_two_controls_is_still_a_container():
+    """The other half of the same line. A tree item the size of nine chats is
+    scenery whatever it holds, which is what the pass was written for."""
+    targets, _ = select(
+        [
+            Element("Chats", "TreeItem", 0, 0, 300, 200),
+            button("Nathan", top=10, width=280, height=40),
+            button("Sanjay", top=60, width=280, height=40),
+        ]
+    )
+    assert "Chats" not in [target.element.name for target in targets]
+
+
 def test_a_wrapper_mirroring_one_control_is_deduplicated():
     targets, _ = select([button("Send", width=100, height=40), button("Send", width=80, height=24)])
     assert len(targets) == 1

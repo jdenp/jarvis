@@ -26,10 +26,10 @@ The prose around them is for whoever opens the file.
   it: `start chrome https://youtube.com`. That opens the page in the last used
   profile with no profile picker, no new tab to find and no address bar to hunt
   for. Never open a browser and then try to drive it to a page.
-- Chrome started with no address shows the profile picker, and the profile cards
-  do not appear in a scan - only the three dots beside each one, which opens
-  Edit and Delete and nothing else. Clicking there is a dead end however many
-  times you try it. `--profile-directory="Profile 1"` picks a named profile.
+- Chrome started with no address shows the profile picker. Each card scans as
+  "Open Casual profile", and the small button beside it is "More actions" - the
+  three dots, which only offers Edit and Delete. Press the card, not the dots.
+  `--profile-directory="Profile 1"` skips the picker for a named profile.
 - A browser tells the accessibility tree almost nothing about the page it is
   showing. A whole window scans as about thirty elements with no address bar
   among them, so ctrl+L is how you reach it - no scan, every browser.

@@ -456,7 +456,7 @@ all the things that were tried and removed.
 ## Development
 
 ```powershell
-uv run pytest        # 638 tests, no hardware, model or network needed
+uv run pytest        # 640 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

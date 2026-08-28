@@ -49,6 +49,22 @@ CLICKABLE = frozenset(
 # An unnamed button is noise. An unnamed text box is still somewhere to type.
 TEXT_ENTRY = frozenset({"ComboBox", "Document", "Edit"})
 
+# Roles that exist to be pressed, as opposed to roles that hold things. The
+# difference matters to the wrapper pass below: a TreeItem the size of nine
+# chats is scenery, and a Button the size of nine controls is still a button.
+PRESSABLE = frozenset(
+    {
+        "Button",
+        "CheckBox",
+        "Hyperlink",
+        "MenuItem",
+        "RadioButton",
+        "SplitButton",
+        "Tab",
+        "TabItem",
+    }
+)
+
 # Past this the wrapper pass costs more than it saves. Real windows land near
 # 50 once the cheap filters have run, so this is a runaway guard, not a limit.
 WRAPPER_PASS_LIMIT = 600
@@ -407,8 +423,14 @@ def _drop_wrappers(elements: list[Element], *, encloses: int = 2) -> list[Elemen
 
     A tree item holding nine chats has the same rectangle as all nine of them
     together, and clicking it does nothing anyone wanted. Anything wholly
-    enclosing two or more of its neighbours is one of those. Two rather than
-    one, so a button that happens to enclose its own label survives.
+    enclosing two or more of its neighbours is one of those.
+
+    Except a button, which is a thing to press whatever it happens to contain.
+    Chrome's profile picker is the case that proved it: each card is a Button
+    called "Open Casual profile" holding a rename box and a three dot menu, so
+    both cards were cut as wrappers and the only thing left to click was the
+    three dots. A live session pressed those six times while being told it was
+    pressing the wrong thing, because the right thing was not on the list.
     """
     if len(elements) > WRAPPER_PASS_LIMIT:
         logger.debug("Skipping the wrapper pass, %d elements survived the filters", len(elements))
@@ -416,7 +438,8 @@ def _drop_wrappers(elements: list[Element], *, encloses: int = 2) -> list[Elemen
     return [
         element
         for element in elements
-        if sum(1 for other in elements if element.contains(other)) < encloses
+        if element.role in PRESSABLE
+        or sum(1 for other in elements if element.contains(other)) < encloses
     ]
 
 
