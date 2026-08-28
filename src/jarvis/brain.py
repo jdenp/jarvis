@@ -780,7 +780,7 @@ class Brain:
         )
         logger.info("Attached %d image(s) to the conversation.", len(waiting))
 
-    def _ask(self, tools, limit: int | None = None) -> Reply:
+    def _ask(self, tools, limit: int | None = None, think: bool | None = None) -> Reply:
         """One model call, watched, with the meter kept up to date afterwards.
 
         Only a call carrying tools is interruptible. The last one of a turn is a
@@ -793,6 +793,7 @@ class Brain:
             tools,
             limit=limit,
             watch=(lambda: self.voice.hear(0.0)) if tools else None,
+            think=think,
             stop=self.stopped.is_set,
         )
         if reply.thinking:
@@ -859,6 +860,16 @@ class Brain:
         all. With no tools in the request there is nothing for it to emit except
         prose, which is the whole reason speaking cannot be forgotten here.
 
+        Reasoning is off. There is nothing left to decide - the tools are gone
+        and one sentence is owed - and reasoning here does not deliberate, it
+        ruminates. A live session spent it rewriting one sentence twenty times,
+        counting its own words and arguing with itself about whether the prompt
+        wanted a clock time in an answer about Task Manager. It put one in.
+
+        Measured on the same conversation: 2620 tokens out and 10270 characters
+        of reasoning with it on, against 21 tokens and none with it off, for the
+        same sentence. Somebody is listening to silence for the difference.
+
         Two things still go wrong here and both were live. It can TYPE a call
         instead of making one - `<tool_call> <function=look_at_screen>` was read
         out with the tags in it. And it can spend the whole token budget
@@ -869,7 +880,7 @@ class Brain:
         So the last thing said is checked like everything else, and it gets one
         more go with twice the room.
         """
-        reply = self._ask(None)
+        reply = self._ask(None, think=False)
         self.messages.append(reply.message)
         if not (trouble := self._unusable(reply)):
             return reply.text
@@ -879,7 +890,7 @@ class Brain:
         # Twice the budget, because running out of room mid thought is one of
         # the two ways to get here and asking again inside the same cap would
         # get the same nothing.
-        second = self._ask(None, limit=self.settings.max_tokens * 2)
+        second = self._ask(None, limit=self.settings.max_tokens * 2, think=False)
         self.messages.append(second.message)
         return "" if self._unusable(second) else second.text
 
