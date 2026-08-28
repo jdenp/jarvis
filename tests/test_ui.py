@@ -244,3 +244,23 @@ def test_tokens_read_at_a_glance():
     assert count(1234) == "1.2k"
     assert count(12345) == "12k"
     assert count(98304) == "98k"
+
+
+def test_jarvis_speaks_in_orange_and_they_speak_in_blue():
+    ui, written = screen(colour=True)
+    ui.heard("what time is it")
+    ui.spoke("Half past two, sir.")
+    body = written.getvalue()
+    assert COLOUR["user"] + "you >" in body
+    assert COLOUR["jarvis"] + "jarvis >" in body
+    assert "38;5;215" in COLOUR["jarvis"], "light orange, which the basic sixteen do not have"
+
+
+def test_the_name_is_painted_before_anything_else_is_written():
+    """usable() turns VT processing on as a side effect, and the banner is the
+    first thing printed - so the colour has to be asked for through it."""
+    from jarvis.cli import _banner
+
+    art = _banner()
+    assert "Just A Rather Very Intelligent System" in art
+    assert art.startswith(COLOUR["art"]) or "\033[" not in art, "orange, or plain with no codes"

@@ -202,3 +202,23 @@ def _config():
     from jarvis.config import Config
 
     return Config()
+
+
+def test_the_prompt_is_the_same_blue_as_every_other_you():
+    """It is the same thing: a line from them, on its way in."""
+    from jarvis.ui import COLOUR
+
+    written = io.StringIO()
+    reader, _ = typing("hi\r", written=written)
+    reader.read_line()
+    assert COLOUR["user"] + "you > " in written.getvalue()
+
+
+def test_the_status_comes_back_once_the_line_is_gone():
+    """It borrows the row rather than taking it."""
+    written = io.StringIO()
+    reader, _ = typing("hi\r", written=written)
+    reader.ui.status("listening")
+    before = written.getvalue().count("listening")
+    reader.read_line()
+    assert written.getvalue().count("listening") > before

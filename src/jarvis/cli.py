@@ -141,6 +141,18 @@ def apply_args(config: Config, args: argparse.Namespace) -> Config:
     )
 
 
+def _banner() -> str:
+    """The name, in orange if the terminal will take it.
+
+    `usable` turns VT processing on as a side effect, which has to happen before
+    the first escape code goes out - and this is the first thing printed.
+    """
+    from . import ui as terminal
+
+    art = BANNER.format(version=__version__).rstrip()
+    return terminal.paint("art", art, terminal.usable(sys.stdout))
+
+
 def print_devices() -> int:
     for index, name in Microphone.list_devices():
         print(f"{index:>3}  {name}")
@@ -622,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_mcp(config)
 
     logger = configure(config.log_dir, config.log_level)
-    logger.info(BANNER.format(version=__version__).rstrip())
+    logger.info(_banner())
     try:
         return run_serve(config, args, logger)
     except KeyboardInterrupt:

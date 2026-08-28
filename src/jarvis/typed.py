@@ -23,6 +23,8 @@ import logging
 import threading
 from collections.abc import Callable
 
+from .ui import paint
+
 logger = logging.getLogger("jarvis.typed")
 
 # How often the console buffer is looked at while nobody is typing. Cheap, and
@@ -100,7 +102,9 @@ class Typing:
         # leaves half an abandoned sentence on screen.
         shown = 0
         try:
-            self.ui.raw(self.prompt)
+            # The same blue as every other `you >`, because it is the same
+            # thing: a line from them, on its way in.
+            self.ui.raw(paint("user", self.prompt, self.ui.colour))
             while not self._stop.is_set():
                 key = self.keyboard.read()
                 if key in PREFIXES:

@@ -31,11 +31,16 @@ FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 PLAIN_FRAMES = "|/-\\"
 TICK_SECONDS = 0.12
 
+# 256 colour rather than the basic sixteen, because orange has no equivalent
+# there - yellow is as close as that palette gets, and it is not close. Every
+# terminal that takes escape codes at all takes these, and the palette entries
+# are the same shade on every machine.
 COLOUR = {
     "reset": "\033[0m",
     "dim": "\033[2m",
     "user": "\033[36m",
-    "jarvis": "\033[1;33m",
+    "jarvis": "\033[1;38;5;215m",
+    "art": "\033[38;5;208m",
     "loud": "\033[1m",
     "warn": "\033[33m",
     "tool": "\033[35m",
