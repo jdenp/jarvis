@@ -172,6 +172,13 @@ marks_file = "marks.png"
 # looked exactly like a working assistant that ignored everything said to it.
 # It stops and says why instead.
 url = "http://127.0.0.1:8081/v1"
+# How long to wait for it at startup before giving up. Both this and the model
+# server usually start at login and nothing sequences them, so the ordinary case
+# is JARVIS winning the race and a large model taking a minute or two to load off
+# disk. It asks every five seconds and says so in the log while it waits. 0 goes
+# back to failing at once. Only `jarvis serve` waits - chat mode is somebody at a
+# keyboard, who is better told than left in front of a prompt that never returns.
+wait_for_model_seconds = 600.0
 model = "local"                # llama-server ignores it and serves what is loaded
 api_key = ""                   # for an endpoint that wants one. Loopback does not.
 # Low on purpose. Choosing a tool is a one-right-answer decision with no creative

@@ -8,6 +8,7 @@ out, and a model that returns nothing - and how each one is closed.
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 
 import pytest
@@ -240,6 +241,58 @@ def test_the_endpoint_is_asked_whether_it_can_see():
 
     model = Model(Config().brain, client=httpx.Client(transport=httpx.MockTransport(props)))
     assert model.can_see() is True
+
+
+def refusing_until(answers_on: int):
+    """A client that refuses the connection until the nth try."""
+    import httpx
+
+    tries = []
+
+    def endpoint(request):
+        tries.append(request)
+        if len(tries) < answers_on:
+            raise httpx.ConnectError("connection refused")
+        return httpx.Response(200, json={"data": []})
+
+    return tries, httpx.Client(transport=httpx.MockTransport(endpoint))
+
+
+def test_a_model_that_is_not_up_yet_is_waited_for():
+    """Both this and the model server start at login and nothing sequences
+    them, so the ordinary case is JARVIS winning the race and a 35B model
+    taking a minute or two to load off disk."""
+    tries, client = refusing_until(3)
+    model = Model(Config().brain, client=client)
+    assert model.wait_until_available(seconds=5, every=0.01) == ""
+    assert len(tries) == 3
+
+
+def test_a_wait_that_runs_out_says_why_rather_than_going_on_forever():
+    """A URL with a typo in it is not a model that is still loading, and the
+    difference is only visible from how long it has been."""
+    _, client = refusing_until(10_000)
+    model = Model(Config().brain, client=client)
+    assert "refused" in model.wait_until_available(seconds=0.05, every=0.01)
+
+
+def test_the_waiting_can_be_switched_off():
+    """Which is what `jarvis chat` gets: somebody sitting at a keyboard is
+    better told at once than left in front of a prompt that never returns."""
+    tries, client = refusing_until(10_000)
+    model = Model(Config().brain, client=client)
+    assert model.wait_until_available(seconds=0, every=0.01)
+    assert len(tries) == 1, "asked once, and did not come back"
+
+
+def test_a_model_that_is_already_up_is_not_waited_for():
+    tries, client = refusing_until(1)
+    model = Model(Config().brain, client=client)
+
+    started = time.monotonic()
+    assert model.wait_until_available(seconds=600) == ""
+    assert time.monotonic() - started < 1, "no sleep before the first try"
+    assert len(tries) == 1
 
 
 def sent(config, **kwargs) -> dict:

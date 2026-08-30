@@ -17,9 +17,12 @@ what the model writes is what comes out of the speakers.
 uv sync
 ```
 
-You need an OpenAI-compatible endpoint running first - built against llama.cpp on loopback,
-with the exact launcher and hardware in [`docs/example-configuration.md`](docs/example-configuration.md).
-If nothing answers, JARVIS says so and stops rather than coming up half working.
+You need an OpenAI-compatible endpoint - built against llama.cpp on loopback, with the exact
+launcher and hardware in [`docs/example-configuration.md`](docs/example-configuration.md).
+It does not have to be up first: JARVIS asks every five seconds for up to ten minutes
+(`brain.wait_for_model_seconds`), which is what makes starting both at login work whichever
+way round they fire. If nothing ever answers it says so and stops rather than coming up half
+working.
 
 ```powershell
 .\jarvis.ps1 -Windowed   # start it in its own window and return
@@ -226,7 +229,7 @@ you want.
 ## Development
 
 ```powershell
-uv run pytest        # 670 tests, no hardware, model or network needed
+uv run pytest        # 674 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

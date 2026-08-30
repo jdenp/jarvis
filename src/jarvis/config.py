@@ -239,6 +239,15 @@ class BrainConfig:
     # everything said to it - a worse outcome than a process that refuses to
     # start and says why.
     url: str = "http://127.0.0.1:8081/v1"
+    # How long to wait for it at startup before giving up. Both this and the
+    # model server start at login and nothing sequences them, so the ordinary
+    # case is JARVIS winning the race and a 35B model taking a minute or two to
+    # load off disk. Refusing to start there is refusing over a few seconds of
+    # bad luck. It is checked every few seconds and says so while it waits; 0
+    # goes back to failing at once. Only the service waits - `jarvis chat` is
+    # somebody sitting at a keyboard, and a prompt that never comes back is
+    # worse than being told the endpoint is down.
+    wait_for_model_seconds: float = 600.0
     # Sent as `model`, and llama-server ignores it - it serves whatever was
     # loaded. Only matters for an endpoint that hosts more than one.
     model: str = "local"

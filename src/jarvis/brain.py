@@ -99,6 +99,14 @@ LOOK_BACK_TOKENS = 160
 # of that has happened, and nothing was learned at the end of it anyway.
 LOOK_BACK_SECONDS = 30.0
 
+# How often the endpoint is asked whether it is up yet, while waiting for it at
+# startup, and how often that wait says so out loud. Every five seconds because
+# a refused connection costs nothing and the thing being waited for is a model
+# loading off disk; once a minute because a log line every five seconds for two
+# minutes is not news.
+MODEL_POLL_SECONDS = 5.0
+MODEL_SAY_SECONDS = 60.0
+
 # How many of them are kept from one turn. It is asked after everything JARVIS
 # says now, so the ceiling is what stops one talkative afternoon filling the
 # file on its own.
@@ -278,6 +286,45 @@ class Model:
         except httpx.HTTPError as exc:
             return str(exc)
         return ""
+
+    def wait_until_available(self, seconds: float, every: float = MODEL_POLL_SECONDS) -> str:
+        """Ask until it answers. Empty once it does, otherwise the last reason.
+
+        For the startup race and nothing else: the model server and this are
+        both launched at login, in no order, and a 35B model takes a minute or
+        two to load. Refusing to start over that is refusing over the order two
+        shortcuts happened to fire in.
+
+        It says what it is doing while it waits. A process that sits silent for
+        two minutes and then works is indistinguishable from one that has hung,
+        and this one is holding the microphone while it does it.
+        """
+        why = self.available()
+        if not why or seconds <= 0:
+            return why
+        started = time.monotonic()
+        logger.info(
+            "No model at %s yet - %s. Waiting up to %.0fs for one, asking every %.0fs.",
+            self.base,
+            why,
+            seconds,
+            every,
+        )
+        said = started
+        while time.monotonic() - started < seconds:
+            time.sleep(every)
+            if not (why := self.available()):
+                logger.info("The model answered after %.0fs.", time.monotonic() - started)
+                return ""
+            if time.monotonic() - said >= MODEL_SAY_SECONDS:
+                said = time.monotonic()
+                logger.info(
+                    "Still waiting for %s after %.0fs - %s",
+                    self.base,
+                    time.monotonic() - started,
+                    why,
+                )
+        return why
 
     def _props(self) -> dict:
         """What llama.cpp says about itself, once. Not part of the OpenAI shape,
@@ -1396,14 +1443,17 @@ def start(config: Config, service, voice=None, terminal=None) -> Brain:
     Returns the brain rather than its thread, because escape has to reach
     something: the terminal needs a `cancel()` to call.
 
-    Raises rather than carrying on without a model. It used to log a line and
-    leave the voice service up as ears and hands, and the result was a JARVIS
-    that listened, transcribed, said nothing and looked entirely well - which is
-    a worse thing to hand somebody than a process that refuses to start and says
-    why.
+    Waits for the endpoint rather than requiring it to be up first, because
+    nothing sequences the two at login - see `wait_until_available`.
+
+    Raises once that wait is spent rather than carrying on without a model. It
+    used to log a line and leave the voice service up as ears and hands, and the
+    result was a JARVIS that listened, transcribed, said nothing and looked
+    entirely well - which is a worse thing to hand somebody than a process that
+    refuses to start and says why.
     """
     model = Model(config.brain, terminal=terminal)
-    if why := model.available():
+    if why := model.wait_until_available(config.brain.wait_for_model_seconds):
         raise ModelUnavailable(f"no model at {config.brain.url} - {why}")
 
     brain = Brain(config, voice or ServiceVoice(service), model=model, terminal=terminal)

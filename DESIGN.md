@@ -211,6 +211,23 @@ split each tool's prose from its signature, and prose out of date with a signatu
 believed over the signature. Keeping it generated means the file is always right and is never
 load-bearing.
 
+**A model that is not up yet is not a missing model.** JARVIS refuses to start without
+an endpoint, and that is right - listening, transcribing and saying nothing is a worse
+thing to hand somebody than a process that stops and says why. But at login there is no
+order between the shortcut that starts the model server and the shortcut that starts
+this, and the model takes a minute or two to load off disk, so the common case for that
+refusal was not a missing model at all - it was arriving first.
+
+So the check became a wait: ask every five seconds for up to ten minutes, then fail
+exactly as before. A refused connection costs nothing to make, so the poll is cheap
+enough to be dumb. It says what it is waiting for and repeats itself once a minute,
+because a process that sits silent for two minutes and then works is indistinguishable
+from one that has hung - and this one is holding the microphone while it does it.
+
+Only the service waits. `jarvis chat` is somebody sitting at a keyboard who asked a
+question, and they are better told the endpoint is down than left in front of a prompt
+that never comes back.
+
 **The web, and the promise it costs.** `search_web` and `read_page` are the first things here
 that leave the machine, which is why they are a switch and why `privacy_report` names
 DuckDuckGo in the startup line. They are on by default anyway, and that is a departure worth

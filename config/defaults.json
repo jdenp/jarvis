@@ -57,6 +57,7 @@
   },
   "brain": {
     "url": "http://127.0.0.1:8081/v1",
+    "wait_for_model_seconds": 600.0,
     "model": "local",
     "api_key": "",
     "temperature": 0.4,
