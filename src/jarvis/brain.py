@@ -70,7 +70,7 @@ STEERED = (
 # is nothing left to call by then, so this asks for the only thing still useful.
 OUT_OF_STEPS = (
     "That was markup, not an answer, and it would have been read out with the "
-    "tags in it. There are no tools left this turn. Say in one plain sentence "
+    "tags in it. There are no tools left to call. Say in one plain sentence "
     "what you found and what you could not do."
 )
 
@@ -88,38 +88,39 @@ CALL_IT = (
 # tomorrow. Asked for in the prompt below and enforced here.
 PER_SCAN = re.compile(r"\btargets?\s+(number\s+)?\d", re.IGNORECASE)
 
-# Enough for two sentences and no more. Whether one line is worth keeping is not
-# a question that gets better with more room to answer it in.
-LOOK_BACK_TOKENS = 200
+# Enough for three lines and the headings over them, and no more. Whether a line
+# is worth keeping is not a question that gets better with more room to answer
+# it in, and this is asked after everything JARVIS says.
+LOOK_BACK_TOKENS = 160
+
+# How many of them are kept from one turn. It is asked after everything JARVIS
+# says now, so the ceiling is what stops one talkative afternoon filling the
+# file on its own.
+LOOK_BACK_LINES = 3
 
 # Asked after the answer has gone to the speakers, so the wait is somebody
 # else's. Deliberately hard to say yes to: most turns teach nothing, and a list
 # that fills up with "Teams was open" is worse than an empty one.
-LOOK_BACK = """That turn is over and they are hearing the answer now. Nobody is
-waiting on this.
+LOOK_BACK = """/no_think
+That is finished and they are hearing the answer now. Answer in one go.
 
-Something in it did not work first time - a refusal, a failure, or the same
-call coming round again. Look back at what happened. Is there anything about how
-this DESKTOP behaves that would have saved you that step, and that is not
-already written down below? A window that behaves oddly, a route that works, one
-that never does, the name a program is really installed under.
+Anything in it worth still knowing next month that is not already below? Two
+kinds count. How this DESKTOP behaves - a window that behaves oddly, a route
+that works, one that never does, the name a program is really installed under.
+And who you are talking to - their work, what they are building, what they own,
+what they enjoy, how they want things done.
 
-Reply with nothing at all if there is nothing worth keeping, which is most
-turns. Otherwise reply with at most two lines, each beginning with "- " and each
-a single sentence somebody could act on months from now.
+Nothing at all is the usual answer. What somebody asks for is not a fact about
+them: "open Chrome" is a request, "I always use Chrome" is a preference.
+Otherwise at most three lines, each beginning "- ", under a "## " heading -
+reusing one from the list below whenever it fits, because two headings for the
+same kind of thing is the mess this is here to avoid.
 
-Only what you actually saw happen, never why you think it happened. A guess at
-the cause written down as fact is worse than an empty file.
-
-Nothing that was merely true at the time. What was open, what was running, what
-was on the taskbar and what the clock said are all gone by tomorrow.
-
-Never a target number: every scan numbers what it finds again from scratch, so a
-number written down here points at something else tomorrow. Never anything that
-would be true of any Windows machine, only this one.
-
-Never anything about this conversation - not what they asked, not what you said,
-not what they seem to want. Only how the machine behaves.
+Only what you saw or heard. Never a guess at why, never what you have decided
+about them, and nothing you would not say to their face - they can read this
+file. Nothing that was merely true at the time: what was open, what was
+running, what the clock said. Never a target number, they are renumbered every
+scan. Nothing about this conversation itself.
 
 Already written down:
 {known}"""
@@ -588,7 +589,7 @@ class Brain:
         return with_ears(body, "pause_transcription" in self.toolbox.tools).format(
             user=os.environ.get("USERNAME") or "the user",
             tools=", ".join(self.toolbox.names) or "nothing but your own knowledge",
-            memories="\n" + self.remembered() if self.remembered() else "",
+            memories=self.remembered(),
         )
 
     def remembered(self) -> str:
@@ -602,16 +603,16 @@ class Brain:
             return ""
         return memories.as_prompt(self._known())
 
-    def _known(self) -> list[str]:
+    def _known(self) -> memories.Groups:
         """Every line of it, reference and learned, as the prompt will see it."""
         if not self.settings.memories:
             return []
         written = self._written()
         return memories.load(written[0].parent, written, self.settings.max_memory_chars)
 
-    def _written(self) -> tuple[Path, Path]:
-        """The two files JARVIS adds to, which are the two that get capped."""
-        return tools.memory_file(self.config), tools.navigation_file(self.config)
+    def _written(self) -> tuple[Path, ...]:
+        """The one file JARVIS adds to, which is the one that gets capped."""
+        return (tools.memory_file(self.config),)
 
     # ------------------------------------------------------------------ a turn
 
@@ -623,7 +624,6 @@ class Brain:
         so a model call made now costs nobody anything.
         """
         before = len(self.messages)
-        stumbles = self.toolbox.stumbles
         self.stopped.clear()
         self._working.set()
         try:
@@ -638,12 +638,10 @@ class Brain:
                 logger.info("Cancelled - the turn was dropped.")
                 self.ui.note("Cancelled.")
                 return ""
-            used_hands = any(message.get("role") == "tool" for message in self.messages[before:])
-            # Only after a turn that hit something. Asked after every turn that
-            # touched a tool, it felt obliged to produce a lesson from a turn
-            # that went perfectly, and wrote down what was on the taskbar.
-            stumbled = self.toolbox.stumbles > stumbles
-            if self.settings.consolidate and self.settings.memories and used_hands and stumbled:
+            # After anything it said out loud, which includes the turns that used
+            # no tools at all: half of what is worth keeping is something they
+            # said about themselves, and nobody learns that by clicking.
+            if self.settings.consolidate and self.settings.memories and spoken:
                 self._look_back()
             return spoken
         finally:
@@ -666,7 +664,7 @@ class Brain:
         return True
 
     def _look_back(self) -> None:
-        """Write down anything about the desk that turn just taught.
+        """Write down anything that turn taught, about the desk or about them.
 
         The only way a lesson outlives the conversation it was learned in
         without somebody typing it up. Everything about it is deliberately quiet:
@@ -674,14 +672,19 @@ class Brain:
         vanishes like any other, and it never touches the conversation - the
         question is asked over a copy and the answer is thrown away.
         """
-        self.ui.status("looking back")
-        known = "\n".join(f"- {x}" for x in self._known()) or "- nothing yet"
+        self.ui.status("learning")
+        known = memories.as_lines(self._known()) or "- nothing yet"
         asked = [*self.messages, {"role": "user", "content": LOOK_BACK.format(known=known)}]
         try:
             # No reasoning, and a short leash. Reasoning earns its cost when a
             # tool has to be chosen, and this call has no tools: left on, it
             # spent four thousand characters weighing up whether one line was
             # worth keeping and then ran out of room before writing it.
+            #
+            # Asked twice, because once is not enough. `enable_thinking` is a
+            # chat template argument and a fine-tuned template is free to ignore
+            # it - this one does, and reasoned its way through every turn until
+            # `/no_think` went in the prompt as well.
             reply = self.model.reply(
                 asked,
                 tools=None,
@@ -697,13 +700,18 @@ class Brain:
 
         if reply.thinking:
             logger.info("looking back: %s", " ".join(reply.thinking.split()))
-        path = tools.navigation_file(self.config)
-        for lesson in memories.bullets_in(reply.text)[:2]:
+        learned = [
+            (heading, lesson)
+            for heading, lessons in memories.sections_in(reply.text)
+            for lesson in lessons
+        ]
+        path = tools.memory_file(self.config)
+        for heading, lesson in learned[:LOOK_BACK_LINES]:
             if PER_SCAN.search(lesson):
                 logger.info("Not kept, target numbers do not survive the scan: %s", lesson)
                 continue
-            logger.info("Learned: %s", lesson)
-            memories.remember(path, lesson, self.settings.max_memory_chars)
+            logger.info("Learned under %s: %s", heading, lesson)
+            memories.remember(path, heading, lesson, self.settings.max_memory_chars)
 
     def _answer(self, said: list[str]) -> str:
         """One utterance, worked and spoken. Returns what was said out loud."""
@@ -1265,12 +1273,16 @@ def with_ears(body: str, has_them: bool) -> str:
     Inline in the file behind markers so that whoever opens it reads the whole
     thing, rather than a prompt with a hole in it and the missing piece in
     Python somewhere.
+
+    Rejoined as paragraphs either way. The markers used to be cut out where
+    they stood, which left the block welded to the end of the line above it.
     """
     if EARS_OPEN not in body or EARS_SHUT not in body:
         return body
     before, rest = body.split(EARS_OPEN, 1)
     inside, after = rest.split(EARS_SHUT, 1)
-    return before + (inside.strip() if has_them else "").strip() + after
+    parts = [before.strip(), inside.strip() if has_them else "", after.strip()]
+    return "\n\n".join(part for part in parts if part)
 
 
 def written_as_words(text: str, names: list[str]) -> str:

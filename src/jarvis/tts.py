@@ -25,7 +25,14 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])([\"')\]]*)\s+|\n+")
 
 
 class Speaker(Protocol):
-    """A synthesiser that can be interrupted mid utterance."""
+    """A synthesiser that can be interrupted mid utterance.
+
+    `render` is optional and is asked for with getattr: it is what lets the web
+    app play a reply in the browser instead of out of the speakers here, and
+    only Kokoro has it. Without one the reply is spoken at the desk as usual,
+    which is the right fallback - a phone that gets no audio is worse than a
+    phone whose audio came out of the wrong room.
+    """
 
     def speak(self, text: str) -> None: ...
     def stop(self) -> None: ...
@@ -311,6 +318,20 @@ class KokoroSpeaker:
         if rate != self.SAMPLE_RATE:  # pragma: no cover - the model is fixed at 24k
             logger.warning("Kokoro returned %dHz audio, expected %d.", rate, self.SAMPLE_RATE)
 
+    def render(self, text: str) -> bytes:
+        """The same speech as a wav, for the web app to play instead.
+
+        No lead-in silence: that is here for a sound device waking up mid
+        syllable, and a browser playing a whole file has no such problem.
+        """
+        samples, rate = self._kokoro.create(
+            text, voice=self._voice, speed=self._speed, lang=self._lang
+        )
+        samples = self._np.asarray(samples, dtype="float32")
+        if (volume := max(0.0, min(1.0, self.config.volume))) != 1.0:
+            samples = samples * volume
+        return as_wav(samples, rate)
+
     def stop(self) -> None:
         """Safe from any thread: a flag speak() checks between chunks."""
         self._cancelled.set()
@@ -376,6 +397,23 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
     raise ValueError(
         f"Unknown TTS engine {config.engine!r}. Choose auto, kokoro, sapi, edge or none."
     )
+
+
+def as_wav(samples, rate: int) -> bytes:
+    """Float samples as a 16-bit mono wav, ready to write down a socket."""
+    import io
+    import wave
+
+    import numpy as np
+
+    clipped = np.clip(np.asarray(samples, dtype="float32"), -1.0, 1.0)
+    body = io.BytesIO()
+    with wave.open(body, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(int(rate))
+        handle.writeframes((clipped * 32767).astype("<i2").tobytes())
+    return body.getvalue()
 
 
 class SpeechEngine:
@@ -446,6 +484,27 @@ class SpeechEngine:
         with self._drained:
             self._pending += 1
         self._queue.put(text)
+
+    def render(self, text: str) -> bytes | None:
+        """The reply as a wav, if this speaker can make one without playing it.
+
+        None means it cannot and the caller should say it here instead, which is
+        every engine but Kokoro. Waits for the worker to have built one, the
+        same way `is_local` does - the alternative is the first reply of a run
+        going to the wrong room while the model is still loading.
+
+        Synthesis happens on the calling thread rather than the worker's,
+        because there is nothing to serialise against: nothing is being played.
+        """
+        self._ready.wait(timeout=10)
+        render = getattr(self._speaker, "render", None)
+        if render is None:
+            return None
+        try:
+            return render(text)
+        except Exception:
+            logger.exception("Could not render that for the web app; saying it here.")
+            return None
 
     def wait(self, timeout: float | None = None) -> bool:
         """Block until everything queued has been spoken."""

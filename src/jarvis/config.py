@@ -131,6 +131,16 @@ class ServiceConfig:
     # erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
+    # A page this service serves, so a phone can be the microphone. Off. On, it
+    # adds GET / and the endpoints under it, and a second capture source that
+    # streams into the same phrase splitter the room does - so JARVIS answers out
+    # loud at the desk and the page shows you what it said.
+    #
+    # This service is still loopback and still has no auth, and that is the whole
+    # design: put `tailscale serve` in front of it and let Tailscale say who you
+    # are. Do not bind this to anything routable instead. The browser needs the
+    # https that gives you anyway - a microphone is refused outright without it.
+    start_webapp: bool = False
     # Key that toggles transcription. Empty disables it. Avoid keys you type
     # with - nothing is swallowed, so whatever is chosen still does its normal
     # job everywhere else. Num Lock earns it by being a key nothing else wants;
@@ -337,34 +347,31 @@ class BrainConfig:
     # the tail carries the error, so a prefix loses the half that mattered.
     # About 500 tokens per 1000 characters.
     shell_output_chars: int = 4000
-    # Lessons JARVIS writes down for itself with the remember tool, and reads
-    # back into its prompt at the start of every turn. The desk is full of things
-    # only discoverable by getting them wrong, and none of them are the same on
-    # the next machine - so the list is grown rather than shipped. Plain
-    # markdown: edit or delete any of it, or add your own.
+    # What JARVIS writes down for itself with the remember tool, and reads back
+    # into its prompt at the start of every turn. How the desk behaves, most of
+    # which is only discoverable by getting it wrong, and who it is talking to.
+    # None of it is the same on the next machine, so the list is grown rather
+    # than shipped. Plain markdown under headings: edit or delete any of it.
     memories: bool = True
-    # The file remember() writes to, under the project root unless it is an
-    # absolute path. Not in git - it is about this desktop. Every other markdown
-    # file beside it is read as well and read whole: those are reference,
-    # written by hand and bounded by hand, and navigation.md is the one that
-    # ships. Only this one grows on its own, so only this one is capped.
+    # The file it writes to, under the project root unless it is an absolute
+    # path. Not in git - it is about this desk and whoever sits at it. Every
+    # other markdown file beside it is read as well and read whole: those are
+    # reference, written by hand and bounded by hand, and os-navigation.md is
+    # the one that ships. Only this one grows on its own, so only this one is
+    # capped.
     memories_file: str = "context/memories/memories.md"
-    # Where the looking back below writes what it works out about getting
-    # around. Beside it, and shipped, is os-navigation.md - how Windows behaves
-    # everywhere, edited by hand. Anything here that turns out to be general
-    # belongs there, and moving it is a text edit.
-    navigation_file: str = "context/memories/navigation/user-navigation.md"
-    # After a turn that used its hands, and while the answer is being read out,
-    # JARVIS looks back over what it did and writes down anything that would
-    # have saved it a step. It costs one model call of nobody's time, because
-    # the speech is still playing - and it is the only way a lesson outlives the
-    # conversation it was learned in without somebody typing it up.
+    # After anything it says out loud, and while the answer is being read out,
+    # JARVIS looks back over the turn and writes down whatever was worth
+    # keeping. It costs one model call of nobody's time, because the speech is
+    # still playing - and it is the only way a lesson outlives the conversation
+    # it was learned in without somebody typing it up.
     consolidate: bool = True
     # How much of the written file is read back. This is prompt, paid on every
     # single call - the only setting here that is - so it is capped, and past it
-    # the oldest go, which is the right end to lose since the desk changes and a
-    # lesson can go stale. The reference files beside it are not counted.
-    max_memory_chars: int = 2000
+    # the top of the file stops being read, which is the right end to lose since
+    # the desk changes and a lesson can go stale. The reference files beside it
+    # are not counted.
+    max_memory_chars: int = 4000
     # Who JARVIS is. Empty means context/soul/jarvis.md, which is where the
     # prompt lives - prose, tuned by reading it out loud and changing a word,
     # with no copy in the code to drift from. Character and behaviour only:

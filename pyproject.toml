@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.10.0"
+version = "0.12.2"
 description = "Jarvis - A local voice and computer-use assistant for Windows"
 readme = "README.md"
 requires-python = ">=3.12"

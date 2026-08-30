@@ -6,13 +6,10 @@ A voice assistant for a Windows desktop that runs entirely on the machine it is 
 It listens, works out what you wanted, does it - clicking real buttons on real windows,
 running real commands - and says what happened. No wake word, no cloud, no API key.
 
-JARVIS owns its own loop. **The reply is the speech.** There is no tool for talking, so
-there is nothing to forget - what the model writes is what comes out of the speakers. It used
-to have no model of its own, and everything that was tried to make something else speak
-reliably is recorded in [`DESIGN.md`](DESIGN.md) as a failure.
+**The reply is the speech.** There is no tool for talking, so there is nothing to forget:
+what the model writes is what comes out of the speakers.
 
-**Windows only.** The ears would port - Whisper and PyAudio do not care - but the hands are
-UI Automation and `SendInput`. Linux is not off the table, it just is not started.
+**Windows only.** The ears would port; the hands are UI Automation and `SendInput`.
 
 ## Setup
 
@@ -20,26 +17,16 @@ UI Automation and `SendInput`. Linux is not off the table, it just is not starte
 uv sync
 ```
 
-That is it. Everything is on by default and no config file is needed.
-
-**You need an OpenAI-compatible endpoint running before you start it.** This was built
-against llama.cpp on loopback, and [`docs/example-configuration.md`](docs/example-configuration.md)
-has the exact launcher, hardware and numbers. If nothing answers at `brain.url`, JARVIS says
-so and stops - it does not come up half working. There is no switch to run it without a
-model, because a JARVIS that listens, transcribes and answers nobody looks entirely well and
-is not.
+You need an OpenAI-compatible endpoint running first - built against llama.cpp on loopback,
+with the exact launcher and hardware in [`docs/example-configuration.md`](docs/example-configuration.md).
+If nothing answers, JARVIS says so and stops rather than coming up half working.
 
 ```powershell
 .\jarvis.ps1 -Windowed   # start it in its own window and return
 .\jarvis.ps1             # or run it here and watch the transcript
 ```
 
-The first run downloads Whisper's `base.en`, about 150 MB, and caches it. Then just talk.
-Everything heard goes through the loop, and JARVIS decides what was aimed at it - there is
-no name to say.
-
-The terminal it runs in shows the conversation as it happens: what it heard, every tool call
-and the first line of what came back, and what it said.
+First run downloads Whisper's `base.en`, about 150MB. Then just talk.
 
 ```
 you > what is the weather in melbourne
@@ -48,105 +35,76 @@ you > what is the weather in melbourne
 jarvis > Fifteen degrees and overcast, sir.
 ```
 
-Under that sits one live line. It is the model thinking, streamed as it writes, replaced by
-whatever it does next and gone when it answers - visible while it happens, kept by nothing,
-which is all "collapsing" ever means. At the right hand end of it is how full the context is
-and how much the last reply cost. Voice mode and chat mode draw through the same code, so
-they look the same, and piped or redirected it degrades to plain lines with no escape codes.
-Detail goes to `logs/jarvis.log`, and every utterance to `logs/heard.jsonl`. The log holds
-every tool call, every result, every thought and where the context stood at the end of each
-turn, so it grows quickly; `log_max_mb` is the whole budget it and its backups may take
-between them, 100MB by default, and past that the oldest quarter goes.
-The reasoning is in that log too: it is the only record of why it did what it did, and a
-voice session has nowhere else to keep one.
-
-One throwaway request goes out at startup so the system prompt and the tool schemas are
-already in the model server's cache. It costs a second or two of nobody's time and takes it
-off the first answer, which is the one that would otherwise feel broken.
+Everything heard goes through the loop and JARVIS decides what was aimed at it - there is no
+name to say. Under the transcript is one live line: the model thinking as it writes, gone
+when it answers, with how full the context is at the end of it. Detail goes to
+`logs/jarvis.log` (every call, result and thought - `log_max_mb` caps the lot at 100MB) and
+every utterance to `logs/heard.jsonl`.
 
 ## Talking to it
 
-Speech goes to Whisper on this machine, then to the model with the desktop tools attached,
-then whatever the model writes is spoken. A phrase ends after 1.2s of non-speech
-(`audio.pause_threshold`), which is the floor under how quickly anything can happen and is
-set high deliberately - being cut off mid sentence is worse than waiting.
+- **Talk over it.** Speaking abandons the half written answer and the turn carries on knowing
+  what you just said. Everything it already found is kept, so "no, the other one" builds on
+  the look that has already happened.
+- **Or type.** Start typing in the window it is running in and the line goes in exactly where
+  speech does. Escape throws it away; escape on an empty line stops whatever it is doing.
+- **Num Lock stops it listening**, from anywhere, including with an admin window in front.
+  Nothing is transcribed or logged until you press it again. Or just ask - "stop listening,
+  I'm on a call" - and it will tell you which key brings it back.
+- **A phrase ends after 1.2s of quiet** (`audio.pause_threshold`), set high on purpose:
+  being cut off mid sentence is worse than waiting.
 
-Two things follow from owning the loop that were impossible before.
-
-**You can talk over it while it works.** The reply is read as it is generated and the room is
-checked while that happens, so speaking abandons the half written answer where it stands and
-the turn carries on knowing what you just said. Everything it had already found is kept, so
-"no, the other one" builds on the look that has already happened rather than starting again.
-The last call of a turn is the exception: it is one sentence from being spoken, and abandoning
-it would lose the answer to work already done.
-
-Cutting it off once it is *speaking* is a different thing, and a later one: a phrase does not
-exist until you have stopped talking, so it lands a couple of seconds in rather than on the
-first syllable. Enough to escape the rest of a long wrong answer, which is the point. It needs
-the microphone open while JARVIS talks, and that is off by default, because with no echo
-cancellation an open microphone on speakers transcribes JARVIS itself. See
-`audio.listen_while_speaking` - on headphones there is nothing to hear, so turn it on there.
-Typing a line cuts a reply off whatever the audio settings say.
-
-**A turn that did work cannot end silent.** If the model runs out of tool calls without saying
-anything, it is asked once more with the tools taken away, so prose is the only move left.
-Staying quiet is still allowed and takes deliberate effort - a reply of a single hyphen, which
-is what it should do when it hears somebody else's conversation.
-
-You can also just type. In the window JARVIS is running in, start typing and the line appears
-where the status usually sits; press enter and it goes in exactly where speech does - same
-`you >`, same transcript, same everything after that. Nothing shows until you press a key, and
-escape throws the line away. It is the answer to a room with somebody else in it, a word
-Whisper will never get right however many times you say it, and anything you would rather not
-say out loud. It works while the microphone is paused, too, since typing is plainly a choice
-to say something.
-
-Escape on an empty line stops it. Whatever it was writing is abandoned mid sentence, whatever
-it was saying is cut off, the turn is dropped out of the conversation entirely, and the prompt
-comes straight back for what you meant instead - there is no sense making you press a key
-twice to say the thing that made you interrupt.
-
-Press Num Lock to stop listening from anywhere, and anywhere means anywhere - the key's own
-lamp is watched rather than the keyboard hooked, so it works with Task Manager or an admin
-terminal in front, which a hook does not. The microphone stops being read, so nothing is
-transcribed, logged or written to `heard.jsonl` until you press it again - not merely withheld.
-Caps Lock and Scroll Lock work the same way; any other key falls back to a hook and needs
-`uv sync --extra hotkey`. `service.hotkey = ""` disables it.
-
-Some windows are out of reach, and it will say so rather than trying. Anything running as
-administrator - Task Manager, an admin terminal, regedit - shows an unelevated process one
-element and no targets, silently discards its clicks and keystrokes, and swallows the hotkey
-while it has focus. `.\jarvis.ps1 --admin` lifts all of that: one consent prompt at launch and
-never another, because a child process inherits its parent's token. The cost is the same fact -
-there is no second checkpoint, so every command `run_command` runs is an administrator command
-with nothing asked first, every application it opens is elevated too, and mapped network drives
-disappear because an elevated token is a separate logon session. It also cannot be used over
-SSH, since the consent dialog is drawn on the secure desktop where only somebody at the machine
-can click it. Off by default, and startup says which mode it is in.
-
-Asking works too. "Stop listening, I'm on a call" is a tool it has, and it tells you which
-key brings it back, because from then on it cannot hear you ask. Either way the live line
-says it is not listening, rather than claiming to be.
-
-## Typing to it instead
+Cutting it off once it is *speaking* needs the microphone open while it talks, which is off
+by default - with no echo cancellation it transcribes itself. On headphones, turn on
+`audio.listen_while_speaking`.
 
 ```powershell
-.\jarvis.ps1 chat
+.\jarvis.ps1 chat        # same loop and same memories, no microphone - works over SSH
 ```
 
-Same loop, same tools, same memories, no microphone - so it works over SSH, and it is much
-the better place to work out why the model did something. Tool calls are printed as they
-happen, you can scroll back, and no experiment costs a sentence out loud. `/tools`,
-`/memories` and `/help`; Ctrl+D or `/quit` to leave. `--verbose` puts the tool results on
-screen as well as in the log.
+**On the go, use the web app.** Set `service.start_webapp = true` and JARVIS serves a page
+that turns a phone into the microphone: hold the browser open, talk, and the reply comes
+back through the phone's loudspeaker rather than out of the speakers at the desk. There is a text box for
+when you cannot talk, a picker for which microphone the browser uses, and a stop-listening
+button, since a phone has no Num Lock key. It draws the same live line the terminal does, so
+you can see what it is doing while it does it. It stays on loopback with no auth of its own -
+reach it by putting
+`tailscale serve` in front of it, which also gives you the https a browser insists on before
+it will open a microphone. Off by default.
 
-It needs no voice service running, which also means it cannot hear you and cannot speak. It
-can still see and drive the desktop, but only the one it is actually logged into - UI
-Automation does not reach the desktop from a remote session.
+While a page is open the browser has the whole conversation: the desk microphone stops being
+listened to, and the reply is rendered to a wav and played in the browser rather than out of
+the speakers. Somebody holding a phone is not at the desk, so a desk microphone there is
+listening to a room nobody is in. Close the tab and both come back within about half a
+minute. The voice half needs Kokoro - the other engines cannot be rendered without playing
+them, so with those it speaks at the desk as usual.
+
+## What it remembers
+
+Most of what makes a desk workable is only discoverable by getting it wrong - a window whose
+tree is empty until it has been focused, which of four identical buttons is the one that
+works. None of that is in a model's weights and the next machine's list is different, so
+JARVIS keeps its own.
+
+**It will also learn about you.** After anything it says out loud it looks back over the turn
+and writes down what was worth keeping - and that includes what you told it about yourself:
+your work, what you are building, what you like, how you want things done. All of it goes in
+`context/memories/memories.md`, in plain bullets under headings, on this machine and not in
+git. It is yours: open it, delete a line, rewrite a heading, or empty it. `brain.memories =
+false` turns the whole thing off.
+
+```
+context/
+  soul/jarvis.md                        who it is - character, nothing else
+  tools/tools.md                        what it can do, generated from tools.py
+  memories/memories.md                  everything it has learned, and about you
+  memories/navigation/os-navigation.md  how Windows behaves, by hand, shipped
+```
+
+Every markdown file under `memories` is read into the prompt, so adding your own is dropping
+a file in. `brain.max_memory_chars` caps how much of the grown one comes back.
 
 ## The voice
-
-Three local options and one that is not.
 
 | `tts.engine` | What it is | Cost |
 | --- | --- | --- |
@@ -155,8 +113,7 @@ Three local options and one that is not.
 | `edge` | Microsoft's neural voices, over the network | every reply leaves the machine |
 | `none` | Text only | - |
 
-`auto` picks Kokoro if you have downloaded it and SAPI otherwise, so adding the model is the
-whole of switching over. Two files, once:
+`auto` picks Kokoro if you have downloaded it and SAPI otherwise. Two files, once:
 
 ```powershell
 uv sync --extra kokoro
@@ -166,92 +123,49 @@ curl.exe -L -o models/kokoro-v1.0.onnx "$base/kokoro-v1.0.onnx"
 curl.exe -L -o models/voices-v1.0.bin "$base/voices-v1.0.bin"
 ```
 
-Measured here on the CPU, a 7700X with llama-server and Whisper already on the GPU: a short
-reply is 0.42s for 1.34s of audio, a two clause one 0.66s for 3.78s - so roughly 5x real time
-once a sentence has any length to it, and under a second before it starts talking either way.
-`tts.kokoro_device` takes `cpu`, `cuda` or `auto`, the same three Whisper's does and with the
-same fallback: `auto` tries CUDA, logs why it could not, and carries on. CUDA is around 20x
-real time, which is faster than nothing can hear, so it is only worth the ~300MB of VRAM if
-the GPU is otherwise idle.
+`tts.kokoro_voice` picks who it sounds like, and the first letter picks the accent -
+`bm_george` and `bm_lewis` are British men, `bf_emma` British women, `am_`/`af_` American.
 
-`tts.kokoro_voice` picks the voice, and the first letter picks the accent it is read with -
-`bm_george` and `bm_lewis` are British men, `bf_emma` British women, `am_`/`af_` the American
-ones.
+## Screen control
 
-## Looking things up
+Handing a model the whole accessibility tree does not work: a Teams window is 810 nodes and a
+35B model given the lot picks something plausible and wrong. So the model never sees the tree
+or a coordinate. It gets a numbered list of the 54 things it can actually press, and names a
+number with what it expects to be there:
 
-`search_web` and `read_page`, through DuckDuckGo's HTML endpoint, which needs no key. The
-snippets usually answer the question on their own; a page is only fetched when they do not,
-and comes back as text with the markup stripped and cut to `brain.page_chars`.
-
-**This is the one thing in the default install that leaves the machine**, so the startup line
-says so every time and `brain.web = false` removes both tools. It is on by default because
-there is no local version of it - off, the feature does not exist rather than falling back to
-something.
-
-Two things about that endpoint. Its limit is one query a second, which JARVIS keeps to rather
-than discovers, because 300ms of waiting is invisible in a conversation and being refused
-costs a whole turn; past it, the refusal arrives as a 202 carrying a challenge page, which is
-a success code that most HTTP clients wave through. And it is somebody's HTML page rather than
-somebody's contract, so when it changes shape a search returns "no results" rather than
-nonsense. `brain.search_url` points at your own SearXNG instead, which has neither problem.
-
-## What it remembers
-
-Most of what makes the desk workable is only discoverable by getting it wrong: a window
-whose accessibility tree is empty until it has been focused once, an application that takes
-a moment to build itself, which of four identically labelled buttons is the one that works.
-None of that is in a model's weights and none of it is worth writing into a prompt by hand,
-because the next machine's list is different.
-
-So JARVIS keeps its own, two ways. It calls `remember()` mid-turn when it works something
-out, and the refusal it just hit says as much. And after any turn that used its hands, while
-the answer is being read out, it looks back over what it did and writes down anything that
-would have saved it a step. That second one costs nothing you can feel: the speech is playing
-on another thread, so the model call happens in time nobody is waiting through.
-
-Either way the whole list goes into its prompt at the start of every turn, so a lesson learned
-at half past two is in play at half past three.
-
-```
-context/
-  soul/jarvis.md                        who it is - character, nothing else
-  tools/tools.md                        what it can do, generated from tools.py
-  memories/navigation/os-navigation.md  how Windows behaves, by hand, shipped
-  memories/navigation/user-navigation.md  what it works out about getting around
-  memories/memories.md                  everything else it works out
+```powershell
+.\jarvis.ps1 look "outlook" --matching reply
+#    1  Button      Reply
+#    2  Button      Reply all
+.\jarvis.ps1 click 1 --expecting Reply
 ```
 
-Split by what each one changes for. `soul` is character: how to speak, when to stay quiet,
-that its words end its turn. It is the same whoever is driving, so there is one file rather
-than one per path, and it should almost never need editing. `tools` is generated. Everything
-about the desk lives under `memories`, and every markdown file in there is read into the
-prompt at any depth - so adding your own is dropping a file in.
+`--expecting` is checked before anything is pressed, which turns the classic misclick - a
+number left over from before the list scrolled - into a refusal. Stale scans, occluded
+points and minimised windows are refused too, and anything running as administrator is out of
+reach entirely unless you start it with `.\jarvis.ps1 --admin`.
 
-The two halves of `navigation` are the same distinction one level down. `os-navigation.md`
-ships and is edited by hand: how Windows behaves, true on any machine. `user-navigation.md`
-is JARVIS's own and is not in git, because it is about this desk. When something in the
-second turns out to be true of the first, move it over - that is a text edit, and it is the
-whole reason they are separate files.
+`screen.control = false` leaves the read-only half: looking and screenshots, no pointer.
+There is also `screenshot()` and `look_at_image()` for the things a tree cannot describe -
+a chart, an error dialog, a page a browser says nothing about.
 
-The memories are plain markdown bullets, so one that has gone wrong is fixed by opening the
-file and deleting the line, and you can add your own. Capped by `brain.max_memory_chars`,
-oldest dropped first - the right end to lose, since the desk changes and a lesson about an
-application that has since been updated is worse than no lesson.
+## What leaves this machine
 
-`soul/jarvis.md` is the prompt itself rather than a copy of it - there is nothing in the code
-to drift from, and if it is missing the brain says so and does not start. Keep it short. The
-more instructions it carries the more carelessly they are followed, which is the accessibility
-tree lesson in different clothes.
+Nothing, unless you ask for it. Startup prints exactly what each stage is doing:
 
-Only `memories.md` is written by JARVIS, and only it is capped: the reference beside it is
-bounded by whoever wrote it, and trimming the curated half to make room for the accumulated
-half would be the wrong way round. The tool descriptions are not remembered at all: the
-schemas go into every single request, so there is nothing to load and nothing to forget. They
-are still the largest influence on its behaviour after the system prompt, and reading them
-should not mean reading Python - so `jarvis tools` prints them and `--write` regenerates
-`context/tools/tools.md`, with a test to catch drift. Change the wording in `tools.py` rather
-than in the file: prose that drifts from a signature gets believed over it.
+```
+ears: whisper (local) -> brain: 127.0.0.1:8081 (local) -> voice: auto (local). Nothing leaves this machine.
+```
+
+| Setting | Sends | To |
+| --- | --- | --- |
+| `brain.web = true` (default) | your search terms | DuckDuckGo |
+| `stt.backend = "google"` | your raw microphone audio | Google |
+| `tts.engine = "edge"` | every reply, as text | Microsoft |
+| `brain.url` off loopback | every word of every conversation, and any screenshot | wherever it points |
+
+Web search is the one thing on by default that leaves, because there is no local version of
+it. `brain.web = false` removes both tools.
 
 ## The rest of the commands
 
@@ -268,190 +182,26 @@ than in the file: prose that drifts from a signature gets believed over it.
 .\jarvis.ps1 --list-devices        # find your microphone
 ```
 
-Call the script by its full path and it works from any directory. The service has to be
-running for the rest to do anything - it is the process that owns the audio hardware, which
-is why `say` from another terminal can mute the same microphone that is listening. It runs
-as `uv`/`python`, so `Get-Process jarvis` finds nothing; use `jarvis.ps1 status`.
-
-## Screen control
-
-The problem this solves: handing a model the whole accessibility tree does not work. A Teams
-window is 810 nodes, almost all of them panes, groups and static text, and a 35B model given
-the lot picks something plausible and wrong. That same window has 54 elements you can
-actually act on. Outlook in a browser: 833 nodes, 177 targets.
-
-So the model never sees the tree, and never sees a coordinate either. It gets a numbered
-list and names a number:
-
-```powershell
-.\jarvis.ps1 look "outlook" --matching reply
-#    1  Button      Reply
-#    2  Button      Reply all
-.\jarvis.ps1 click 1 --expecting Reply
-```
-
-`--expecting` is the interesting part. It is required and it is checked against the label
-before anything is pressed. A number left over from a scan taken before the list scrolled
-still resolves to a perfectly good coordinate, and that is how automation ends up pressing
-delete on the wrong row. Naming what you expect turns a misclick into a refusal.
-
-Three more things are checked. A scan expires after 60s. Whatever is under the point has to
-still be the target, which catches occlusion for free - a desktop icon behind a terminal is
-genuinely not clickable, and the refusal says so instead of clicking the terminal. And a
-minimised window is refused outright, because it still reports plausible coordinates left
-over from wherever it was last drawn.
-
-Some of it needs no scan at all. `press_keys` knows the media keys, and Windows routes those
-to whatever is playing, so "pause my music" is one call with no window to find. The
-taskbar scans as a window called `Taskbar`, one target per pinned app, which is the sane way
-to launch something. And typing with no target goes wherever the caret already is, which is
-the only way into the Start menu - it reports a single element covering itself, so a scan
-comes back flagged as having nothing clickable rather than offering a target that cannot
-work.
-
-Two limits worth knowing. Windows silently refuses input from an unelevated process to any
-window running as administrator: the tree reads perfectly and every click does nothing. And
-UI Automation only reaches the desktop from the signed-in session, the same way an audio
-device does, so a service in session 0 sees nothing.
-
-`screen.control = false` leaves the read-only half - looking and screenshots, no pointer.
-## Looking at a picture
-
-The accessibility tree is a list of labels, and some things are not in it - a chart, an error
-dialog, a page a browser tells UI Automation nothing about. Two tools for that, deliberately
-separate because they are separate questions:
-
-```
-screenshot()                      -> saved a picture of every monitor to logs/screen.png
-screenshot(window="Chrome")       -> that window alone
-look_at_image(path="...")         -> it arrives with the next message
-```
-
-Taking a picture is cheap and often the file is all that was wanted. Looking at one costs
-about 1.3k tokens for a 1600px capture, so it is asked for on purpose. The two calls are also
-why the second is where the answer goes: a tool result is text, no endpoint takes an image on
-a `tool` message, so the picture travels as the user message after it. Only the most recent
-one stays attached - a turn that looks twice would otherwise carry both for the rest of the
-conversation.
-
-It needs a model loaded with a vision projector. llama-server reports that on `/props` as
-`modalities.vision`, and startup warns if `brain.images` is on and the model says it cannot
-see, because a picture sent to something with no eyes is payload for nothing. Set
-`brain.images = false` and both tools disappear rather than being present and useless.
-
-For pressing something, `look_at_screen` and its numbers are still surer than any picture.
-
-`jarvis look --marks` writes `logs/marks.png` with a numbered box burned over every target,
-which turns "why did it click the wrong thing" from unanswerable into obvious. `--raw` prints
-every element the window exposed with the dropped ones marked, which answers the other half -
-whether a control JARVIS could not press was filtered out or was never in the tree at all.
-The two look identical from the outside and want opposite fixes.
-
-No new dependencies for any of it: UI Automation comes through `comtypes`, which was already
-here for SAPI, and input goes through `SendInput` in `ctypes`.
-
-## What leaves this machine
-
-Nothing, unless you ask for it. At startup JARVIS prints exactly what each stage is doing:
-
-```
-ears: whisper (local) -> brain: 127.0.0.1:8081 (local) -> voice: auto (local). Nothing leaves this machine.
-```
-
-Three settings can change that, all of them opt in and all of them named in that line:
-
-| Setting | Sends | To |
-| --- | --- | --- |
-| `stt.backend = "google"` | your raw microphone audio | Google |
-| `tts.engine = "edge"` | every reply, as text | Microsoft |
-| `brain.url` off loopback | every word of every conversation | wherever it points |
-
-One thing is not JARVIS's to promise: `look_at_image` hands a picture to the model, and a
-picture of your screen has whatever was on it at the time. Local model, local picture - `brain.url` on loopback means it
-goes no further than llama-server. Point that off the machine and every screenshot goes with
-it. `brain.images = false` takes both tools away.
+The service has to be running for most of them - it owns the audio hardware. It runs as
+`uv`/`python`, so `Get-Process jarvis` finds nothing; use `jarvis.ps1 status`.
 
 ## Configuration
 
-Three ways, each beating the last: `config/jarvis.json`, then `JARVIS_*` environment
-variables, then command line flags.
-
-```powershell
-jarvis config              # everything in effect, and where it came from
-jarvis config --defaults   # just the built-in defaults
-```
-
-`config/defaults.json` lists every option with its default. It is generated from the code
-and a test fails if the two drift, because a hand-written example goes stale the first time
-someone changes a default. `config/jarvis.toml.example` is the annotated version of the
-same thing, kept because comments explain a trade-off better than a schema can.
-
-JSON has no comments, so any key beginning with `_` is ignored and can hold the reason a
-setting is what it is. Copy only the bits you want; anything absent keeps its default.
-
-## Architecture
-
-```
- mic thread ──▶ queue ──▶ STT ──▶ transcript ──▶ brain ──▶ tools ──▶ speech
-      ▲                                                                │
-      └──────────────── muted while speaking ◀─────────────────────────┘
-```
-
-| Module | Role |
-| --- | --- |
-| `cli.py` | Argument parsing, wiring, and every command |
-| `service.py` | Owns the hardware, serves loopback HTTP |
-| `brain.py` | The agent loop, the model client, and the system prompt |
-| `tools.py` | What the brain can do, as schemas and dispatch |
-| `chat.py` | The same loop with a keyboard instead of a microphone |
-| `ui.py` | The terminal: scrolling conversation, one live line, no dependency |
-| `typed.py` | A line typed into the voice session, taken as though it were heard |
-| `memories.py` | The list JARVIS writes for itself and reads back every turn |
-| `transcript.py` | Append-only record with blocking reads |
-| `client.py` | Client for the service, used by the CLI |
-| `microphone.py` | Background capture, phrase splitting, mute |
-| `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
-| `stt.py` | Local Whisper transcription, with Google as an opt in |
-| `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
-| `hotkey.py` | The key that stops and starts listening, from anywhere |
-| `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
-| `uia.py` | UI Automation through comtypes: the only Windows-specific module |
-| `hands.py` | Synthetic clicks and keystrokes, through SendInput |
-| `marks.py` | The numbered boxes drawn onto a screenshot |
-| `echo.py` | Recognising JARVIS's own voice coming back |
-| `config.py` | Defaults, TOML, environment |
-
-[`DESIGN.md`](DESIGN.md) has the reasoning behind everything that is not obvious, including
-all the things that were tried and removed.
-
-## Not done yet
-
-- **A summary of a summary.** Forgetting is a ladder of three now and the top two are
-  cheap, but the third one rewrites its own earlier output rather than the conversation, so a
-  long enough session ends up with a paragraph written from a paragraph. Nothing catches that
-  degrading. Below it, `brain.history_turns` still deletes rather than compacts: ask about
-  something from before the summary and what is left is the paragraph, not the exchange.
-- **An honest word when one turn is too big.** The trim always keeps at least one turn, so a
-  single turn that overflows the window on its own cannot be cut. llama-server rejects the
-  request, that arrives as an HTTP error like any other, and what gets said out loud is "I
-  cannot reach my model, sir" - which is not what happened. It takes a scan of a very
-  crowded window several times over to get there, so it has not been hit yet.
-- **Speech interruption on speakers.** Cutting JARVIS off mid sentence needs the microphone
-  open while it talks, and with no acoustic echo cancellation that means it transcribes
-  itself - which it did, answering its own weather forecast with "That's right. Is there
-  anything else I can help you with?" The text comparison in `echo.py` is the only defence
-  and a long reply beat it once already, so `audio.listen_while_speaking` is off and
-  headphones are the workaround. It is late even there, by the length of the pause that ends
-  a phrase: a couple of seconds, not the first syllable. Doing it properly means real AEC on
-  the capture path, and cutting on speech onset rather than on a finished phrase.
+`config/jarvis.json`, then `JARVIS_*` environment variables, then command line flags, each
+beating the last. `config/defaults.json` lists every option with its default and is generated
+from the code; `config/jarvis.toml.example` is the same thing annotated. Copy only the bits
+you want.
 
 ## Development
 
 ```powershell
-uv run pytest        # 591 tests, no hardware, model or network needed
+uv run pytest        # 631 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```
+
+[`DESIGN.md`](DESIGN.md) is the long version: how it is put together, why each part is the
+shape it is, and every idea that was tried and thrown away.
 
 ## License
 

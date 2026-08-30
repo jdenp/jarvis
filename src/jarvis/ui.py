@@ -20,6 +20,7 @@ brackets.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 import sys
@@ -123,6 +124,7 @@ class Silent:
     def note(self, text: str) -> None: ...
     def warn(self, text: str) -> None: ...
     def status(self, text: str) -> None: ...
+    def watch(self, listener) -> None: ...
     def thinking(self, text: str) -> None: ...
     def meter(self, text: str) -> None: ...
     def resting(self) -> None: ...
@@ -155,6 +157,9 @@ class Ui:
         self._lock = threading.RLock()
         self._status = ""
         self._meter = ""
+        # Anybody else who wants the live line - the web app draws the same
+        # thing on a phone, and it should say what this says.
+        self._watchers: list = []
         self._width = 0
         self._tick = 0
         self._stop = threading.Event()
@@ -255,8 +260,25 @@ class Ui:
 
     # ------------------------------------------------------------------ live
 
+    def watch(self, listener) -> None:
+        """Report the live line to somebody else as well.
+
+        Only `status` and `resting`, not `thinking`: reasoning arrives hundreds
+        of times a second and is drawn at whatever pace the terminal can manage,
+        which is not a thing to put down a socket.
+        """
+        self._watchers.append(listener)
+
+    def _tell(self, text: str) -> None:
+        for listener in self._watchers:
+            with contextlib.suppress(Exception):
+                # Somebody else's copy of the live line is never worth taking
+                # the terminal down over.
+                listener(text)
+
     def status(self, text: str) -> None:
         """Say what is happening now, on the line that redraws in place."""
+        self._tell(text)
         with self._lock:
             self._status = text
             if self.live and text and self._spinner is None:
@@ -298,6 +320,7 @@ class Ui:
 
     def resting(self) -> None:
         """Nothing is happening. Clears the live line without printing."""
+        self._tell("")
         with self._lock:
             self._status = ""
             if self._held and self._stepped:

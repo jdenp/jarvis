@@ -7,6 +7,11 @@ reopening per utterance is slow and throws away the calibration.
 The stream is cut into phrases here rather than by speech_recognition, so that
 background noise cannot hold a phrase open. See PhraseEnd, and vad.py for how a
 buffer is judged to be speech at all.
+
+`_run` reads four things off its source - CHUNK, SAMPLE_RATE, SAMPLE_WIDTH and
+stream.read - so a source does not have to be a device. RemoteStream below is
+the same four members fed by the web app, which is what lets a phone use every
+phrase rule written here without a second copy of any of it.
 """
 
 from __future__ import annotations
@@ -27,6 +32,14 @@ from .vad import SAMPLE_RATE, SAMPLES, build_detector
 logger = logging.getLogger("jarvis.microphone")
 
 KEEP_SILENCE = 0.5  # silence kept either side of a phrase
+
+# How long a remote stream may go quiet before it counts as gone. Under it the
+# gap is read as silence, which is what a gap in the network sounds like.
+REMOTE_IDLE_SECONDS = 3.0
+
+# Longest a remote read waits for a chunk before giving up and calling it
+# silence. A quarter of the way into the wait for the next 250ms of audio.
+REMOTE_WAIT_SECONDS = 0.25
 
 
 class MicrophoneError(RuntimeError):
@@ -68,22 +81,130 @@ class PhraseEnd:
         return count
 
 
-class Microphone:
-    """Continuous background capture from a single input device."""
+class RemoteStream:
+    """Audio arriving over the network, shaped like an open input device.
 
-    def __init__(self, config: AudioConfig | None = None) -> None:
+    Everything `_run` asks of a source, so a phone streaming PCM is one and the
+    phrase rules, the mute gate and the trimming all apply to it unchanged. What
+    it must not be is a file: there is no end of it to reach, and a read that
+    returns nothing stops the capture loop for good.
+
+    So a quiet network reads as silence rather than as the end, which is what it
+    sounds like - and it means a phone that walks out of range mid sentence still
+    gets the words it managed to send, because the silence ends the phrase the
+    ordinary way. Past `idle_seconds` of it the stream goes back to sleep and
+    blocks instead, so nothing is fed to Silero on behalf of a phone that is not
+    there.
+    """
+
+    CHUNK = SAMPLES
+    SAMPLE_RATE = SAMPLE_RATE
+    SAMPLE_WIDTH = 2
+
+    def __init__(self, idle_seconds: float = REMOTE_IDLE_SECONDS) -> None:
+        self.idle_seconds = idle_seconds
+        # _run reads `source.stream`, and there is no second object to be.
+        self.stream = self
+        self._chunks: queue.Queue[bytes] = queue.Queue(maxsize=64)
+        self._pending = bytearray()
+        self._closed = threading.Event()
+        self._live = threading.Event()
+        self._last = 0.0
+
+    @property
+    def live(self) -> bool:
+        """Whether anything is streaming into this right now."""
+        return self._live.is_set()
+
+    def write(self, pcm: bytes) -> None:
+        """Take a chunk of 16 kHz mono 16-bit audio off the network."""
+        if self._closed.is_set() or not pcm:
+            return
+        self._last = time.monotonic()
+        self._live.set()
+        try:
+            self._chunks.put_nowait(bytes(pcm))
+        except queue.Full:
+            logger.warning("Remote audio backed up, dropping a chunk.")
+
+    def read(self, frames: int) -> bytes:
+        """One buffer, blocking. Silence while a live stream is quiet.
+
+        Closing lets whatever already arrived play out first. A phone that hung
+        up mid sentence still said the words, and they are sitting in the queue.
+        """
+        wanted = frames * self.SAMPLE_WIDTH
+        while len(self._pending) < wanted:
+            if chunk := self._take():
+                self._pending += chunk
+            elif self._closed.is_set():
+                return b""
+            elif self.live and time.monotonic() - self._last <= self.idle_seconds:
+                return bytes(wanted)
+            else:
+                self._live.clear()
+                self._pending.clear()
+        buffer = bytes(self._pending[:wanted])
+        del self._pending[:wanted]
+        return buffer
+
+    def _take(self) -> bytes:
+        """The next chunk, waiting only while one is expected to turn up."""
+        try:
+            if self._closed.is_set():
+                return self._chunks.get_nowait()
+            return self._chunks.get(timeout=REMOTE_WAIT_SECONDS if self.live else 1.0)
+        except queue.Empty:
+            return b""
+
+    def close(self) -> None:
+        """Stop for good. A blocked read gives up within the second."""
+        self._closed.set()
+        self._live.clear()
+
+    def __enter__(self) -> RemoteStream:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
+class Microphone:
+    """Continuous background capture from a single source.
+
+    Usually a device. Given a `source` it is whatever that is, and given a `sink`
+    it delivers into somebody else's queue - which is how the web app's audio and
+    the room's arrive at the service as one stream of phrases.
+    """
+
+    def __init__(
+        self,
+        config: AudioConfig | None = None,
+        source=None,
+        sink: queue.Queue | None = None,
+    ) -> None:
         self.config = config or AudioConfig()
         self.detector = build_detector(self.config)
         self._recognizer = sr.Recognizer()
 
-        self._source: sr.Microphone | None = None
-        self._queue: queue.Queue[sr.AudioData] = queue.Queue(maxsize=16)
+        self._source = source
+        self._given = source is not None
+        self._queue: queue.Queue[sr.AudioData] = (
+            sink if sink is not None else queue.Queue(maxsize=16)
+        )
         self._muted = threading.Event()
         # Separate from _muted, which the echo gate owns and clears on its own.
         self._paused = threading.Event()
+        # And separate again: this one is another source having the floor.
+        self._deferred = threading.Event()
         self._deaf_until = 0.0
         self._running = threading.Event()
         self._thread: threading.Thread | None = None
+
+    @property
+    def sink(self) -> queue.Queue:
+        """The queue phrases are delivered into, to share with another source."""
+        return self._queue
 
     @property
     def energy_threshold(self) -> float:
@@ -94,19 +215,20 @@ class Microphone:
         """Open the device, calibrate if needed, and begin background capture."""
         if self._thread is not None:
             return
-        try:
-            # 16 kHz explicitly. Left to itself speech_recognition opens at the
-            # device default - 44100 on this mic - and Silero silently scores
-            # frames that are not the length it thinks they are.
-            self._source = sr.Microphone(
-                device_index=self.config.device_index,
-                sample_rate=SAMPLE_RATE,
-                chunk_size=SAMPLES,
-            )
-        except OSError as exc:  # pragma: no cover - hardware dependent
-            raise MicrophoneError(f"Could not open input device: {exc}") from exc
+        if not self._given:
+            try:
+                # 16 kHz explicitly. Left to itself speech_recognition opens at the
+                # device default - 44100 on this mic - and Silero silently scores
+                # frames that are not the length it thinks they are.
+                self._source = sr.Microphone(
+                    device_index=self.config.device_index,
+                    sample_rate=SAMPLE_RATE,
+                    chunk_size=SAMPLES,
+                )
+            except OSError as exc:  # pragma: no cover - hardware dependent
+                raise MicrophoneError(f"Could not open input device: {exc}") from exc
+            self._calibrate()
 
-        self._calibrate()
         self._running.set()
         self._thread = threading.Thread(target=self._capture, name="jarvis-capture", daemon=True)
         self._thread.start()
@@ -214,7 +336,7 @@ class Microphone:
         Checked per buffer, so JARVIS's own voice is dropped as it is recorded,
         and so a pause costs no transcription rather than merely hiding it.
         """
-        if self._muted.is_set() or self._paused.is_set():
+        if self._muted.is_set() or self._paused.is_set() or self._deferred.is_set():
             return False
         return time.monotonic() >= self._deaf_until
 
@@ -244,6 +366,22 @@ class Microphone:
         self._deaf_until = time.monotonic() + self.config.echo_guard_seconds
         self.drain()
         self._muted.clear()
+
+    def defer(self, elsewhere: bool) -> None:
+        """Stop capturing while another source has the floor.
+
+        Two live microphones in one room hear the same sentence twice, and the
+        second copy of it arrives as a follow-up question nobody asked. Its own
+        flag again, because it is neither the echo gate nor a pause anybody
+        asked for, and it must not clear either of them on its way out.
+
+        Nothing is drained. The queue is shared with whatever took the floor, so
+        emptying it here would throw away the phrase that caused this.
+        """
+        if elsewhere:
+            self._deferred.set()
+        else:
+            self._deferred.clear()
 
     def pause(self) -> None:
         """Stop reading the microphone until resumed.
@@ -279,7 +417,8 @@ class Microphone:
         if thread is not None:
             thread.join(timeout=5)
             logger.debug("Microphone stopped.")
-        self._source = None
+        if not self._given:
+            self._source = None
 
     def __enter__(self) -> Microphone:
         self.start()

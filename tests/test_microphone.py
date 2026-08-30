@@ -7,10 +7,14 @@ detector, since a square wave is loud but is not speech - see test_vad.py.
 
 from __future__ import annotations
 
+import queue
+import threading
+import time
+
 import numpy as np
 
 from jarvis.config import AudioConfig
-from jarvis.microphone import Microphone, PhraseEnd
+from jarvis.microphone import Microphone, PhraseEnd, RemoteStream
 from jarvis.vad import SAMPLE_RATE, SAMPLES, SECONDS_PER_BUFFER
 
 PER_BUFFER = SECONDS_PER_BUFFER  # 0.032s
@@ -237,3 +241,105 @@ def test_a_device_at_the_wrong_rate_is_called_out(caplog):
 
 def test_stop_is_safe_before_start():
     make_mic().stop()
+
+
+# --------------------------------------------------------- audio off a network
+
+
+def test_what_was_written_comes_back_a_buffer_at_a_time():
+    """`_run` reads CHUNK frames at a time, and the network arrives in whatever
+    size the page felt like sending."""
+    stream = RemoteStream()
+    stream.write(make_buffer(LOUD) + make_buffer(QUIET))
+
+    assert stream.read(SAMPLES) == make_buffer(LOUD)
+    assert stream.read(SAMPLES) == make_buffer(QUIET)
+
+
+def test_a_gap_in_the_network_reads_as_silence_not_as_the_end():
+    """A read returning nothing stops the capture loop for good, and a phone
+    going quiet for a moment is not the end of anything."""
+    stream = RemoteStream(idle_seconds=30)
+    stream.write(make_buffer(LOUD))
+    stream.read(SAMPLES)
+
+    assert stream.read(SAMPLES) == bytes(SAMPLES * 2), "silence, so the phrase can end"
+    assert stream.live, "still connected, just not talking"
+
+
+def test_a_stream_that_stays_quiet_goes_back_to_sleep():
+    """Otherwise Silero scores silence forever on behalf of a phone that went
+    into somebody's pocket an hour ago."""
+    stream = RemoteStream(idle_seconds=0.05)
+    stream.write(make_buffer(LOUD))
+    stream.read(SAMPLES)
+    assert stream.live
+
+    time.sleep(0.1)
+    threading.Timer(0.3, stream.close).start()
+    assert stream.read(SAMPLES) == b"", "asleep until closed, rather than filling silence"
+    assert not stream.live
+
+
+def test_closing_it_ends_the_capture_loop():
+    stream = RemoteStream()
+    stream.close()
+    assert stream.read(SAMPLES) == b""
+
+
+def test_a_remote_source_delivers_into_a_queue_it_was_handed():
+    """Which is the whole trick: the service reads one queue and never learns
+    that any of it came from a phone."""
+    together: queue.Queue = queue.Queue(maxsize=16)
+    phone = make_mic()
+    desk = make_mic()
+    phone._queue = together
+    assert desk.sink is not together, "the desk keeps its own unless one is handed to it"
+
+    stream = RemoteStream()
+    # One blob, the way the page sends it: a quarter second at a time, which is
+    # eight buffers' worth and nothing to do with where a phrase begins.
+    pattern = "#" * 20 + SILENCE
+    stream.write(b"".join(make_buffer(LOUD if char == "#" else QUIET) for char in pattern))
+    stream.close()
+    phone._running.set()
+    phone._run(stream)
+
+    assert together.qsize() == 1
+
+
+def test_a_source_that_was_handed_over_is_not_a_device():
+    """Nothing to open and nothing to calibrate, and it survives a stop so the
+    same stream can be listened to again."""
+    stream = RemoteStream()
+    phone = Microphone(AudioConfig(), source=stream, sink=queue.Queue())
+    phone.start()
+    phone.stop()
+    assert phone._source is stream
+
+
+def test_a_deferred_microphone_captures_nothing():
+    """Two live microphones in one room hear the same sentence twice, and the
+    second copy arrives as a follow-up question nobody asked."""
+    mic = make_mic()
+    mic.defer(True)
+    assert run(mic, "#" * 20 + SILENCE) == []
+
+    mic.defer(False)
+    assert len(run(mic, "#" * 20 + SILENCE)) == 1
+
+
+def test_taking_the_floor_back_does_not_undo_a_pause_or_a_mute():
+    """It is neither the echo gate nor a pause anybody asked for, so it has to
+    keep out of the way of both on its way in and out."""
+    mic = make_mic()
+    mic.pause()
+    mic.defer(True)
+    mic.defer(False)
+    assert mic.paused
+
+    mic = make_mic()
+    mic.mute()
+    mic.defer(True)
+    mic.defer(False)
+    assert run(mic, "#" * 20 + SILENCE) == [], "still muted"

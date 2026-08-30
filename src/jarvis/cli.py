@@ -208,6 +208,16 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         )
     )
     logger.info("Transcript: %s", config.log_dir / config.service.transcript_file)
+    if config.service.start_webapp:
+        # Said out loud at startup for the same reason the line above it is: this
+        # is still loopback and still has no auth of its own, and whether that is
+        # safe depends entirely on what somebody put in front of it.
+        logger.info(
+            "Web app on http://%s:%d - loopback, and no auth of its own. "
+            "Reach it from a phone with `tailscale serve`, not by binding it wider.",
+            config.service.host,
+            config.service.port,
+        )
     from .screen import we_are_admin
 
     if we_are_admin():
@@ -231,6 +241,9 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         return 2
 
     service.ui = screen
+    # The web app draws the same live line the terminal does, so it is reported
+    # rather than reinvented - see Doing in service.py.
+    screen.watch(service.doing.set)
     _hand_the_terminal_over(logger, screen)
     # Only with a terminal to read from. Started after the takeover so that the
     # first thing it does cannot land in the middle of the boot lines.

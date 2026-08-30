@@ -1,13 +1,15 @@
 # Driving a Windows desktop
 
 Reference rather than memory: how Windows behaves, which is the same on every
-machine and ships with the project. `user-navigation.md` beside it is where
-JARVIS writes what it works out for itself, and anything there that turns out to
-be general belongs here instead - by hand, because that is the difference
-between the two files.
+machine and ships with the project. `memories.md` is where JARVIS writes what it
+works out for itself, and anything there that turns out to be general belongs
+here instead - by hand, because that is the difference between the two files.
 
-Every line is a bullet, because the bullets are what get read into the prompt.
-The prose around them is for whoever opens the file.
+Every line is a bullet under a `##` heading, because the bullets and the
+headings over them are what get read into the prompt. The prose around them is
+for whoever opens the file.
+
+## Files and the shell
 
 - Files are a shell question, not a pointer question. Finding, listing,
   reading, copying, renaming and deleting are all one run_command:
@@ -21,7 +23,7 @@ The prose around them is for whoever opens the file.
   is for applications that only exist as a window.
 - A file dialog is a window of its own called "Open" or "Save As", not part of
   whatever raised it. Focus it by that name and read its numbers off its own
-  scan. Working it off the browser's scan is the single biggest waste of a turn
+  scan. Working it off the browser's scan is the single biggest waste of a call
   here: the dialog's controls do appear there, with the browser's numbers, and
   typing into those puts the text nowhere.
 - The whole of a file dialog is the "File name:" box. Type the full path into it
@@ -45,6 +47,9 @@ The prose around them is for whoever opens the file.
 - In a web file list - Drive, a mail attachment pane, anything of that shape - a
   click only selects. Enter is what opens it. Double clicking works on the
   desktop and mostly does not there.
+
+## Applications
+
 - To open an application, press the Windows key, type its name and press enter.
   It needs no scan, it finds anything installed rather than only what is pinned,
   and it works for things with no name on the command line.
@@ -66,6 +71,9 @@ The prose around them is for whoever opens the file.
 - The taskbar scans as a window called Taskbar, one target per pinned
   application. Useful for seeing what is already running, and it only ever
   covers what somebody pinned.
+
+## Windows
+
 - Moving a window needs no scan and no title bar button: win+up maximises what
   is in front, win+left and win+right put it against one side.
 - Minimising takes win+down twice from a maximised window. The first press only
@@ -75,12 +83,15 @@ The prose around them is for whoever opens the file.
   volumeup, volumedown, mute. Windows routes them to whatever is playing.
 - Look before acting and again afterwards. Anything you do redraws something and
   the numbers move; a number from the scan before is refused rather than
-  clicked, but a refusal still costs a turn.
+  clicked, but a refusal still costs a call.
 - Some windows report a full tree of coordinates while minimised, left over from
   wherever they were last drawn. Focusing one is the only thing that fixes it.
 - A window that reports elements but no targets is still building itself. Wait
   and look again rather than deciding it is empty - unless it runs as
   administrator, in which case waiting never helps and the scan says so.
+
+## Elevated windows
+
 - Anything running as administrator is out of reach. Task Manager, an admin
   terminal, regedit: Windows shows an unelevated process one element and no
   targets, refuses its clicks and its keystrokes silently, and swallows the
@@ -92,6 +103,9 @@ The prose around them is for whoever opens the file.
 - If one has to be closed, taskkill /F /IM name.exe through run_command does it,
   and they will get a prompt from Windows to approve. Worth mentioning before
   running it, because somebody has to be at the desk to click it.
+
+## Closing things
+
 - To close a program, name the window: press_keys(keys="alt+f4",
   window="Google Chrome"). Sent without a window it goes wherever the focus
   happens to be, and looking at a window does not focus it - that is how JARVIS

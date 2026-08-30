@@ -734,8 +734,8 @@ def _ear_tools(config: Config, ears) -> list[Tool]:
                 "withheld from you.\n\n"
                 "For when they ask for privacy, or say they are on a call, or are about "
                 "to have a conversation that is not with you.\n\n"
-                "Call it FIRST and say so afterwards. Your words end your turn, so a "
-                "reply that promises to stop listening is a promise instead of the act - "
+                "Call it FIRST and say so afterwards. A reply that promises to stop "
+                "listening is a promise where the act should be - "
                 f"and once it is done, say that the {key} key brings you back, because "
                 "from then on you cannot hear them ask. Not a way to avoid answering "
                 "something: a hyphen does that and keeps your ears."
@@ -761,30 +761,41 @@ def _memory_tools(config: Config) -> list[Tool]:
 
     path = memory_file(config)
 
-    def remember(lesson: str) -> str:
-        return memories.remember(path, lesson, config.brain.max_memory_chars)
+    def remember(heading: str, lesson: str) -> str:
+        return memories.remember(path, heading, lesson, config.brain.max_memory_chars)
 
     return [
         Tool(
             name="remember",
             description=(
-                "Write down one thing you have learned about this machine, so you have it "
-                "next time. Your whole list is read back into your prompt at the start of "
-                "every turn.\n\n"
-                "This is for how the desk behaves, and most of it is only discoverable by "
-                "getting it wrong: a window whose tree is empty until it has been focused, "
-                "an application that takes a moment to build itself, which of four "
-                "identically labelled buttons is the one that works, a command that turned "
-                "out to be the way to do something. When a tool refuses you and you work "
-                "out why, that is exactly what this is for.\n\n"
-                "Not for anything about one conversation - not what they asked for, not "
-                "what you replied, not what they like. One sentence, and specific enough "
-                "to act on months from now: a number from a scan will be wrong by then, "
-                "a label or a window name will not."
+                "Write down one thing worth still knowing next month, so you have it "
+                "next time. Your whole list is read back to you the next time they "
+                "speak.\n\n"
+                "How the desk behaves, and most of that is only discoverable by getting "
+                "it wrong: a window whose tree is empty until it has been focused, an "
+                "application that takes a moment to build itself, which of four "
+                "identically labelled buttons is the one that works, a command that "
+                "turned out to be the way to do something. When a tool refuses you and "
+                "you work out why, that is exactly what this is for.\n\n"
+                "And who you are talking to: what they do, what they are working on, what "
+                "they own, what they enjoy, how they like things done. Only what they "
+                "actually said - what somebody asks for is not a fact about them, and "
+                "they can open this file and read it.\n\n"
+                "`heading` is which group it belongs under - Navigation, Applications, "
+                "Preferences, Work, Personal, or any other. Your headings are in your "
+                "prompt with everything under them: reuse one that fits rather than "
+                "making a second heading for the same kind of thing.\n\n"
+                "Not for anything about one conversation - not what they asked for today, "
+                "not what you replied, not what was on screen at the time. One sentence, "
+                "and specific enough to act on months from now: a number from a scan will "
+                "be wrong by then, a label or a window name will not."
             ),
             run=remember,
-            properties={"lesson": {"type": "string", "description": "one sentence"}},
-            required=("lesson",),
+            properties={
+                "heading": {"type": "string", "description": "which group it goes under"},
+                "lesson": {"type": "string", "description": "one sentence"},
+            },
+            required=("heading", "lesson"),
         )
     ]
 
@@ -792,11 +803,6 @@ def _memory_tools(config: Config) -> list[Tool]:
 def memory_file(config: Config) -> Path:
     """The file remember() writes to. Relative names sit under the project root."""
     return under_root(config.brain.memories_file)
-
-
-def navigation_file(config: Config) -> Path:
-    """The file the looking back writes to, beside the shipped reference."""
-    return under_root(config.brain.navigation_file)
 
 
 def under_root(named: str) -> Path:
@@ -848,8 +854,7 @@ def _shell_tools(config: Config) -> list[Tool]:
                 "only exist as a window.\n\n" + handoff + "\n\n"
                 "It waits for the command to finish, so nothing interactive: no prompts, "
                 "no pagers, no servers held in the foreground. Anything that changes the "
-                "machine, say what you did once it is done - your words end your turn, so "
-                "announcing it first means it never happens."
+                "machine, report it once it is done and never in advance."
             ),
             run=run_command,
             properties={"command": {"type": "string"}},

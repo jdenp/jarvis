@@ -23,7 +23,7 @@ HELP = """\
 Type and press enter. Anything else works exactly as it does out loud.
 
   /tools      what it can do
-  /memories   what it has learned on this machine
+  /memories   what it has learned so far, about the desk and about you
   /forget     the file to edit, and where it is
   /quit       or Ctrl+D
 """

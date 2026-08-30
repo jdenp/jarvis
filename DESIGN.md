@@ -117,6 +117,14 @@ Whatever the endpoint does while it wakes up lands on the first word, and "a" an
 only words short enough to disappear into it entirely - a reply that begins "have opened
 Spotify". So the lead-in goes back on. It costs 150ms per reply and it is not decoration.
 
+**What the voice costs, measured.** Kokoro on a 7700X CPU, with llama-server and Whisper
+already on the GPU: a short reply is 0.42s for 1.34s of audio, a two clause one 0.66s for
+3.78s. Roughly 5x real time once a sentence has any length to it, and under a second before it
+starts talking either way. `tts.kokoro_device` takes `cuda` and gets about 20x, which is faster
+than anybody can hear - so it is worth the ~300MB of VRAM only if the GPU is otherwise idle.
+SAPI is instant and sounds like 1998; `edge` sounds best and is the one that leaves the
+machine.
+
 **JARVIS never speaks on its own initiative.** There used to be an `Acknowledger`: a
 `threading.Timer` that spoke a canned phrase when nothing had been said for a couple of
 seconds, so that a slow answer did not sound like a crash. It was the one place JARVIS
@@ -235,13 +243,14 @@ deleted during a rewrite for looking tool-adjacent - after which a session decid
 not installed and went shopping in the Microsoft Store. Every markdown file under `memories/`
 is read, at any depth, so a new one is a new file rather than a code change.
 
-The same distinction repeats one level down, in `memories/navigation/`. `os-navigation.md`
-ships and is edited by hand: how Windows behaves, true on any machine, and therefore worth
-committing. `user-navigation.md` is JARVIS's own and is gitignored, because it is about one
-desk. Promoting a line from the second to the first is a text edit, which is the whole reason
-they are separate files rather than one with a convention inside it.
+One more split survives inside `memories/`, and it is shipped against grown rather than one
+mechanism against another. `navigation/os-navigation.md` is edited by hand and committed: how
+Windows behaves, true on any machine. `memories.md` is JARVIS's own and gitignored, because it
+is about one desk and one person. Promoting a line from the second to the first is a text
+edit, which is the whole reason they are separate files rather than one with a convention
+inside it.
 
-Only the two files JARVIS writes are capped. The rest are bounded by whoever wrote them, and
+Only the file JARVIS writes is capped. The rest are bounded by whoever wrote them, and
 trimming the curated half to make room for the accumulated half would be the wrong way round.
 
 **The prompt is a file, and shorter is better.** It lives in `context/soul/brain.md` rather
@@ -269,22 +278,60 @@ calls is worse than admitting it could not manage.
 
 **It writes its own notes, after the answer has gone out.** A lesson only outlives the
 conversation it was learned in if somebody writes it down, and asking a model to remember
-mid-turn competes with the thing it is actually doing. So a turn that used its hands is
-followed by one more call: look back, and is there anything about how this desktop behaves
-that would have saved a step? It runs after `_speak`, and speech is queued and played on
-another thread, so it happens in time nobody is waiting through.
+mid-turn competes with the thing it is actually doing. So anything JARVIS says out loud is
+followed by one more call: look back, and was there anything in that worth still knowing next
+month? It runs after `_speak`, and speech is queued and played on another thread, so it
+happens in time nobody is waiting through.
 
 Three things make it work rather than fill the file with rubbish. It is told that most turns
-teach nothing and that replying with nothing is the expected answer. It gets at most two lines
-and they must be bullets. And crucially it runs with reasoning OFF and a 200 token leash -
-left thinking, it spent four thousand characters weighing up whether one line was worth
-keeping and then ran out of room before writing it. Reasoning earns its cost when a tool has
-to be chosen; this call has no tools.
+teach nothing and that replying with nothing is the expected answer. It gets at most three
+lines. And crucially it runs with reasoning OFF and a short leash - left thinking, it spent
+four thousand characters weighing up whether one line was worth keeping and then ran out of
+room before writing it. Reasoning earns its cost when a tool has to be chosen; this call has
+no tools.
+
+Switching it off takes two goes, which is worth knowing before believing a setting. Thinking
+is asked off with `enable_thinking`, a chat template argument - and a fine-tuned template is
+free to ignore it. One here does, and reasoned its way through every single turn while the
+log said it had been told not to, which is only visible because the reasoning is logged. So
+the prompt opens with `/no_think` as well, which is Qwen's own switch and is plain text to
+anything else. The prompt itself was cut by half at the same time: it is asked after
+everything JARVIS says now, so its length is paid on every reply.
 
 It never touches the conversation: the question is asked over a copy of the history and the
-answer is thrown away. What it writes goes to `user-navigation.md`, not to the file
-`remember()` uses, because a note about how to minimise a window is not the same kind of thing
-as a note about this machine.
+answer is thrown away.
+
+**Every answered turn, not every turn that stumbled.** It used to fire only after a turn that
+used its hands and hit something, because asked after every turn that merely touched a tool it
+felt obliged to produce a lesson from a turn that went perfectly and wrote down what was on the
+taskbar. That gate is gone, and it was never the right shape once the other half of this
+existed: what somebody tells you about themselves arrives in a turn with no tool calls in it at
+all. Nobody learns that their user rides on Sundays by clicking.
+
+So the trigger is that JARVIS spoke, which also rules out the case that matters - a reply of a
+single hyphen is somebody else's conversation, and overheard is not told. The pressure that the
+gate used to apply now sits entirely in the prompt, which says outright that most turns teach
+nothing, and in the ceiling of three lines a turn. That is a weaker guard than a gate and it is
+the thing to watch: the failure mode is a file full of what was on the taskbar, and it is
+visible the moment you open the file.
+
+**One file, and headings inside it rather than more files.** There were two grown files for a
+while, split by which mechanism wrote them - `remember()` into one, the looking back into the
+other. Nobody reading the result could tell you why a note about minimising a window was in a
+different file from a note about this machine, because there is no real line there either.
+
+What there is, once JARVIS is keeping what it hears about a person as well as what it works out
+about a desk, is a need to group. Thirty unsorted sentences about windows, keyboard shortcuts
+and somebody's job is not readable by them or by the model. So `remember(heading, lesson)`, one
+file, and the headings are the model's own - it is shown its existing headings with everything
+under them and told to reuse one rather than start a second for the same thing. The same names
+merge across files, so a `## Windows` it wrote lands under the shipped `## Windows` in
+`os-navigation.md` rather than beside it.
+
+The cap moved with it. Counting back from the newest line no longer means anything once lines
+are filed rather than appended, so past `brain.max_memory_chars` the top of the file stops
+being read. It is a rougher rule than the old one and it is honest about what it is: the file
+is markdown, and a section that has stopped earning its keep is deleted by deleting it.
 
 **Reasoning and the answer share one budget, which is how a turn ends in silence.** The worst
 failure so far had no symptom at all: `brain.max_tokens` was 600, sized for a forty word
@@ -499,6 +546,109 @@ blaming its render time. So the scan asks: `runs_as_admin` on a window offering 
 the answer says which of the two it is. Being refused the process handle counts as elevated,
 because that refusal is the same news.
 
+**`--admin` is one consent prompt and then no second checkpoint.** A child process inherits
+its parent's token, so launching the service elevated lifts the whole wall at once: Task
+Manager becomes clickable, the hotkey survives an admin window having focus, and every window
+that was silently refusing input stops. The cost is the same sentence read the other way.
+Every command `run_command` runs is then an administrator command with nothing asked first,
+every application it opens is elevated too, and mapped network drives vanish because an
+elevated token is a separate logon session. It cannot be used over SSH either - the consent
+dialog is drawn on the secure desktop, where only somebody at the machine can click it. Off by
+default, and the startup line says which mode it is in, because that is not a thing to have to
+remember.
+
+**The phone is a source, not a second pipeline.** A web app that records on the phone and
+uploads a file would have needed its own endpointing, its own idea of when a sentence had
+finished, and its own answer to what happens when the network stutters - a second copy of
+the most delicate code here, running somewhere it cannot be tested. What it sends instead is
+raw PCM at 16 kHz, which is what `vad.py` wants, and `Microphone._run` only ever asks its
+source for `CHUNK`, `SAMPLE_RATE`, `SAMPLE_WIDTH` and `stream.read`. So `RemoteStream` is
+those four members with a queue behind them, and Silero, `PhraseEnd`, `min_speech_seconds`,
+the phrase time limit, the silence trimming and the mute gate all apply to a phone without
+one line of any of them being written twice.
+
+Two things make it a stream rather than a file. It never ends: a read that returns nothing
+stops the capture loop for good, so a quiet network reads as *silence* instead - which is
+also what it sounds like, and it means a phone that walks out of range mid sentence still
+gets the words it managed to send, because the silence ends the phrase the ordinary way.
+And past `idle_seconds` of that the stream goes back to sleep and blocks, so nothing is fed
+to Silero on behalf of a phone that went into somebody's pocket an hour ago.
+
+The two sources share one queue, which is what keeps the service out of it: `listen` merges
+them and nothing downstream ever learns that a phrase came from a phone. They do not share a
+detector, though - Silero carries state between buffers, and one detector fed from two rooms
+is scoring a mixture of both.
+
+**One room at a time, decided once.** Which microphone is listened to and which room the
+voice comes out in are the same question, and they were answered separately at first: the
+ears switched on whether audio was arriving this second, the voice on whether a page was
+open. So a phone that stopped talking for four seconds handed the desk its microphone back
+while still holding the voice, and the desk sat there transcribing a room nobody was in.
+
+`LiveHardware` is that decision in one place. It holds both microphones, answers which one
+is live, and `settle()` gives the floor to it - called from the listen loop rather than
+tracked as a transition somebody has to remember to fire, because it is cheap and
+idempotent and a missed transition is a JARVIS that has gone deaf for no visible reason.
+The test is whether a page is open, not whether it is talking. Both microphones still get
+muted together while JARVIS speaks: a phone in the same room hears the desk speakers as
+clearly as the desk does.
+
+**With a page open, the reply belongs in the room the page is in.** A machine talking to an
+empty room is no use to somebody in another one, so `say` renders the speech to a wav and
+hands it to the browser instead of playing it. Kokoro only: it already synthesises to an
+array before writing it to a device, so `render` is the same call without the last step.
+Every other engine plays as it synthesises, so with those the reply is spoken at the desk as
+usual - a phone that gets no audio is worse than audio that came out of the wrong room.
+
+Whether a page is open is answered by how recently one polled, because nothing else can
+answer it: a closed tab says nothing and a phone that walks out of range says less. The page
+long polls `/spoken` continuously, so a poll inside `PAGE_GONE` is a browser that is still
+there. The cost is stated rather than hidden - close the tab and the desk stays silent for up
+to forty seconds, which is one wait plus the trip.
+
+Nothing is muted on that path, because nothing is being played here. What stops the page
+transcribing the reply it just played is the page itself: it holds the audio back while a
+clip is running, which is surer than relying on the browser's echo cancellation to recognise
+a file it is playing rather than a speaker in the room.
+
+**The live line is reported, not reinvented.** `Ui.status` is the one place that knows what
+JARVIS is doing, so the page reads that rather than guessing from the endpoints it can see -
+the terminal hands its line to whoever is watching and the service holds the latest one. It is
+a current value rather than a stream, so it is versioned and long polled: sampling it on a
+timer either lags behind the thing it is describing or costs a phone a request a second all
+day. Streamed reasoning is deliberately left out of it - it changes hundreds of times a second
+and is drawn at whatever pace a terminal can manage, which is not a thing to put down a socket.
+
+**Asking for the session the phone had already chosen.** The reply played on the phone for a day before anybody heard it. A page with a microphone open puts iOS into a recording session, and a recording session routes output to the earpiece - so it was playing perfectly, into the receiver, on a phone lying on a desk. `navigator.audioSession` reported `play-and-record` the whole time, and *setting* it to `play-and-record`, the value it already had, is what moves the output to the loudspeaker. A session the phone chose and the same session asked for are not the same session.
+
+It took as long as it did because every layer failed silently. A media element refused outside a gesture rejects nothing you can see; a suspended AudioContext plays a buffer into nothing and raises no error; and a working page routed to the earpiece is indistinguishable from all of them. What eventually made it findable was putting the state on screen - the context state, its sample rate, and the route - rather than reasoning about which of them it might be.
+
+**No WebSocket, and no auth of its own.** Chunks go up as ordinary POSTs, a quarter second
+at a time, because the payload is bytes rather than a container - the splitter cannot tell
+where one request ended and the next began, so the seams that would matter for a recording
+do not exist. That is 8KB down a keep-alive socket four times a second against hand-rolling
+RFC 6455 on top of `BaseHTTPRequestHandler`, and it can become a WebSocket later if the
+overhead ever shows up in a measurement.
+
+The service stays bound to loopback with no authentication, which is the invariant it was
+written under and the one thing a feature like this could quietly destroy. `tailscale serve`
+goes in front: it terminates TLS, authenticates against the tailnet, and leaves this socket
+exactly as private as it was. It is not merely the convenient option either - a browser will
+not open a microphone outside a secure context, so the certificate is load-bearing. Off by
+default, absent rather than refusing when off, and named at startup when on.
+
+**The page has one failure and it is invisible, so it is measured on screen.** Silence from a
+browser microphone looks identical whether the device is muted, the wrong device is selected,
+permission was refused, or everything is working in a quiet room - and the first report of
+this not working was exactly that, with no way to tell which. Driving it from CDP with a
+fake microphone showed audio arriving at the right rate the whole time, so the fault was
+never in the page. What was missing was evidence.
+
+So the page shows a level meter and a running byte count, both fed from the same buffer that
+is posted, and a refused microphone leaves its error in the status line rather than being
+overwritten by the next poll. A meter that does not move is a device problem; a meter that
+moves with nothing transcribed is this end's problem. That distinction is the whole point.
+
 **Chat mode is a front end, not a second implementation.** `jarvis chat` is the same
 `Brain`, the same `Toolbox` and the same memories, with `ConsoleVoice` in place of
 `ServiceVoice` - two methods, `hear(timeout)` and `say(text)`, and `run_forever` cannot tell
@@ -564,17 +714,25 @@ that at startup spends a second or two of nobody's time instead of putting it on
 answer, which is the one that would otherwise feel broken. A one token limit, and it never
 enters the history: that conversation did not happen.
 
-**Speaking ends the turn, so nothing may be announced in advance.** Two tool descriptions said
-"say what you are about to do before you do it", carried over from a design where a lead-in
-and the work were separate calls. In this loop prose *is* the end of the turn, so that
-instruction is not merely unhelpful, it is impossible to follow - and it was followed exactly.
-Asked to stop listening, the model replied "Pausing transcription, sir. Just call my name to
-start me up again", called nothing, and went back to listening. It also invented a wake word.
+**A promise where the act should be, and the overcorrection that followed it.** Two tool
+descriptions said "say what you are about to do before you do it", carried over from a design
+where the lead-in and the work were separate calls. Asked to stop listening, the model replied
+"Pausing transcription, sir. Just call my name to start me up again", called nothing, and went
+back to listening. It also invented a wake word.
 
-The fix is the ordering, everywhere: do it, then say what happened, or write the sentence in
-the same message as the call. The system prompt now says so in as many words, because it is
-the one rule of this loop that nothing else has - anywhere else, saying you are about to do
-something is normal and harmless.
+The fix went too far. Everything the model reads was rewritten in terms of turns - YOUR WORDS
+END YOUR TURN, your list is read back at the start of every turn, announcing it first means it
+never happens. That is jargon from the design where something else held the loop, it describes
+plumbing rather than behaviour, and what it bought was silence: told that words end the turn,
+the model stopped writing anything beside a tool call at all. A live session went eight seconds
+between the question and the answer, four calls back to back with nothing said, which is
+indistinguishable from a crash to somebody who can only hear.
+
+What the rule was protecting is one sentence, and it survives: the line goes WITH the call and
+never instead of it. So the prompt asks for a holding line now - six words, its own words,
+beside the first call only - and says the thing about promises directly instead of through a
+model of how the loop is put together. The loop has always spoken a line written beside the
+first call, so none of this is code; it is what the model is told.
 
 **Reasoning off is fast and worse at choosing.** `brain.thinking = false` sends
 `chat_template_kwargs: {"enable_thinking": false}`, and it is a genuine improvement on latency:
@@ -734,6 +892,13 @@ and names the two things that are not clicking.
 The general shape, which is the third time it has come up in this file: a refusal has to
 end on something different from what the caller just tried.
 
+**Two pictures, for the two halves of "why did it click the wrong thing".** `jarvis look
+--marks` writes `logs/marks.png` with a numbered box burned over every target, which answers
+the first half by showing what the number meant. `--raw` prints every element the window
+exposed with the dropped ones marked, which answers the other half - whether the control it
+could not press was filtered out or was never in the tree at all. The two failures look
+identical from outside and want opposite fixes.
+
 **Placing repeated labels.** A browser offers four buttons called Close and a coarse
 position does not separate them - a tab strip is all in the same ninth of the window.
 What does separate them is the thing before them in reading order, which is how anyone
@@ -782,6 +947,39 @@ to a process that has not declared it understands scaling, so on a 150% display 
 lands two thirds of the way to where it was aimed. It is set on first use of the backend,
 and failing means it was already set, which is the outcome wanted anyway.
 
+## The modules
+
+```
+ mic thread --> queue --> STT --> transcript --> brain --> tools --> speech
+      ^                                                                |
+      +------------------ muted while speaking <----------------------+
+```
+
+| Module | Role |
+| --- | --- |
+| `cli.py` | Argument parsing, wiring, and every command |
+| `service.py` | Owns the hardware, serves loopback HTTP |
+| `brain.py` | The agent loop, the model client, and the system prompt |
+| `tools.py` | What the brain can do, as schemas and dispatch |
+| `chat.py` | The same loop with a keyboard instead of a microphone |
+| `ui.py` | The terminal: scrolling conversation, one live line, no dependency |
+| `typed.py` | A line typed into the voice session, taken as though it were heard |
+| `memories.py` | The list JARVIS writes for itself and reads back every turn |
+| `transcript.py` | Append-only record with blocking reads |
+| `client.py` | Client for the service, used by the CLI |
+| `microphone.py` | Background capture, phrase splitting, mute |
+| `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
+| `stt.py` | Local Whisper transcription, with Google as an opt in |
+| `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
+| `hotkey.py` | The key that stops and starts listening, from anywhere |
+| `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
+| `uia.py` | UI Automation through comtypes: the only Windows-specific module |
+| `hands.py` | Synthetic clicks and keystrokes, through SendInput |
+| `marks.py` | The numbered boxes drawn onto a screenshot |
+| `echo.py` | Recognising JARVIS's own voice coming back |
+| `webapp.py` | The page a phone talks through, as one string |
+| `config.py` | Defaults, TOML, environment |
+
 ## Swapping a component
 
 Each is a Protocol or a factory, so a replacement only has to match the shape:
@@ -807,8 +1005,34 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
 - Cutting the speech off on speech onset rather than on a finished phrase, which would take
   it from a couple of seconds down to about 0.3s. Needs a predicate that is not volume-blind,
   or it cuts itself off on its own bleed
-- Nothing fills the silence if the model forgets to speak before slow work. That is
-  deliberate - see above - but it does mean a forgetful turn sounds broken
+- Nothing fills the silence if the model writes no holding line. The prompt asks for one and
+  the loop speaks whatever comes back beside the first call, but a model that writes none
+  leaves the room quiet for as long as the work takes. A rotation of stock phrases underneath
+  it was built and thrown away: the value of the line is that it is about what was actually
+  asked for, and twelve canned openers are not that
+- A summary of a summary. Forgetting is a ladder of three and the top two are cheap, but the
+  third rewrites its own earlier output rather than the conversation, so a long enough session
+  ends up with a paragraph written from a paragraph and nothing catches that degrading. Below
+  it, `brain.history_turns` still deletes rather than compacts: ask about something from
+  before the summary and what is left is the paragraph, not the exchange
+- An honest word when one turn is too big. The trim always keeps at least one turn, so a
+  single turn that overflows the window on its own cannot be cut. llama-server rejects the
+  request, it arrives as an HTTP error like any other, and what gets said out loud is "I
+  cannot reach my model, sir" - which is not what happened. It takes a scan of a very crowded
+  window several times over to get there, so it has not been hit yet
+- The look back now runs after everything JARVIS says, so the guard against a file full of
+  rubbish is a prompt and a three line ceiling rather than a gate. Nothing measures whether
+  what it keeps is worth keeping; opening the file is the only check there is
+- The web app only works with the phone awake and the tab in front. Backgrounded or locked,
+  the browser suspends the audio graph and the stream stops - Screen Wake Lock keeps the
+  display on but there is no browser path to a locked phone streaming audio. A native client
+  is the only real answer and is not worth it yet
+- Browser playback is Kokoro only, and it is a whole wav rather than a stream: a long reply
+  is rendered before any of it is heard, where the desk starts talking after the first
+  sentence. Nobody has noticed yet at the length replies actually are
+- A page left open in a forgotten tab keeps the desk silent, since polling is the only
+  evidence of a browser being there. It is the intended behaviour and it is still a
+  surprising one
 - Screen control has no undo and no dry run. `expecting` catches the wrong target but
   nothing catches the right target with the wrong intent
 - Nothing reads text out of a control. It can see that an edit box exists and type

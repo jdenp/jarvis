@@ -9,8 +9,10 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 
+import httpx
 import pytest
 
+from jarvis import service as service_module
 from jarvis.client import ServiceUnavailable, VoiceClient
 from jarvis.config import Config, ServiceConfig
 from jarvis.service import VoiceService, build_server
@@ -23,6 +25,9 @@ class FakeMicrophone:
         self.mute_calls = 0
         self.started = False
         self.paused = False
+        self.deferred = False
+        # A real one hands this to the web app's source to deliver into.
+        self.sink: queue.Queue = queue.Queue(maxsize=16)
 
     def start(self) -> None:
         self.started = True
@@ -44,6 +49,9 @@ class FakeMicrophone:
     def resume(self) -> None:
         self.paused = False
 
+    def defer(self, elsewhere: bool) -> None:
+        self.deferred = elsewhere
+
     def stop(self) -> None:
         self.started = False
 
@@ -58,12 +66,17 @@ class FakeSpeech:
         # about being talked over needs to be in.
         self.speaking = False
         self.interrupts = 0
+        # What render() hands back. None is every engine but Kokoro.
+        self.wav: bytes | None = None
 
     def say(self, text: str) -> None:
         # Record whether the mic was muted at the moment we spoke.
         self.muted_while_speaking.append(bool(self._microphone and self._microphone.muted))
         self.said.append(text)
         self.speaking = True
+
+    def render(self, text: str) -> bytes | None:
+        return self.wav
 
     def wait(self, timeout=None) -> bool:
         return True
@@ -115,6 +128,9 @@ class Phrases:
         pass
 
     def resume(self) -> None:
+        pass
+
+    def defer(self, elsewhere: bool) -> None:
         pass
 
 
@@ -484,3 +500,349 @@ def test_hushing_drops_what_was_queued_and_cuts_off_what_is_playing():
     assert speech.said == ["A rather long answer, sir."]
     service.hush()
     assert speech.said == []
+
+
+# ------------------------------------------------------------------- web app
+
+
+def webapp(**overrides):
+    """A service with the page switched on, behind a real HTTP server.
+
+    Energy detection rather than Silero: this is about the plumbing, and there
+    is no point loading a network to score buffers of zeroes with.
+    """
+    settings = ServiceConfig(port=0, start_webapp=True, **overrides)
+    service, microphone, _speech = make_service(
+        service=settings, audio=replace(Config().audio, vad="energy")
+    )
+    service._start_webapp_source()
+    server = build_server(service)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return service, microphone, server.server_address[1], server
+
+
+def get(port, path):
+    return httpx.get(f"http://127.0.0.1:{port}{path}")
+
+
+def post(port, path, **kwargs):
+    return httpx.post(f"http://127.0.0.1:{port}{path}", **kwargs)
+
+
+@pytest.fixture
+def app():
+    service, microphone, port, server = webapp()
+    try:
+        yield service, microphone, port
+    finally:
+        service.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_page_is_absent_unless_it_was_switched_on(running):
+    """Off it is not there at all, which is how every other switch here
+    behaves - and this one opens a microphone."""
+    _, client, _ = running
+    port = client.config.port
+    assert get(port, "/").status_code == 404
+    assert post(port, "/audio", content=b"\x00\x00").status_code == 404
+    assert post(port, "/typed", json={"text": "hello"}).status_code == 404
+    assert get(port, "/spoken").status_code == 404
+
+
+def test_the_page_is_served_when_it_is_on(app):
+    _, _, port = app
+    reply = get(port, "/")
+    assert reply.status_code == 200
+    assert "text/html" in reply.headers["content-type"]
+    assert "<title>JARVIS</title>" in reply.text
+
+
+def test_a_typed_line_arrives_as_though_it_had_been_heard(app):
+    service, _, port = app
+    assert post(port, "/typed", json={"text": "open spotify"}).status_code == 200
+    assert [item.text for item in service.transcript.since(0)] == ["open spotify"]
+
+
+def test_a_typed_line_needs_something_to_say(app):
+    _, _, port = app
+    assert post(port, "/typed", json={}).status_code == 400
+
+
+def test_what_jarvis_said_is_readable_by_the_page(app):
+    """The speech comes out of the speakers at the desk, so the page needs
+    somewhere to read the other half of the conversation from."""
+    service, _, port = app
+    service.say("Spotify is open, sir.")
+
+    body = get(port, "/spoken?since=0").json()
+    assert [item["text"] for item in body["spoken"]] == ["Spotify is open, sir."]
+    assert body["cursor"] == 1
+
+
+def test_what_was_said_is_not_written_to_the_transcript_file(app):
+    """heard.jsonl is what was heard. The other half is in memory and goes when
+    the process does, which is all the page asks of it."""
+    service, _, _ = app
+    service.say("Spotify is open, sir.")
+    assert service.transcript.since(0) == []
+    assert service.spoken.path is None
+
+
+def test_audio_reaches_the_capture_loop(app):
+    service, _, port = app
+    assert post(port, "/audio", content=b"\x11\x22" * 100).json() == {"samples": 100}
+    assert service.stream is not None and service.stream.live
+
+
+def test_half_a_sample_is_not_a_sample(app):
+    """One odd byte through and every buffer after it is out of phase."""
+    service, _, port = app
+    assert post(port, "/audio", content=b"\x01\x02\x03").json() == {"samples": 1}
+    assert service.stream is not None
+    assert service.stream.read(1) == b"\x01\x02"
+
+
+def test_the_desk_stands_down_for_as_long_as_the_page_is_open(app):
+    """Not just while audio is arriving. Somebody holding a phone is not at the
+    desk, so a desk microphone between two sentences is listening to a room
+    nobody is in."""
+    service, microphone, port = app
+    assert not microphone.deferred
+
+    post(port, "/audio", content=b"\x00\x00" * 100)
+    assert microphone.deferred
+    assert service.live.mic is service.remote
+
+    # Quiet, but still there - which used to hand the desk its microphone back.
+    service.stream._live.clear()
+    service.live.settle()
+    assert microphone.deferred, "still the page's floor between sentences"
+    assert service.remote is not None and not service.remote._deferred.is_set()
+
+
+def test_the_desk_gets_its_microphone_back_when_the_page_goes_away():
+    """Nothing says goodbye. A tab that is closed and a phone that walks out of
+    range both just stop, so the listen loop asks how long ago a page last
+    spoke rather than waiting to be told."""
+    service, microphone, port, server = webapp()
+    try:
+        post(port, "/audio", content=b"\x00\x00" * 100)
+        assert microphone.deferred, "the page has the floor while it is here"
+
+        service._page_seen -= service_module.PAGE_GONE + 1
+        service._running.set()
+        listener = threading.Thread(target=service._listen, daemon=True)
+        listener.start()
+        for _ in range(60):
+            if not microphone.deferred:
+                break
+            time.sleep(0.05)
+        service._running.clear()
+        listener.join(timeout=2)
+        assert not microphone.deferred
+    finally:
+        service.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_status_says_whether_the_page_is_there(app):
+    service, _, port = app
+    assert get(port, "/status").json()["webapp"] is True
+    assert service.status()["streaming"] is False
+
+
+def test_the_page_does_not_listen_without_a_queue_to_share(caplog):
+    """A microphone that is not one - a stub, or a front end that has no
+    hardware - has no queue for a second source to deliver into."""
+    service, microphone, _ = make_service(service=ServiceConfig(start_webapp=True))
+    microphone.sink = None
+    with caplog.at_level(logging.WARNING, logger="jarvis.service"):
+        service._start_webapp_source()
+    assert service.stream is None
+    assert "cannot listen" in caplog.text
+
+
+def test_the_phone_is_muted_while_jarvis_talks_as_well(app):
+    """A phone in the same room hears the reply coming out of the desk speakers
+    as clearly as the desk does."""
+    service, desk, _ = app
+    phone = FakeMicrophone()
+    service.live.web = phone
+
+    service.say("Spotify is open, sir.")
+    assert phone.mute_calls == 1
+    assert desk.mute_calls == 1
+
+
+# ------------------------------------------------- the reply, in the other room
+
+
+def test_with_no_page_open_it_is_spoken_here_as_always(app):
+    """Nothing about this changes for somebody sitting at the desk."""
+    service, _, _ = app
+    service.speech.wav = b"RIFFrendered"
+    service.say("Spotify is open, sir.")
+    assert service.speech.said == ["Spotify is open, sir."]
+    assert service.clips == {}
+
+
+def test_a_page_that_is_polling_gets_the_reply_instead(app):
+    """A machine talking to an empty room is no use to somebody in another one."""
+    service, _, port = app
+    service.speech.wav = b"RIFFrendered"
+    get(port, "/spoken?since=0")  # what the page does continuously
+
+    service.say("Spotify is open, sir.")
+    assert service.speech.said == [], "not out of the speakers here"
+    assert list(service.clips.values()) == [b"RIFFrendered"]
+
+
+def test_the_clip_is_fetched_by_the_id_of_the_line(app):
+    service, _, port = app
+    service.speech.wav = b"RIFFrendered"
+    get(port, "/spoken?since=0")
+    service.say("Spotify is open, sir.")
+
+    line = get(port, "/spoken?since=0").json()["spoken"][0]
+    clip = get(port, f"/voice/{line['id']}.wav")
+    assert clip.status_code == 200
+    assert clip.headers["content-type"] == "audio/wav"
+    assert clip.content == b"RIFFrendered"
+
+
+def test_a_line_with_no_clip_is_an_ordinary_404(app):
+    """The page asks for every line it sees, and one spoken at the desk has
+    nothing to fetch."""
+    _, _, port = app
+    assert get(port, "/voice/99.wav").status_code == 404
+    assert get(port, "/voice/nonsense.wav").status_code == 400
+
+
+def test_a_speaker_that_cannot_render_still_speaks_here(app):
+    """Every engine but Kokoro. A phone that gets no audio is worse than audio
+    that came out of the wrong room."""
+    service, _, port = app
+    service.speech.wav = None
+    get(port, "/spoken?since=0")
+
+    service.say("Spotify is open, sir.")
+    assert service.speech.said == ["Spotify is open, sir."]
+    assert service.clips == {}
+
+
+def test_a_page_that_stopped_polling_hands_the_voice_back(app):
+    """Closing the tab cannot say goodbye, so this is a timeout - and the desk
+    is silent for that long after you walk away from the page."""
+    service, _, port = app
+    service.speech.wav = b"RIFFrendered"
+    get(port, "/spoken?since=0")
+    assert service.page_attached()
+
+    service._page_seen -= service_module.PAGE_GONE + 1
+    assert not service.page_attached()
+    service.say("Spotify is open, sir.")
+    assert service.speech.said == ["Spotify is open, sir."]
+
+
+def test_only_the_last_few_clips_are_kept(app):
+    """They are seconds old by the time the browser has them, and nothing ever
+    asks for an old one twice."""
+    service, _, port = app
+    service.speech.wav = b"RIFFrendered"
+    get(port, "/spoken?since=0")
+    for n in range(service_module.KEEP_CLIPS + 4):
+        service.say(f"Reply number {n}.")
+    assert len(service.clips) == service_module.KEEP_CLIPS
+    assert max(service.clips) == service_module.KEEP_CLIPS + 4
+
+
+def test_transcription_can_be_stopped_from_the_page(app):
+    """Num Lock stops it at the desk. A phone has no Num Lock, so the page has
+    to be able to say it too."""
+    service, _, port = app
+    assert post(port, "/pause").json() == {"paused": True}
+    assert service.transcript.paused
+    assert get(port, "/status").json()["paused"] is True
+
+    assert post(port, "/resume").json() == {"paused": False}
+    assert not service.transcript.paused
+
+
+def test_pausing_still_works_the_way_the_cli_asks_for_it(app):
+    """`jarvis pause` has always been a GET, and it stays one."""
+    service, _, port = app
+    assert get(port, "/pause").json() == {"paused": True}
+    assert service.transcript.paused
+
+
+def test_everything_the_page_calls_at_the_end_exists():
+    """A page that throws on load is a page with no conversation, no status and
+    no sound, and the only symptom is that nothing happens. One rename during a
+    refactor took `watchDoing` out from under the call at the bottom and the
+    whole script stopped at that line."""
+    import re
+
+    from jarvis.webapp import PAGE
+
+    script = re.search(r"<script>(.*)</script>", PAGE, re.S).group(1)
+    defined = set(re.findall(r"^(?:async )?function (\w+)", script, re.M))
+    defined |= set(re.findall(r"^(?:const|let|var) (\w+)", script, re.M))
+    called = set(re.findall(r"^(\w+)\(", script, re.M))
+
+    # The browser brings these; everything else has to be in the file.
+    provided = {"addEventListener", "registerProcessor", "setTimeout", "fetch"}
+
+    assert called, "the page should start something"
+    missing = called - defined - provided
+    assert not missing, f"called but never defined: {sorted(missing)}"
+
+
+def test_a_goodbye_is_not_undone_by_what_was_already_in_flight(app):
+    """A page closing has long polls open behind it, and those land a moment
+    later. Taken as a page still being here, the floor went back and the
+    handover was announced twice in a row."""
+    service, _, port = app
+    said = []
+    service.ui = type("Watching", (), {"note": lambda self, text: said.append(text)})()
+
+    get(port, "/spoken?since=0")
+    service.live.settle()
+    assert service.live.on_the_page
+
+    post(port, "/gone")
+    assert not service.live.on_the_page
+
+    # The tail of the page that has already gone.
+    get(port, "/spoken?since=0")
+    get(port, "/live?since=0")
+    service.live.settle()
+    assert not service.live.on_the_page, "still gone"
+    assert said == [
+        "Listening through the web app. This microphone is off.",
+        "The web app has gone. Listening on this microphone again.",
+    ]
+
+
+def test_a_page_that_comes_back_after_the_grace_is_here_again(app):
+    """Backgrounding says goodbye, and coming back has to be believed."""
+    service, _, port = app
+    get(port, "/spoken?since=0")
+    post(port, "/gone")
+    assert not service.live.on_the_page
+
+    service._page_left -= service_module.GOODBYE + 1
+    get(port, "/spoken?since=0")
+    assert service.live.on_the_page
+
+
+def test_starting_up_announces_nothing(app):
+    """The first settle is not a handover, it is a beginning."""
+    service, _, _ = app
+    said = []
+    service.ui = type("Watching", (), {"note": lambda self, text: said.append(text)})()
+    service.live._floor = None
+    service.live.settle()
+    assert said == []

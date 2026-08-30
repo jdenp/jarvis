@@ -147,18 +147,10 @@ def brain(*replies, voice=None, config=None, box=None, limit=98304) -> Brain:
 
 
 def looking_back(tmp_path, *replies, box=None) -> Brain:
-    """One that does look back, writing somewhere harmless.
-
-    Its tool refuses, because a turn that went perfectly is no longer looked
-    back at - there is nothing to learn from a route that worked first time.
-    """
+    """One that does look back, writing somewhere harmless."""
     config = replace(
         Config(),
-        brain=replace(
-            Config().brain,
-            memories_file=str(tmp_path / "memories.md"),
-            navigation_file=str(tmp_path / "navigation" / "user-navigation.md"),
-        ),
+        brain=replace(Config().brain, memories_file=str(tmp_path / "memories.md")),
     )
     return Brain(
         config,
@@ -567,6 +559,16 @@ def test_the_microphone_paragraph_is_taken_out_when_there_is_none():
     assert "close your ears" not in with_ears(body, False)
     assert with_ears(body, False).startswith("before")
     assert with_ears(body, False).endswith("after")
+
+
+def test_a_kept_block_comes_out_as_a_paragraph():
+    """Cut out where the markers stood, it came back welded to the end of the
+    sentence above it."""
+    from jarvis.brain import with_ears
+
+    body = "before\n<!-- ears -->\nyou can close your ears\n<!-- /ears -->\nafter"
+    assert with_ears(body, True) == "before\n\nyou can close your ears\n\nafter"
+    assert with_ears(body, False) == "before\n\nafter"
 
 
 def test_a_prompt_with_no_markers_is_left_alone():
@@ -1023,7 +1025,7 @@ def test_markup_typed_as_the_final_answer_is_not_read_out():
 
     nudge = [m for m in it.messages if m["role"] == "user"][-1]
     assert "markup, not an answer" in nudge["content"]
-    assert "no tools left this turn" in nudge["content"]
+    assert "no tools left to call" in nudge["content"]
 
 
 def test_markup_twice_over_is_reported_rather_than_spoken():
@@ -1536,18 +1538,51 @@ def test_a_tool_result_goes_in_the_log_as_well_as_on_screen(caplog):
 def test_what_a_turn_taught_is_written_down(tmp_path):
     """The only way a lesson outlives the conversation it was learned in
     without somebody typing it up."""
-    from jarvis.memories import bullets
+    from jarvis.memories import sections
 
     it = looking_back(
         tmp_path,
         calling("look_at_screen"),
         said("Teams is open, sir."),
-        said("- Minimising takes win+down twice from a maximised window."),
+        said("## Windows\n- Minimising takes win+down twice from a maximised window."),
     )
     it.turn(["open teams"])
 
-    written = bullets(tmp_path / "navigation" / "user-navigation.md")
-    assert written == ["Minimising takes win+down twice from a maximised window."]
+    assert sections(tmp_path / "memories.md") == [
+        ("Windows", ["Minimising takes win+down twice from a maximised window."])
+    ]
+
+
+def test_what_they_said_about_themselves_is_written_down_too(tmp_path):
+    """Half of what is worth keeping is something they said about themselves,
+    and nobody learns that by clicking."""
+    from jarvis.memories import sections
+
+    it = looking_back(
+        tmp_path,
+        said("Noted, sir."),
+        said("## Personal\n- They ride on Sunday mornings."),
+    )
+    it.turn(["i ride every sunday morning"])
+
+    assert sections(tmp_path / "memories.md") == [("Personal", ["They ride on Sunday mornings."])]
+
+
+def test_a_turn_that_used_no_tools_is_looked_back_at_as_well(tmp_path):
+    """It used to want a turn that had stumbled, which is a turn that used its
+    hands. Nothing about a person is learned that way."""
+    it = looking_back(tmp_path, said("Half past two, sir."))
+    it.turn(["what time is it"])
+    assert len(it.model.asked) == 2, "answered, and then asked what it learned"
+
+
+def test_nothing_it_kept_quiet_about_is_looked_back_at(tmp_path):
+    """A hyphen means it was not aimed at you. Somebody talking near the desk
+    has not told you anything, and there is nothing to look back over."""
+    it = looking_back(tmp_path, said("-"))
+    it.turn(["...he moved to Perth last year"])
+    assert len(it.model.asked) == 1
+    assert not (tmp_path / "memories.md").exists()
 
 
 def test_it_happens_after_the_answer_has_gone_out(tmp_path):
@@ -1557,7 +1592,7 @@ def test_it_happens_after_the_answer_has_gone_out(tmp_path):
         tmp_path,
         calling("look_at_screen"),
         said("Teams is open, sir."),
-        said("- Something learned."),
+        said("## Windows\n- Something learned."),
     )
     spoken_at = []
     it.voice.say = lambda text: spoken_at.append(len(it.model.asked))
@@ -1567,9 +1602,8 @@ def test_it_happens_after_the_answer_has_gone_out(tmp_path):
 
 
 def test_most_turns_teach_nothing(tmp_path):
-    """A list that fills up with "Teams was open" is worse than an empty one."""
-    from jarvis.memories import bullets
-
+    """A list that fills up with "Teams was open" is worse than an empty one,
+    and it is asked after everything now - so this is the common case."""
     it = looking_back(
         tmp_path,
         calling("look_at_screen"),
@@ -1577,20 +1611,53 @@ def test_most_turns_teach_nothing(tmp_path):
         said("Nothing worth writing down."),
     )
     it.turn(["open teams"])
-    assert bullets(tmp_path / "navigation" / "user-navigation.md") == []
+    assert not (tmp_path / "memories.md").exists()
 
 
-def test_at_most_two_lessons_from_one_turn(tmp_path):
+def test_at_most_three_lines_from_one_turn(tmp_path):
+    """The ceiling is what stops one talkative afternoon filling the file."""
     from jarvis.memories import bullets
 
     it = looking_back(
         tmp_path,
         calling("look_at_screen"),
         said("Done, sir."),
-        said("- One.\n- Two.\n- Three.\n- Four."),
+        said("## Windows\n- One.\n- Two.\n- Three.\n- Four."),
     )
     it.turn(["do something"])
-    assert bullets(tmp_path / "navigation" / "user-navigation.md") == ["One.", "Two."]
+    assert bullets(tmp_path / "memories.md") == ["One.", "Two.", "Three."]
+
+
+def test_lines_are_filed_under_the_headings_they_came_back_with(tmp_path):
+    from jarvis.memories import sections
+
+    it = looking_back(
+        tmp_path,
+        calling("look_at_screen"),
+        said("Done, sir."),
+        said(
+            "## Applications\n- Teams is an MSIX package.\n\n## Personal\n- They are left handed."
+        ),
+    )
+    it.turn(["do something"])
+    assert sections(tmp_path / "memories.md") == [
+        ("Applications", ["Teams is an MSIX package."]),
+        ("Personal", ["They are left handed."]),
+    ]
+
+
+def test_a_line_with_no_heading_is_still_kept(tmp_path):
+    """A line worth keeping is worth keeping badly filed."""
+    from jarvis.memories import sections
+
+    it = looking_back(
+        tmp_path,
+        calling("look_at_screen"),
+        said("Done, sir."),
+        said("- Something with no heading over it."),
+    )
+    it.turn(["do something"])
+    assert sections(tmp_path / "memories.md") == [("Other", ["Something with no heading over it."])]
 
 
 def test_a_lesson_about_a_target_number_is_thrown_away(tmp_path):
@@ -1604,51 +1671,16 @@ def test_a_lesson_about_a_target_number_is_thrown_away(tmp_path):
         calling("look_at_screen"),
         said("Closed, sir."),
         said(
+            "## Windows\n"
             "- File Explorer closes by clicking Close, target number 3.\n"
             "- Explorer opens straight from run_command with no path."
         ),
     )
     it.turn(["close file explorer"])
 
-    kept = bullets(tmp_path / "navigation" / "user-navigation.md")
-    assert kept == ["Explorer opens straight from run_command with no path."]
-
-
-def test_a_turn_that_went_perfectly_is_not_looked_back_at(tmp_path):
-    """Asked after every turn that touched a tool, it felt obliged to produce
-    something and wrote down what was on the taskbar and that Task Manager was
-    open. A route that worked first time has nothing to teach."""
-    it = looking_back(
-        tmp_path,
-        calling("look_at_screen"),
-        said("Teams is open, sir."),
-        said("- Something it would have learned."),
-        box=toolbox(look_at_screen="Taskbar - 25 targets"),
-    )
-    it.turn(["open teams"])
-    assert len(it.model.asked) == 2, "answered, and no third call to look back with"
-    assert not (tmp_path / "navigation" / "user-navigation.md").exists()
-
-
-def test_a_turn_that_hit_something_is(tmp_path):
-    from jarvis.memories import bullets
-
-    it = looking_back(
-        tmp_path,
-        calling("look_at_screen"),
-        said("I could not, sir."),
-        said("- The taskbar refuses a click while it is redrawing."),
-    )
-    it.turn(["open teams"])
-    assert bullets(tmp_path / "navigation" / "user-navigation.md") == [
-        "The taskbar refuses a click while it is redrawing."
+    assert bullets(tmp_path / "memories.md") == [
+        "Explorer opens straight from run_command with no path."
     ]
-
-
-def test_a_turn_that_used_no_tools_is_not_worth_looking_back_at(tmp_path):
-    it = looking_back(tmp_path, said("Half past two, sir."))
-    it.turn(["what time is it"])
-    assert len(it.model.asked) == 1, "answered and stopped"
 
 
 def test_looking_back_never_touches_the_conversation(tmp_path):
@@ -1657,10 +1689,10 @@ def test_looking_back_never_touches_the_conversation(tmp_path):
         tmp_path,
         calling("look_at_screen"),
         said("Done, sir."),
-        said("- Something learned."),
+        said("## Windows\n- Something learned."),
     )
     it.turn(["do something"])
-    assert not any("Look back at what you just did" in str(m) for m in it.messages)
+    assert not any("Look back over it" in str(m) for m in it.messages)
     assert it.messages[-1]["content"] == "Done, sir."
 
 

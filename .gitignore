@@ -7,11 +7,10 @@ config/jarvis.json
 config/jarvis.toml
 .pytest_cache/
 .ruff_cache/
-# What JARVIS writes for itself is about this machine, not this project. The
-# reference beside it is not - context/memories/navigation/os-navigation.md is
-# how Windows behaves, and ships.
+# What JARVIS writes for itself is about this desk and whoever sits at it, not
+# about this project. The reference beside it is not -
+# context/memories/navigation/os-navigation.md is how Windows behaves, and ships.
 context/memories/memories.md
-context/memories/navigation/user-navigation.md
 
 # Downloaded once, 330MB, and not this project's to carry.
 models/
