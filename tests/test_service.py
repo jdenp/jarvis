@@ -608,6 +608,7 @@ def test_the_page_is_absent_when_it_is_switched_off():
         assert post(port, "/typed", json={"text": "hello"}).status_code == 404
         assert get(port, "/spoken").status_code == 404
         assert post(port, "/microphone", json={"on": False}).status_code == 404
+        assert get(port, "/calls").status_code == 404
     finally:
         service.stop()
         server.shutdown()
@@ -847,6 +848,29 @@ def test_the_desk_can_be_shut_from_the_page(app):
 
     assert post(port, "/resume").json() == {"paused": False}
     assert not microphone.paused
+
+
+def test_what_it_did_is_streamed_the_way_what_it_said_is(app):
+    """So that a reply that took eleven seconds is not eleven seconds of
+    nothing on the page - see webapp.py."""
+    service, _, port = app
+    service.ran("look_at_screen(window='Teams')", "Teams - 14 targets")
+
+    body = get(port, "/calls?since=0").json()
+    assert body["cursor"] == 1
+    assert [(one["text"], one["gave"]) for one in body["calls"]] == [
+        ("look_at_screen(window='Teams')", "Teams - 14 targets"),
+    ]
+
+
+def test_a_call_arriving_wakes_the_page_rather_than_making_it_ask_again(app):
+    service, _, port = app
+    threading.Timer(0.2, lambda: service.ran("press_keys(keys='win')", "Pressed win.")).start()
+
+    started = time.monotonic()
+    body = get(port, "/calls?since=0&wait=10").json()
+    assert time.monotonic() - started < 5
+    assert [one["text"] for one in body["calls"]] == ["press_keys(keys='win')"]
 
 
 def test_the_page_can_shut_its_own_microphone(app):

@@ -26,7 +26,7 @@ from .echo import EchoGuard
 from .hotkey import HotkeyListener
 from .microphone import Microphone, RemoteStream
 from .stt import Transcriber, build_transcriber
-from .transcript import Transcript
+from .transcript import ToolCall, Transcript
 from .tts import SpeechEngine, build_speaker
 
 logger = logging.getLogger("jarvis.service")
@@ -176,6 +176,9 @@ class VoiceService:
         # What JARVIS said, in memory only: the file beside it is what was heard,
         # and the web app needs somewhere to read the other half of it from.
         self.spoken = Transcript()
+        # And what it did in between. Nothing here writes to it - the terminal
+        # does, through `ran` below.
+        self.calls = Transcript(item=ToolCall)
         self.stream: RemoteStream | None = None
         # Fed by the terminal once there is one - see cli.run_serve.
         self.doing = Doing()
@@ -351,6 +354,19 @@ class VoiceService:
             utterance = self.transcript.add(heard)
             logger.info("[%d] %s", utterance.id, heard)
             self.ui.heard(heard)
+
+    def ran(self, called: str, gave: str) -> None:
+        """A finished tool call, for the page to draw beside the conversation.
+
+        Reported by the terminal rather than by the brain, which is the route
+        the live line already takes - see Doing. The brain does not know whether
+        anything is drawing it, and chat mode has no service to tell.
+
+        Published once the call is finished, so every row arrives complete. What
+        is happening while it runs is on the live line already, and a row that
+        fills itself in afterwards is more machinery than a phone needs.
+        """
+        self.calls.add(called, gave=gave)
 
     def typed(self, text: str) -> None:
         """Take a typed line as though it had been heard.
@@ -617,6 +633,10 @@ class _Handler(BaseHTTPRequestHandler):
             # a browser is open and the reply belongs there rather than here.
             self.service.page_here()
             self._stream(self.service.spoken, "spoken", query)
+        elif url.path == "/calls":
+            # Not a page-here signal. One poll saying so is enough, and this one
+            # is quiet for whole conversations at a time.
+            self._stream(self.service.calls, "calls", query)
         elif url.path.startswith("/voice/"):
             self._voice(url.path)
         else:

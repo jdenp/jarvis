@@ -57,6 +57,11 @@ COLOUR = {
 RUNS = ">"
 GAVE = " "
 
+# The most of a result anybody watching is given. One line of it is drawn on a
+# phone, and a tool that answers in 40KB of JSON on a single line should not
+# send all of it there to be clipped.
+GAVE_LIMIT = 240
+
 # Up one row, leaving the column alone. What gives the live line back its place
 # after somebody has typed on the row beneath it.
 UP = "\033[A"
@@ -121,6 +126,7 @@ class Silent:
     def spoke(self, text: str) -> None: ...
     def tool(self, name: str, arguments: str = "") -> None: ...
     def result(self, text: str) -> None: ...
+    def watch_tools(self, listener) -> None: ...
     def note(self, text: str) -> None: ...
     def warn(self, text: str) -> None: ...
     def status(self, text: str) -> None: ...
@@ -160,6 +166,9 @@ class Ui:
         # Anybody else who wants the live line - the web app draws the same
         # thing on a phone, and it should say what this says.
         self._watchers: list = []
+        self._tool_watchers: list = []
+        # The call being run, between drawing it and drawing what it gave back.
+        self._ran: tuple[str, str] | None = None
         self._width = 0
         self._tick = 0
         self._stop = threading.Event()
@@ -241,6 +250,7 @@ class Ui:
     def tool(self, name: str, arguments: str = "") -> None:
         marker = paint("tool", f"  {RUNS} {name}", self.colour)
         self.line(f"{marker}{paint('dim', arguments, self.colour)}")
+        self._ran = (name, arguments)
 
     def result(self, text: str) -> None:
         """The first line of what a tool gave back.
@@ -249,8 +259,9 @@ class Ui:
         and not that it found nothing, which is the moment you most want to know.
         """
         lines = text.splitlines()
-        first = tail(lines[0] if lines else "", self.width() - 8)
-        self.line(paint("dim", f"  {GAVE} {first}", self.colour))
+        opening = lines[0] if lines else ""
+        self.line(paint("dim", f"  {GAVE} {tail(opening, self.width() - 8)}", self.colour))
+        self._tell_tools(opening)
 
     def note(self, text: str) -> None:
         self.line(paint("dim", text, self.colour))
@@ -275,6 +286,23 @@ class Ui:
                 # Somebody else's copy of the live line is never worth taking
                 # the terminal down over.
                 listener(text)
+
+    def watch_tools(self, listener) -> None:
+        """Report finished tool calls to somebody else as well.
+
+        The pair, once there is a result to go with the call: the page draws one
+        compact row for both rather than a line that fills itself in later.
+        """
+        self._tool_watchers.append(listener)
+
+    def _tell_tools(self, gave: str) -> None:
+        if self._ran is None:
+            return
+        name, arguments = self._ran
+        self._ran = None
+        for listener in self._tool_watchers:
+            with contextlib.suppress(Exception):
+                listener(name + arguments, gave[:GAVE_LIMIT])
 
     def status(self, text: str) -> None:
         """Say what is happening now, on the line that redraws in place."""

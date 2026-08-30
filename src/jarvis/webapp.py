@@ -94,6 +94,17 @@ over the top of it. On headphones it keeps sending, and a phrase arriving while
 a clip runs stops the clip - the same evidence the desk uses, decided here
 because the audio is here and the service cannot stop what it is not playing.
 
+Tool calls are drawn here too, the way the terminal draws them - what ran, and
+the first line of what came back. Without them a reply that took eleven seconds
+is eleven seconds of nothing, and half of what JARVIS does out loud is only
+legible if you can see that it looked at the screen first. Smaller than the
+conversation and clipped to one line each, because on a phone this is the
+working out rather than the answer - tap a row for the whole of it.
+
+They arrive finished, call and result together. What is running now is on the
+live line already, and a row that fills itself in afterwards needs an id to
+come back to and gains nothing on a screen this size.
+
 The raw switch is the other suspect. Echo cancellation, noise suppression and
 gain control are asked for by default because the browser plays the reply a
 few inches from the microphone that is listening for the next thing - but that
@@ -134,6 +145,20 @@ PAGE = """<!doctype html>
   .you { align-self: flex-end; text-align: right; }
   .you .what { color: #9fc6ff; }
   .jarvis .what { color: #e6e6e6; }
+  /* What it did on the way to the answer, so: smaller, ruled off, and one
+     line each until somebody taps it. */
+  .tool {
+    max-width: 100%; font-size: 13px; line-height: 1.35; color: #6b7280;
+    border-left: 2px solid #2b3038; padding-left: 8px;
+  }
+  .tool + .tool { margin-top: -6px; }
+  .tool .ran { color: #c4a7e7; }
+  .tool .ran, .tool .gave {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tool.open .ran, .tool.open .gave {
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
   footer {
     border-top: 1px solid #23262d; padding: 12px 16px;
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
@@ -238,17 +263,45 @@ function show(who, text) {
   log.scrollTop = log.scrollHeight;
 }
 
+// One row for a call and what it gave back. Clipped to a line each; tapped, it
+// says the whole thing, because the interesting half of a long command is the
+// half an ellipsis eats.
+function showTool(item) {
+  const line = document.createElement('div');
+  line.className = 'line tool';
+  const ran = document.createElement('div');
+  ran.className = 'ran';
+  ran.textContent = item.text;
+  line.append(ran);
+  if (item.gave) {
+    const gave = document.createElement('div');
+    gave.className = 'gave';
+    gave.textContent = item.gave;
+    line.append(gave);
+  }
+  line.onclick = () => line.classList.toggle('open');
+  log.append(line);
+  log.scrollTop = log.scrollHeight;
+}
+
 // Long polling, one loop per stream. A failure is a pause and a retry rather
 // than an error: a phone loses its network constantly and says nothing about it.
-async function follow(path, key, who) {
+//
+// `history` is how much of what it missed a fresh page draws. None of it for
+// the tool calls: what a reply from ten minutes ago was looked up in is not
+// what somebody opening the page wants at the top of the screen.
+async function follow(path, key, who, history) {
   let cursor = null;
   for (;;) {
     try {
       const first = cursor === null;
       const url = path + '?since=' + (first ? 0 : cursor) + '&wait=' + (first ? 0 : 25);
       const data = await (await fetch(url)).json();
-      const items = first ? data[key].slice(-10) : data[key];
+      // slice(-0) is the whole array, which is the one case this has to
+      // get right - see the tool calls, which ask for none of it.
+      const items = first ? (history ? data[key].slice(-history) : []) : data[key];
       for (const item of items) {
+        if (who === 'tool') { showTool(item); continue; }
         show(who, item.text);
         if (key === 'spoken' && !first) play(item.id);
         // Somebody talked over the reply. The same rule the desk uses, and
@@ -673,8 +726,9 @@ listDevices();
 mediaKeys();
 navigator.mediaDevices.addEventListener('devicechange', listDevices);
 watchDoing();
-follow('heard', 'heard', 'you');
-follow('spoken', 'spoken', 'jarvis');
+follow('heard', 'heard', 'you', 10);
+follow('spoken', 'spoken', 'jarvis', 10);
+follow('calls', 'calls', 'tool', 0);
 status();
 </script>
 </body>

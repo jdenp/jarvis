@@ -4,7 +4,7 @@ import json
 import threading
 import time
 
-from jarvis.transcript import Transcript
+from jarvis.transcript import ToolCall, Transcript
 
 
 def test_ids_are_monotonic_from_one():
@@ -82,6 +82,27 @@ def test_old_utterances_are_dropped_but_ids_keep_climbing():
         transcript.add(f"line {i}")
     assert transcript.cursor == 5
     assert [item.text for item in transcript.since(0)] == ["line 2", "line 3", "line 4"]
+
+
+def test_a_record_of_tool_calls_keeps_what_came_back():
+    """Same ids, same cursor, same waiting - one more field, because the call
+    and what it gave back are drawn differently at both ends."""
+    calls = Transcript(item=ToolCall)
+    calls.add("look_at_screen(window='teams')", gave="Teams - 14 targets")
+
+    [call] = calls.since(0)
+    assert call.id == 1
+    assert call.as_dict() == {
+        "id": 1,
+        "text": "look_at_screen(window='teams')",
+        "gave": "Teams - 14 targets",
+        "at": call.at,
+    }
+
+
+def test_a_call_with_nothing_to_say_for_itself_is_still_a_call():
+    calls = Transcript(item=ToolCall)
+    assert calls.add("press_keys(keys='win')").gave == ""
 
 
 def test_pause_stops_recording():

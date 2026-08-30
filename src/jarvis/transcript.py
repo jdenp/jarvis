@@ -1,7 +1,11 @@
-"""The record of what JARVIS has heard.
+"""The record of what JARVIS has heard, said and did.
 
 Append only, with monotonic ids so a client holding a cursor never misses or
-repeats an utterance across a reconnect. ``wait_for`` blocks until one arrives.
+repeats an entry across a reconnect. ``wait_for`` blocks until one arrives.
+
+Three of them, one shape. What was heard is the one with a file behind it; what
+was said and what was run are in memory, because they exist for the web app to
+draw and the log has the rest.
 """
 
 from __future__ import annotations
@@ -33,11 +37,39 @@ class Utterance:
         return asdict(self)
 
 
-class Transcript:
-    """In memory ring of recent utterances, mirrored to a JSONL file."""
+@dataclass(frozen=True)
+class ToolCall(Utterance):
+    """One tool call, and the first line of what it gave back.
 
-    def __init__(self, path: Path | None = None, keep: int = 200) -> None:
+    Two fields rather than one line of text, because the two are drawn
+    differently at both ends - see `ui.tool` and the page.
+    """
+
+    gave: str = ""
+
+    @classmethod
+    def new(cls, id: int, text: str, gave: str = "") -> ToolCall:
+        return cls(
+            id=id,
+            text=text,
+            gave=gave,
+            at=datetime.now(UTC).isoformat(timespec="seconds"),
+        )
+
+
+class Transcript:
+    """In memory ring of recent entries, mirrored to a JSONL file."""
+
+    def __init__(
+        self,
+        path: Path | None = None,
+        keep: int = 200,
+        item: type[Utterance] = Utterance,
+    ) -> None:
         self.path = path
+        # What one entry is. The waiting, the ids and the cursor are the same
+        # question whatever is being recorded, and only the fields differ.
+        self.item = item
         self._items: deque[Utterance] = deque(maxlen=keep)
         self._next_id = 1
         self._condition = threading.Condition()
@@ -87,7 +119,7 @@ class Transcript:
         with self._condition:
             return self._paused
 
-    def add(self, text: str, always: bool = False) -> Utterance:
+    def add(self, text: str, always: bool = False, **fields) -> Utterance:
         """Record an utterance and wake anything waiting.
 
         If paused, the utterance still gets an id but does not enter the ring
@@ -96,7 +128,7 @@ class Transcript:
         the ears, and somebody typing has plainly chosen to say something.
         """
         with self._condition:
-            utterance = Utterance.new(self._next_id, text)
+            utterance = self.item.new(self._next_id, text, **fields)
             self._next_id += 1
             if always or not self._paused:
                 self._items.append(utterance)

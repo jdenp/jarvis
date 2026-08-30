@@ -256,8 +256,11 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
 
     service.ui = screen
     # The web app draws the same live line the terminal does, so it is reported
-    # rather than reinvented - see Doing in service.py.
+    # rather than reinvented - see Doing in service.py. Tool calls take the same
+    # route for the same reason: the brain draws them and does not need to know
+    # whether anything else is looking.
     screen.watch(service.doing.set)
+    screen.watch_tools(service.ran)
     _hand_the_terminal_over(logger, screen)
     # Only with a terminal to read from. Started after the takeover so that the
     # first thing it does cannot land in the middle of the boot lines.

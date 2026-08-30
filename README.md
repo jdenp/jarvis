@@ -68,8 +68,9 @@ every utterance to `logs/heard.jsonl`.
 JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
 the reply comes back through the phone's loudspeaker rather than out of the speakers at the
 desk. There is a text box for when you cannot talk, a picker for which microphone the browser
-uses, and a checkbox for headphone mode. It draws the same live line the terminal does. On by
-default (`service.start_webapp`).
+uses, and a checkbox for headphone mode. It draws the same live line the terminal does, and
+the same tool calls under the conversation - what ran and the first line of what came back,
+one row each, tap one for the whole of it. On by default (`service.start_webapp`).
 
 While a page is open the browser has the whole conversation: the desk microphone stops being
 listened to, and the reply is rendered to a wav and played in the browser rather than out of
@@ -102,7 +103,7 @@ https://your-machine.your-tailnet.ts.net/
 
 That URL is the machine, not the session, so it survives reboots and restarts and is worth
 bookmarking on the phone. Open it on a phone signed into the same tailnet, allow the
-microphone, and press **Use this microphone**. `tailscale serve status` shows what is being
+microphone, and press **Mic off** to turn it on. `tailscale serve status` shows what is being
 served and `tailscale serve reset` stops it.
 
 None of this is on the public internet - that is `tailscale funnel`, a different command, and
@@ -225,7 +226,7 @@ you want.
 ## Development
 
 ```powershell
-uv run pytest        # 661 tests, no hardware, model or network needed
+uv run pytest        # 670 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

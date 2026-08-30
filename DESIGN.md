@@ -665,6 +665,22 @@ timer either lags behind the thing it is describing or costs a phone a request a
 day. Streamed reasoning is deliberately left out of it - it changes hundreds of times a second
 and is drawn at whatever pace a terminal can manage, which is not a thing to put down a socket.
 
+**And so are the tool calls, by the same route.** A reply that took eleven seconds is
+eleven seconds of nothing on a phone, and half of what JARVIS does out loud only makes
+sense if you can see that it looked at the screen first. They go the way the live line
+goes: the brain draws them on the terminal, the terminal hands them to whoever is
+watching, and the service publishes them on a stream beside what was heard and what was
+said. The brain never learns whether anything is drawing it, which is what keeps chat
+mode - where there is no service at all - from needing to know either.
+
+A row is published when the call finishes, with what it gave back already in it, rather
+than when it starts. A row that fills itself in later needs an id to come back to and a
+second message to do it with, and it buys nothing: what is running right now is on the
+live line already, which says `running look_at_screen` while it runs. On the page they are
+smaller than the conversation and clipped to a line each, because this is the working out
+rather than the answer - and tapping one opens it, since the half of a long command an
+ellipsis eats is usually the half worth reading.
+
 **Asking for the session the phone had already chosen.** The reply played on the phone for a day before anybody heard it. A page with a microphone open puts iOS into a recording session, and a recording session routes output to the earpiece - so it was playing perfectly, into the receiver, on a phone lying on a desk. `navigator.audioSession` reported `play-and-record` the whole time, and *setting* it to `play-and-record`, the value it already had, is what moves the output to the loudspeaker. A session the phone chose and the same session asked for are not the same session.
 
 It took as long as it did because every layer failed silently. A media element refused outside a gesture rejects nothing you can see; a suspended AudioContext plays a buffer into nothing and raises no error; and a working page routed to the earpiece is indistinguishable from all of them. What eventually made it findable was putting the state on screen - the context state, its sample rate, and the route - rather than reasoning about which of them it might be.

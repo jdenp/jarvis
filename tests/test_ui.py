@@ -10,7 +10,7 @@ from __future__ import annotations
 import io
 import logging
 
-from jarvis.ui import COLOUR, LogToUi, Silent, Ui, paint
+from jarvis.ui import COLOUR, GAVE_LIMIT, LogToUi, Silent, Ui, paint
 
 
 def screen(colour=False):
@@ -57,6 +57,65 @@ def test_a_tool_that_gave_back_nothing_still_draws_a_line():
     ui, written = screen()
     ui.result("")
     assert written.getvalue() == "    \n"
+
+
+def test_a_finished_call_is_reported_to_whoever_else_is_drawing_it():
+    """The web app draws the same tool calls the terminal does, so they are
+    reported rather than reinvented - and as a pair, because a row that fills
+    itself in later needs an id to come back to."""
+    ui, _ = screen()
+    seen = []
+    ui.watch_tools(lambda called, gave: seen.append((called, gave)))
+
+    ui.tool("look_at_screen", "(window='Teams')")
+    assert seen == [], "the call is not finished until something came back"
+
+    ui.result("Teams - 14 targets from 39 elements\nand more lines")
+    assert seen == [("look_at_screen(window='Teams')", "Teams - 14 targets from 39 elements")]
+
+
+def test_the_page_is_given_the_whole_first_line_and_the_terminal_its_own_width():
+    """The terminal cuts to fit; a phone clips in CSS and can be tapped to see
+    the rest, so cutting it here would throw away the half worth reading."""
+    ui, written = screen()
+    seen = []
+    ui.watch_tools(lambda called, gave: seen.append(gave))
+
+    ui.tool("run_command", "(command='dir')")
+    ui.result("x" * 200)
+    assert seen == ["x" * 200]
+    drawn = written.getvalue().splitlines()[-1]
+    assert len(drawn) < len(seen[0]), "the terminal cut it to fit"
+
+
+def test_a_result_nobody_would_read_is_cut_before_it_is_sent():
+    """A tool that answers in one very long line should not send all of it to
+    a phone to be clipped to one row."""
+    ui, _ = screen()
+    seen = []
+    ui.watch_tools(lambda called, gave: seen.append(gave))
+
+    ui.tool("run_command", "(command='dir')")
+    ui.result("y" * 5000)
+    assert seen == ["y" * GAVE_LIMIT]
+
+
+def test_a_result_with_no_call_in_front_of_it_is_not_reported():
+    """Nothing does this, but a listener taking a result with no name attached
+    would draw a row with nothing in it."""
+    ui, _ = screen()
+    seen = []
+    ui.watch_tools(lambda called, gave: seen.append(gave))
+    ui.result("out of nowhere")
+    assert seen == []
+
+
+def test_a_watcher_that_throws_does_not_take_the_terminal_with_it():
+    ui, written = screen()
+    ui.watch_tools(lambda called, gave: 1 / 0)
+    ui.tool("press_keys", "(keys='win')")
+    ui.result("Pressed win.")
+    assert "Pressed win." in written.getvalue()
 
 
 def test_the_banner_says_what_is_running():
