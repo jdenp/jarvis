@@ -604,11 +604,10 @@ function nowPlaying(on) {
   if (!session) return;
   session.playbackState = on ? 'playing' : 'paused';
   try {
-    // What the lock screen shows while you are in another room.
-    session.metadata = new MediaMetadata({
-      title: 'JARVIS',
-      artist: on ? 'Listening' : 'Microphone off',
-    });
+    // The name and nothing else. It said whether the microphone was on for a
+    // while, which is a second copy of a state the page already draws and one
+    // that iOS is free to leave on screen after it stops being true.
+    session.metadata = new MediaMetadata({title: 'JARVIS'});
   } catch (err) {
     // No MediaMetadata here, which costs the title and nothing else.
   }
