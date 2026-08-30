@@ -705,18 +705,19 @@ somebody shutting the desk has not asked for the sentence their phone sent a mom
 be forgotten. So a queued phrase carries which microphone made it, and a drain puts back
 everything that is not its own.
 
-**A squeeze on an AirPod needs a media element, not an AudioContext.** The lock screen
-buttons worked the first time they were tried and the stem did not - it answered with
-"cannot control mic with AirPods Pro", which sounds like a permission problem and is not
-one. Safari hands headset buttons to a page only while a media *element* is playing on it.
-The reply plays through an AudioContext, which is not one, so the session iOS showed was
-real enough for the on-screen controls and invisible to the firmware, which read the
-squeeze as an attempt to mute a microphone it does not control and refused it.
+**The lock screen works the microphone. The AirPods stem does not.** iOS gives a page that is
+playing audio a media session, and `setActionHandler` catches what the control centre sends to
+it, so play and pause start and stop the microphone - the one control worth having when the
+phone is in a pocket and the screen is off. It was half doing that by accident already, since
+pausing suspends the audio graph and the capture stops on the way past.
 
-So half a second of silence loops in an `<audio>` tag whenever the microphone is meant to
-be on, generated in the page rather than pasted in as a kilobyte of base64. `play` and
-`pause` are then bound to starting and stopping the microphone, which is the only control
-worth having when the phone is in a pocket and the screen is off.
+The stem is a different matter. It answers "cannot control mic with AirPods Pro", which sounds
+like a permission problem and is not one: the firmware is being asked to map a squeeze onto a
+microphone mute it does not own, and refuses. The documented way round that is a looping silent
+`<audio>` element, on the theory that Safari hands headset buttons to a page only while a media
+*element* is playing and an AudioContext is not one. It was built and the element was real - a
+valid silent wav generated in the page rather than pasted in as base64 - and the stem gave the
+same refusal. Taken out again. The lock screen half was never the problem and it stayed.
 
 **Being talked over, decided in the room the audio is in.** The page holds its microphone
 back while a clip is playing, which is right on a loudspeaker - the browser's echo
