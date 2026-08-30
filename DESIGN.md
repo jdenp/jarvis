@@ -644,6 +644,20 @@ it can only ever make things quieter. Every clip is therefore scaled so its loud
 sits just under full scale before the volume setting is applied - capped at four times, so
 that a clip which is quiet because it is quiet does not come back as amplified noise.
 
+**Num Lock is a key on the desk, so it shuts the desk.** It used to pause the transcript,
+which is every source at once - so leaving the house with JARVIS muted took the phone down
+with it, and the one moment you most want to talk to it from another room is the moment you
+have just muted the room you left. It now shuts the desk microphone only. The web app's own
+control means the same thing there, which is why the page has two: one for the desk and one
+for the phone it is running on.
+
+That took the transcript gate away, and it was there for a reason - a phrase captured just
+before the key was pressed could still be mid-transcription when it lands. Draining the
+microphone's queue covers it, except that the queue is now shared with the web app, and
+somebody shutting the desk has not asked for the sentence their phone sent a moment ago to
+be forgotten. So a queued phrase carries which microphone made it, and a drain puts back
+everything that is not its own.
+
 **No WebSocket, and no auth of its own.** Chunks go up as ordinary POSTs, a quarter second
 at a time, because the payload is bytes rather than a container - the splitter cannot tell
 where one request ended and the next began, so the seams that would matter for a recording

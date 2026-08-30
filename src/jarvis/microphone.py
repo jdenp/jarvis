@@ -16,6 +16,7 @@ phrase rule written here without a second copy of any of it.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import queue
@@ -343,14 +344,21 @@ class Microphone:
     def _deliver(self, frames: deque[bytes], source) -> None:
         audio = sr.AudioData(b"".join(frames), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
         try:
-            self._queue.put_nowait(audio)
+            # Whose it is, because the queue may be shared and draining it is
+            # then a question of whose phrases are being thrown away.
+            self._queue.put_nowait((self, audio))
         except queue.Full:
             logger.warning("Audio queue full, dropping a phrase.")
 
     def listen(self, timeout: float | None = None) -> sr.AudioData | None:
-        """Pop the next captured phrase, or None if nothing arrived in time."""
+        """Pop the next captured phrase, or None if nothing arrived in time.
+
+        Whichever source it came from. That is the whole trick of sharing the
+        queue: the service reads one stream of phrases and never learns there
+        were two microphones.
+        """
         try:
-            return self._queue.get(timeout=timeout)
+            return self._queue.get(timeout=timeout)[1]
         except queue.Empty:
             return None
 
@@ -403,12 +411,22 @@ class Microphone:
         return self._paused.is_set()
 
     def drain(self) -> None:
-        """Discard any queued phrases."""
+        """Discard any queued phrases of mine, and put back everyone else's.
+
+        Somebody shutting the desk microphone has not asked for the sentence
+        their phone sent a moment ago to be forgotten, and the two share a
+        queue.
+        """
+        held = []
         while True:
             try:
-                self._queue.get_nowait()
+                held.append(self._queue.get_nowait())
             except queue.Empty:
-                return
+                break
+        for waiting in held:
+            if waiting[0] is not self:
+                with contextlib.suppress(queue.Full):
+                    self._queue.put_nowait(waiting)
 
     def stop(self) -> None:
         """Stop background capture and release the device."""

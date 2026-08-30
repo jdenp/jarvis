@@ -48,9 +48,10 @@ every utterance to `logs/heard.jsonl`.
   the look that has already happened.
 - **Or type.** Start typing in the window it is running in and the line goes in exactly where
   speech does. Escape throws it away; escape on an empty line stops whatever it is doing.
-- **Num Lock stops it listening**, from anywhere, including with an admin window in front.
-  Nothing is transcribed or logged until you press it again. Or just ask - "stop listening,
-  I'm on a call" - and it will tell you which key brings it back.
+- **Num Lock shuts this microphone**, from anywhere, including with an admin window in
+  front. Nothing said in the room is transcribed or logged until you press it again. It is
+  the desk only: a phone on the web app keeps hearing, so you can leave the room muted and
+  still talk to it from the next one. Or just ask - "stop listening, I'm on a call".
 - **A phrase ends after 1.2s of quiet** (`audio.pause_threshold`), set high on purpose:
   being cut off mid sentence is worse than waiting.
 

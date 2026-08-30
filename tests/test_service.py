@@ -382,14 +382,33 @@ def test_listen_while_speaking_leaves_the_microphone_open():
     assert speech.said == ["Talking over myself."]
 
 
-def test_pause_stops_recording():
-    service, _, _ = make_service()
-    assert service.transcript.paused is False
-    result = service.pause()
-    assert result is True
-    assert service.transcript.paused is True
-    service.transcript.add("paused utterance")
-    assert [item.text for item in service.transcript.since(0)] == []
+def test_pause_shuts_the_desk_microphone():
+    service, microphone, _ = make_service()
+    assert service.paused is False
+    assert service.pause() is True
+    assert service.paused is True
+    assert microphone.paused is True
+    assert service.pause() is False, "already shut"
+
+    service.resume()
+    assert service.paused is False
+    assert microphone.paused is False
+
+
+def test_pausing_the_desk_leaves_the_phone_listening(app):
+    """Num Lock is a key on the desk. Somebody pressing it on their way out is
+    muting the room they are leaving, not the phone in their pocket - which was
+    not true while this stopped the transcript, and that is every source."""
+    service, microphone, port = app
+    get(port, "/spoken?since=0")
+    service.live.settle()
+
+    service.pause()
+    assert microphone.paused, "the desk is shut"
+    assert not service.transcript.paused, "and nothing else is"
+
+    service.transcript.add("something the phone heard")
+    assert [x.text for x in service.transcript.since(0)] == ["something the phone heard"]
 
 
 def test_pause_stops_the_microphone_not_just_the_delivery():
@@ -759,23 +778,23 @@ def test_only_the_last_few_clips_are_kept(app):
     assert max(service.clips) == service_module.KEEP_CLIPS + 4
 
 
-def test_transcription_can_be_stopped_from_the_page(app):
-    """Num Lock stops it at the desk. A phone has no Num Lock, so the page has
-    to be able to say it too."""
-    service, _, port = app
+def test_the_desk_can_be_shut_from_the_page(app):
+    """Num Lock is on the desk and a phone has not got one, so the page can say
+    it too - and it means the same thing there: the desk, not this phone."""
+    _, microphone, port = app
     assert post(port, "/pause").json() == {"paused": True}
-    assert service.transcript.paused
+    assert microphone.paused
     assert get(port, "/status").json()["paused"] is True
 
     assert post(port, "/resume").json() == {"paused": False}
-    assert not service.transcript.paused
+    assert not microphone.paused
 
 
 def test_pausing_still_works_the_way_the_cli_asks_for_it(app):
     """`jarvis pause` has always been a GET, and it stays one."""
-    service, _, port = app
+    _, microphone, port = app
     assert get(port, "/pause").json() == {"paused": True}
-    assert service.transcript.paused
+    assert microphone.paused
 
 
 def test_everything_the_page_calls_at_the_end_exists():

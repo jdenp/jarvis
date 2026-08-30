@@ -51,10 +51,12 @@ say why, and that was this once already. What none of it can do anything about
 is the ring/silent switch, which mutes audio outright - so a refusal says so
 rather than being swallowed.
 
-Two controls that sound alike and are not. The microphone button is about this
-phone: whether it is streaming. The one above the conversation is the Num Lock
-key, which a phone has not got - it stops JARVIS transcribing anything, from
-any microphone, until it is pressed again.
+Two controls that sound alike and are not, and neither reaches the other. The
+microphone button is this phone: whether it is streaming. The one above the
+conversation is the Num Lock key on the desk, which a phone has not got - it
+shuts the microphone in that room and leaves this one alone. Muting the room
+you have walked out of while still talking from the next one is the whole
+reason they are separate.
 
 The reply arrives the way everything else here does: by long polling, and it is
 played here rather than at the desk - a machine talking to an empty room is no
@@ -204,7 +206,7 @@ function routing() {
   return navigator.audioSession ? navigator.audioSession.type : 'not supported';
 }
 
-let bytesSent = 0, loudest = 0, playing = null, deaf = false, resumeMic = false;
+let bytesSent = 0, loudest = 0, playing = null, deaf = false;
 
 let ctx = null, media = null, node = null, timer = null, wake = null;
 let pending = [], streaming = false, broken = '';
@@ -373,25 +375,19 @@ document.getElementById('typing').onsubmit = async event => {
 function showEars(paused) {
   deaf = paused;
   banner.classList.toggle('off', paused);
-  ears.textContent = paused ? 'Not listening to anything' : 'Listening';
-  deafen.textContent = paused ? 'Start again' : 'Stop listening';
+  ears.textContent = paused ? 'Desk microphone is off' : 'Desk microphone is on';
+  deafen.textContent = paused ? 'Turn it on' : 'Turn it off';
 }
 
-// The Num Lock key, for a phone. Not the microphone button: this stops JARVIS
-// transcribing at all, here and at the desk, until it is pressed again.
+// The Num Lock key on the desk, pressed from here. It does not touch this
+// phone's microphone, which is what the button below it is for - the point of
+// having both is muting the room you left without going deaf in the one you
+// are standing in.
 deafen.onclick = async () => {
   unlock();
   const paused = !deaf;
   showEars(paused);  // said now; the next poll of /status confirms it
-  if (paused) {
-    // Streaming into a service that is dropping it is battery for nothing.
-    resumeMic = streaming;
-    if (streaming) await stopMic();
-    await fetch('pause', {method: 'POST'});
-  } else {
-    await fetch('resume', {method: 'POST'});
-    if (resumeMic) await startMic();
-  }
+  await fetch(paused ? 'pause' : 'resume', {method: 'POST'});
 };
 
 // Raw frames straight off the graph. Nothing is written to the output, so

@@ -373,32 +373,39 @@ class VoiceService:
         )
         self._hotkey.start()
 
-    def pause(self) -> bool:
-        """Stop listening. Returns True if it was not already paused.
+    @property
+    def paused(self) -> bool:
+        """Whether the desk microphone is shut."""
+        return self.microphone is not None and self.microphone.paused
 
-        The microphone stops being read, so a paused JARVIS spends no CPU on
-        transcription and writes nothing to the log or the transcript file. The
-        transcript gate stays as the second line: a phrase captured just before
-        the key was pressed can still be mid-transcription when it lands.
+    def pause(self) -> bool:
+        """Shut the desk microphone. Returns True if it was not already shut.
+
+        The desk only. Num Lock is a key on the desk, and somebody pressing it
+        on their way out of the room is muting the room they are leaving - not
+        the phone in their pocket, which has a button of its own. It used to
+        stop the transcript as well, which is every source at once, so leaving
+        the house with JARVIS muted also took the phone down with it.
+
+        The microphone stops being read, so a shut desk spends no CPU on
+        transcription and writes nothing to the log or the transcript file.
         """
-        if self.transcript.paused:
+        if self.microphone is None or self.microphone.paused:
             return False
-        self.transcript.pause()
-        if self.microphone is not None:
-            self.microphone.pause()
-        # Said on screen, not only logged. Pausing has no sound and no visible
+        self.microphone.pause()
+        # Said on screen, not only logged. This has no sound and no visible
         # effect of its own, so with nothing drawn a working hotkey is
         # indistinguishable from a dead one.
         key = self.config.service.hotkey or "resume_transcription"
-        self.ui.note(f"Not listening. {key} to start again.")
+        self.ui.note(f"This microphone is off. {key} to start it again.")
         return True
 
     def resume(self) -> None:
-        """Start listening again."""
-        if self.transcript.resume():
-            self.ui.note("Listening again.")
-        if self.microphone is not None:
-            self.microphone.resume()
+        """Open the desk microphone again."""
+        if self.microphone is None or not self.microphone.paused:
+            return
+        self.microphone.resume()
+        self.ui.note("This microphone is listening again.")
 
     # ------------------------------------------------------------------ speak
 
@@ -485,7 +492,7 @@ class VoiceService:
             "cursor": self.transcript.cursor,
             "stt": self.config.stt.backend,
             "tts": self.config.tts.engine,
-            "paused": self.transcript.paused,
+            "paused": self.paused,
             "webapp": self.stream is not None,
             "streaming": self.stream is not None and self.stream.live,
             "attached": self.live.on_the_page,

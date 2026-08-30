@@ -88,7 +88,9 @@ Pass `window` and it is focused first and checked before anything is pressed, wh
 
 ## pause_transcription
 
-Stop listening. The microphone stops being read, so nothing is transcribed, logged or recorded until it is resumed - not merely withheld from you.
+Shut the microphone on the desk. It stops being read, so nothing said in that room is transcribed, logged or recorded until it is resumed - not merely withheld from you.
+
+The desk only. A phone using the web app has its own control and keeps hearing, which is the point: somebody can leave the room muted and still talk to you from the next one.
 
 For when they ask for privacy, or say they are on a call, or are about to have a conversation that is not with you.
 
