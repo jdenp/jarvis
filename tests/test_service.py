@@ -822,8 +822,8 @@ def test_only_the_last_few_clips_are_kept(app):
 
 
 def test_the_desk_can_be_shut_from_the_page(app):
-    """Num Lock is on the desk and a phone has not got one, so the page can say
-    it too - and it means the same thing there: the desk, not this phone."""
+    """The key is on the desk and the page no longer offers to press it, but the
+    route stays: `jarvis pause` has always used it, and it means the desk."""
     _, microphone, port = app
     assert post(port, "/pause").json() == {"paused": True}
     assert microphone.paused

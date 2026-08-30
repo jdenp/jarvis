@@ -522,10 +522,12 @@ class ServiceVoice:
 
         The desk is named rather than implied, because this line is drawn on
         the web app too and a phone there is still listening perfectly well.
+        Short, because it is a status bar and the room it is about is the room
+        the person reading it is standing in.
         """
         if self.service.paused:
             key = self.service.config.service.hotkey or "resume_transcription"
-            return f"the desk microphone is off - {key} to start it again"
+            return f"desk mic off, {key} to toggle"
         return "listening"
 
     # Having these is what puts the two transcription tools in the toolbox. Chat

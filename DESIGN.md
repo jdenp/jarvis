@@ -676,9 +676,15 @@ just put headphones on, which is not a moment anybody spends in a config file.
 **Num Lock is a key on the desk, so it shuts the desk.** It used to pause the transcript,
 which is every source at once - so leaving the house with JARVIS muted took the phone down
 with it, and the one moment you most want to talk to it from another room is the moment you
-have just muted the room you left. It now shuts the desk microphone only. The web app's own
-control means the same thing there, which is why the page has two: one for the desk and one
-for the phone it is running on.
+have just muted the room you left. It now shuts the desk microphone only.
+
+The page mirrored it for a while, as a banner reading `desk microphone is off` with a button
+to turn it back on, and that came out again. A phone showing a control for a room nobody in
+front of it is standing in is clutter at best, and above the conversation it read as though
+it were about the phone. `POST /pause` stays, because the CLI has always used it. Headphone
+mode stayed on the page as a checkbox beside the raw audio one, which is the honest shape
+for it: a setting that is true or false about the desk, not a button that does something in
+the room the phone is in.
 
 That took the transcript gate away, and it was there for a reason - a phrase captured just
 before the key was pressed could still be mid-transcription when it lands. Draining the

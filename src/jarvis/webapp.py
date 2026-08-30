@@ -51,17 +51,17 @@ say why, and that was this once already. What none of it can do anything about
 is the ring/silent switch, which mutes audio outright - so a refusal says so
 rather than being swallowed.
 
-Two controls that sound alike and are not, and neither reaches the other. The
-microphone button is this phone: whether it is streaming. The one above the
-conversation is the Num Lock key on the desk, which a phone has not got - it
-shuts the microphone in that room and leaves this one alone. Muting the room
-you have walked out of while still talking from the next one is the whole
-reason they are separate.
+One microphone control here, and it is this phone's. The desk's own key was
+mirrored up here for a while as a banner - `desk microphone is off`, with a
+button to turn it back on - and it was a control for a room you are not standing
+in, sitting above the conversation where it read as though it were about this
+phone. The desk has a key on the desk.
 
-Headphone mode beside it is the desk again, and the same key held down. It only
-means anything to the room with speakers in it: what plays here plays out of
-this phone, and the browser's own echo cancellation is what keeps that out of
-the microphone.
+Headphone mode is still here, as a checkbox with the other one, because it is a
+setting rather than a control: something that is true or false about the desk,
+not a button that does anything in this room. It means nothing to what happens
+here - what plays on this phone comes out of this phone, and the browser's own
+echo cancellation is what keeps that out of the microphone.
 
 The reply arrives the way everything else here does: by long polling, and it is
 played here rather than at the desk - a machine talking to an empty room is no
@@ -111,15 +111,6 @@ PAGE = """<!doctype html>
   }
   h1 { font-size: 15px; letter-spacing: .18em; margin: 0; color: #8a8f98; font-weight: 600; }
   #state { font-size: 13px; color: #6b7280; margin-left: auto; }
-  #banner {
-    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
-    font-size: 14px; color: #8a8f98; border-bottom: 1px solid #23262d;
-    flex-wrap: wrap;
-  }
-  #banner.off { background: #3b2a12; color: #f5c77e; }
-  #banner button { padding: 8px 12px; font-size: 13px; }
-  #banner button:first-of-type { margin-left: auto; }
-  #phones.on { background: #14532d; border-color: #2f7d4f; color: #d8f5e2; }
   #log {
     flex: 1; overflow-y: auto; padding: 16px;
     display: flex; flex-direction: column; gap: 12px;
@@ -158,7 +149,9 @@ PAGE = """<!doctype html>
     font-style: italic; border-top: 1px solid #23262d;
   }
   #doing.on { display: block; }
-  #rawline { font-size: 13px; color: #8a8f98; display: flex; gap: 8px; align-items: center; }
+  #rawline, #phoneline {
+    font-size: 13px; color: #8a8f98; display: flex; gap: 8px; align-items: center;
+  }
   select {
     background: #1b1f26; border: 1px solid #2b3038; color: inherit;
     border-radius: 10px; padding: 10px 12px; font: inherit; width: 100%;
@@ -167,9 +160,6 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <header><h1>JARVIS</h1><span id="state">connecting</span></header>
-<div id="banner"><span id="ears">Listening</span>
-  <button id="phones" title="Leave the desk microphone open through a reply">Headphones off</button>
-  <button id="deafen">Stop listening</button></div>
 <div id="log"></div>
 <div id="doing"></div>
 <footer>
@@ -177,10 +167,11 @@ PAGE = """<!doctype html>
   <select id="devices" title="Which microphone"></select>
   <label id="rawline"><input type="checkbox" id="raw">
     Raw audio (no echo cancellation or noise gating)</label>
+  <label id="phoneline"><input type="checkbox" id="phones">
+    Headphone mode at the desk (it listens while it talks)</label>
   <button id="mic">Use this microphone</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>
-  <div id="sent" class="quiet"><span id="lastplay"></span></div>
 </footer>
 <script>
 const RATE = 16000;
@@ -188,9 +179,6 @@ const FLUSH_MS = 250;
 
 const log = document.getElementById('log');
 const state = document.getElementById('state');
-const banner = document.getElementById('banner');
-const ears = document.getElementById('ears');
-const deafen = document.getElementById('deafen');
 const phones = document.getElementById('phones');
 const mic = document.getElementById('mic');
 const meter = document.getElementById('meter');
@@ -198,7 +186,6 @@ const level = document.getElementById('level');
 const sent = document.getElementById('sent');
 const devices = document.getElementById('devices');
 const doing = document.getElementById('doing');
-const lastplay = document.getElementById('lastplay');
 const raw = document.getElementById('raw');
 raw.checked = localStorage.getItem('raw') === 'yes';
 // The loudspeaker. Asking for the session the phone had already chosen is what
@@ -216,7 +203,7 @@ function routing() {
   return navigator.audioSession ? navigator.audioSession.type : 'not supported';
 }
 
-let bytesSent = 0, loudest = 0, playing = null, deaf = false, wearing = false;
+let bytesSent = 0, loudest = 0, playing = null;
 
 let ctx = null, media = null, node = null, timer = null, wake = null;
 let pending = [], streaming = false, broken = '';
@@ -293,15 +280,10 @@ async function play(id) {
   if (playing) return;
   while (queued.length) {
     const next = queued.shift();
-    // Said out loud at every step, because every layer of this fails silently:
-    // no line at all means nothing even tried.
-    lastplay.textContent = 'clip ' + next + ': fetching';
     try {
       const reply = await fetch('voice/' + next + '.wav');
-      if (!reply.ok) {
-        lastplay.textContent = 'clip ' + next + ': spoken at the desk';
-        continue;
-      }
+      // The ordinary case for a line that was spoken at the desk instead.
+      if (!reply.ok) continue;
       if (!ctx) throw new Error('no audio context yet - tap anything once');
       if (ctx.state !== 'running') await ctx.resume();
       // Said out loud rather than played into the void: starting a source on a
@@ -317,8 +299,6 @@ async function play(id) {
       source.buffer = buffer;
       source.connect(ctx.destination);
       playing = source;
-      lastplay.textContent = 'clip ' + next + ': playing '
-        + buffer.duration.toFixed(1) + 's on ' + routing();
       await new Promise((done, fail) => {
         // Its own length plus a margin. Never no limit: the queue behind this
         // is drained by whatever finishes here.
@@ -328,11 +308,12 @@ async function play(id) {
         source.start(0);
       });
     } catch (err) {
-      // Never swallowed. Silence with no explanation is the one failure this
-      // page cannot afford twice.
-      lastplay.textContent = 'clip ' + next + ': ' + (err.message || err);
+      // Never swallowed, and in the conversation rather than in a status line:
+      // silence with no explanation is the one failure this page cannot afford
+      // twice, and the route is in it because that was the answer once.
       show('jarvis', 'Could not play that here - ' + (err.name || '') + ' '
-        + (err.message || err) + '. On an iPhone the ring/silent switch mutes'
+        + (err.message || err) + ' (route ' + routing() + ')'
+        + '. On an iPhone the ring/silent switch mutes'
         + ' this; the volume buttons while it is playing set the right level.');
     } finally {
       playing = null;
@@ -362,8 +343,7 @@ async function status() {
   for (;;) {
     try {
       const data = await (await fetch('status')).json();
-      showEars(data.paused);
-      showPhones(data.headphones);
+      phones.checked = data.headphones;
     } catch (err) { /* follow() is already saying so */ }
     await new Promise(done => setTimeout(done, 4000));
   }
@@ -383,42 +363,16 @@ document.getElementById('typing').onsubmit = async event => {
   });
 };
 
-function showEars(paused) {
-  deaf = paused;
-  banner.classList.toggle('off', paused);
-  ears.textContent = paused ? 'Desk microphone is off' : 'Desk microphone is on';
-  deafen.textContent = paused ? 'Turn it on' : 'Turn it off';
-}
-
-// The Num Lock key on the desk, pressed from here. It does not touch this
-// phone's microphone, which is what the button below it is for - the point of
-// having both is muting the room you left without going deaf in the one you
-// are standing in.
-deafen.onclick = async () => {
+// The desk, and the same Num Lock key held down rather than pressed. It leaves
+// the microphone there open while JARVIS talks, so a reply can be cut off mid
+// sentence - free on headphones, and a machine transcribing itself on speakers.
+// The box is checked already; the next poll of /status confirms it.
+phones.onchange = async () => {
   unlock();
-  const paused = !deaf;
-  showEars(paused);  // said now; the next poll of /status confirms it
-  await fetch(paused ? 'pause' : 'resume', {method: 'POST'});
-};
-
-function showPhones(on) {
-  wearing = on;
-  phones.classList.toggle('on', on);
-  phones.textContent = on ? 'Headphones on' : 'Headphones off';
-}
-
-// The desk again, and the same Num Lock key held down rather than pressed. It
-// leaves the microphone there open while JARVIS talks, so a reply can be cut
-// off mid sentence - which is free on headphones and is a machine transcribing
-// itself on speakers.
-phones.onclick = async () => {
-  unlock();
-  const on = !wearing;
-  showPhones(on);  // said now; the next poll of /status confirms it
   await fetch('headphones', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({on: on}),
+    body: JSON.stringify({on: phones.checked}),
   });
 };
 
@@ -486,8 +440,7 @@ function flush() {
   // rather than judged: a quiet room reads the same as a dead microphone from
   // here, and only the person in the room knows which it is.
   sent.textContent = Math.round(bytesSent / 1024) + ' kB sent, loudest '
-    + (loudest * 100).toFixed(2) + '%, audio '
-    + (ctx ? ctx.state : 'not started') + ', route ' + routing();
+    + (loudest * 100).toFixed(2) + '%';
   fetch('audio', {
     method: 'POST',
     headers: {'Content-Type': 'application/octet-stream'},

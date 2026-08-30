@@ -68,8 +68,8 @@ every utterance to `logs/heard.jsonl`.
 JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
 the reply comes back through the phone's loudspeaker rather than out of the speakers at the
 desk. There is a text box for when you cannot talk, a picker for which microphone the browser
-uses, a headphone-mode button, and a stop-listening button since a phone has no Num Lock key.
-It draws the same live line the terminal does. On by default (`service.start_webapp`).
+uses, and a checkbox for headphone mode. It draws the same live line the terminal does. On by
+default (`service.start_webapp`).
 
 While a page is open the browser has the whole conversation: the desk microphone stops being
 listened to, and the reply is rendered to a wav and played in the browser rather than out of

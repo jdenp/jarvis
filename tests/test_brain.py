@@ -736,7 +736,7 @@ def test_the_live_line_does_not_claim_to_be_listening_while_deaf():
     # The desk microphone, which is what the key shuts. Pausing the transcript
     # is not it any more, and reading that was a line saying it could hear.
     service.paused = True
-    assert "microphone is off" in voice.waiting()
+    assert voice.waiting().startswith("desk mic off")
     assert Config().service.hotkey in voice.waiting(), "and which key brings it back"
 
 
