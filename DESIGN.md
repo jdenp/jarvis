@@ -705,6 +705,20 @@ somebody shutting the desk has not asked for the sentence their phone sent a mom
 be forgotten. So a queued phrase carries which microphone made it, and a drain puts back
 everything that is not its own.
 
+**There is no tool for starting to listen again.** There was, and the shape of it was
+wrong from the start: the microphone `resume_transcription` would open is the one that
+would have had to hear somebody ask for it, so it was reachable exactly when it was not
+needed and unreachable when it was. What it actually produced was worse than useless - a
+model with a tool it cannot test the state of calls it on a hunch, so a session went
+`pause_transcription` -> "Already not listening" -> "I've stopped listening, sir" ->
+"Still muted, sir" while answering every word, then `resume_transcription` -> "Good, I'm
+back." None of it was true and all of it was fluent.
+
+The key is the way back and the prompt says so. The other half of that fix is in the
+refusal: shutting the desk is not going deaf, because a phone on the web app keeps
+hearing, so a second `pause_transcription` now answers with which microphone was already
+shut and tells it not to claim to be deaf while it is plainly still listening.
+
 **No WebSocket, and no auth of its own.** Chunks go up as ordinary POSTs, a quarter second
 at a time, because the payload is bytes rather than a container - the splitter cannot tell
 where one request ended and the next began, so the seams that would matter for a recording

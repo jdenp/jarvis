@@ -94,13 +94,7 @@ The desk only. A phone using the web app has its own control and keeps hearing, 
 
 For when they ask for privacy, or say they are on a call, or are about to have a conversation that is not with you.
 
-Call it FIRST and say so afterwards. A reply that promises to stop listening is a promise where the act should be - and once it is done, say that the num lock key brings you back, because from then on you cannot hear them ask. Not a way to avoid answering something: a hyphen does that and keeps your ears.
-
-No arguments.
-
-## resume_transcription
-
-Start reading the microphone again. Nothing said during the pause is recoverable - it was never captured.
+Call it FIRST and say so afterwards. A reply that promises to stop listening is a promise where the act should be - and once it is done, say that the num lock key brings you back, because from then on you cannot hear them ask. There is no tool for starting again, on purpose: it would be a tool the shut microphone had to hear you asked for. Not a way to avoid answering something either: a hyphen does that and keeps your ears.
 
 No arguments.
 

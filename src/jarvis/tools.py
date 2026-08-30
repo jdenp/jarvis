@@ -700,10 +700,16 @@ def _web_tools(config: Config) -> list[Tool]:
 
 
 def _ear_tools(config: Config, ears) -> list[Tool]:
-    """Stopping and starting the microphone, if there is one to stop.
+    """Stopping the microphone, if there is one to stop.
 
     Absent in chat mode, where there are no ears to close. `hasattr` rather than
     a flag because that is the only difference between the two front ends.
+
+    Stopping only. There was a `resume_transcription` beside this and it went:
+    the microphone it would open is the one that would have had to hear the
+    request, so the tool was reachable exactly when it was not needed, and what
+    it actually produced was JARVIS calling it on a hunch and announcing it was
+    back from a state it had never been in. The key is the way back.
     """
     if ears is None or not hasattr(ears, "pause"):
         return []
@@ -711,18 +717,19 @@ def _ear_tools(config: Config, ears) -> list[Tool]:
 
     def pause_transcription() -> str:
         if not ears.pause():
-            return "Already not listening."
+            # Said at length because the short version read as "you are deaf",
+            # and JARVIS told somebody it could not hear them while answering
+            # every word they said.
+            return (
+                "The desk microphone was already shut. Anything you can hear right now "
+                "is reaching you some other way - the web app on a phone - so do not "
+                "tell them you have gone deaf, because you plainly have not."
+            )
         return (
-            "Stopped listening. The microphone is no longer being read, so nothing said "
-            f"from now is transcribed, logged or recoverable. Tell them the {key} key "
-            "brings you back, because from here you cannot hear them ask."
-        )
-
-    def resume_transcription() -> str:
-        ears.resume()
-        return (
-            "Listening again. Nothing said during the pause was captured, so there is "
-            "nothing to catch up on."
+            "Stopped listening at the desk. That microphone is no longer being read, so "
+            f"nothing said in that room is transcribed, logged or recoverable. The {key} "
+            "key is the only way back and you have no tool for it: say so now, because "
+            "from here you cannot hear them ask."
         )
 
     return [
@@ -740,18 +747,12 @@ def _ear_tools(config: Config, ears) -> list[Tool]:
                 "Call it FIRST and say so afterwards. A reply that promises to stop "
                 "listening is a promise where the act should be - "
                 f"and once it is done, say that the {key} key brings you back, because "
-                "from then on you cannot hear them ask. Not a way to avoid answering "
-                "something: a hyphen does that and keeps your ears."
+                "from then on you cannot hear them ask. There is no tool for starting "
+                "again, on purpose: it would be a tool the shut microphone had to hear "
+                "you asked for. Not a way to avoid answering something either: a "
+                "hyphen does that and keeps your ears."
             ),
             run=pause_transcription,
-        ),
-        Tool(
-            name="resume_transcription",
-            description=(
-                "Start reading the microphone again. Nothing said during the pause is "
-                "recoverable - it was never captured."
-            ),
-            run=resume_transcription,
         ),
     ]
 

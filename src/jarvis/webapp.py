@@ -80,6 +80,12 @@ The meter reports and does not judge. It said 'no signal' after a few flat
 seconds for a while, and a quiet room set it off, which is exactly the sort of
 warning people learn to ignore. The number is the whole of it.
 
+A squeeze on an AirPod is a play/pause aimed at the media session iOS gives a
+page that is playing audio, so those two are handled and mapped to the
+microphone - the one control worth having when the phone is in a pocket and the
+screen is off. It was already doing half of that by accident: pausing from the
+lock screen suspends the audio graph, which stops the capture on its way past.
+
 The raw switch is the other suspect. Echo cancellation, noise suppression and
 gain control are asked for by default because the browser plays the reply a
 few inches from the microphone that is listening for the next thing - but that
@@ -126,7 +132,9 @@ PAGE = """<!doctype html>
     display: flex; flex-direction: column; gap: 10px; background: #14171c;
   }
   form { display: flex; gap: 8px; }
-  input {
+  /* The typing box only. It used to be every input, which stretched and padded
+     the two checkboxes as well and left them sitting at different indents. */
+  #line {
     flex: 1; min-width: 0; background: #1b1f26; border: 1px solid #2b3038; color: inherit;
     border-radius: 10px; padding: 12px 14px; font: inherit;
   }
@@ -168,7 +176,7 @@ PAGE = """<!doctype html>
   <label id="rawline"><input type="checkbox" id="raw">
     Raw audio (no echo cancellation or noise gating)</label>
   <label id="phoneline"><input type="checkbox" id="phones">
-    Headphone mode at the desk (it listens while it talks)</label>
+    Headphone mode - listen while speaking</label>
   <button id="mic">Use this microphone</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>
@@ -533,6 +541,7 @@ async function stopMic() {
   meter.classList.remove('on');
   mic.textContent = 'Use this microphone';
   state.textContent = 'connected';
+  nowPlaying(false);
   await hush();
 }
 
@@ -552,6 +561,42 @@ async function startMic() {
   meter.classList.add('on');
   mic.textContent = 'Stop using this microphone';
   state.textContent = 'listening';
+  nowPlaying(true);
+}
+
+// The lock screen, and a squeeze on an AirPod. A page playing audio shows up on
+// iOS as a media session, and play/pause from a headset or the control centre
+// goes to that session rather than to anything on the page - so the one control
+// worth reaching without looking at a screen is the microphone.
+//
+// It was doing something already: pausing from the lock screen suspended the
+// audio graph, which stopped the capture as a side effect. This makes that the
+// intent rather than a side effect, and gives the play half something to do.
+function nowPlaying(on) {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  session.playbackState = on ? 'playing' : 'paused';
+  try {
+    // What the lock screen shows while you are in another room.
+    session.metadata = new MediaMetadata({
+      title: 'JARVIS',
+      artist: on ? 'Listening' : 'Microphone off',
+    });
+  } catch (err) {
+    // No MediaMetadata here, which costs the title and nothing else.
+  }
+}
+
+function mediaKeys() {
+  const session = navigator.mediaSession;
+  if (!session) return;
+  try {
+    session.setActionHandler('pause', () => { if (streaming) stopMic(); });
+    session.setActionHandler('play', () => { unlock(); if (!streaming) startMic(); });
+  } catch (err) {
+    // An action the browser will not hand over. Nothing is worse than before.
+  }
+  nowPlaying(false);
 }
 
 mic.onclick = () => {
@@ -584,6 +629,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 listDevices();
+mediaKeys();
 navigator.mediaDevices.addEventListener('devicechange', listDevices);
 watchDoing();
 follow('heard', 'heard', 'you');

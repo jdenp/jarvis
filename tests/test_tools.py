@@ -273,15 +273,17 @@ def test_there_is_nothing_to_pause_without_a_microphone():
     assert "pause_transcription" not in box().names
 
 
-def test_listening_can_be_stopped_and_started():
+def test_listening_can_be_stopped_but_not_started():
+    """The microphone it would open is the one that would have had to hear the
+    request, so a resume tool is reachable exactly when it is not wanted. What
+    it produced was JARVIS calling it on a hunch and announcing it was back from
+    a state it had never been in."""
     ears = Ears()
     tools = build_toolbox(Config(), desk(button("Reply")), ears=ears)
-    assert "resume_transcription" in tools.names
+    assert "resume_transcription" not in tools.names
 
     assert "Stopped listening" in tools.run("pause_transcription", {})
     assert ears.listening is False
-    assert "Listening again" in tools.run("resume_transcription", {})
-    assert ears.listening is True
 
 
 def test_pausing_says_how_to_get_back():
@@ -297,8 +299,13 @@ def test_pausing_says_how_to_get_back():
 
 
 def test_pausing_twice_says_so_rather_than_pretending():
+    """And says which microphone, because the desk being shut is not JARVIS
+    being deaf - it told somebody it could not hear them while answering every
+    word they said."""
     tools = build_toolbox(Config(), desk(button("Reply")), ears=Ears(listening=False))
-    assert tools.run("pause_transcription", {}) == "Already not listening."
+    result = tools.run("pause_transcription", {})
+    assert "already shut" in result
+    assert "deaf" in result, "and that it is not"
 
 
 def test_the_prompt_only_mentions_closing_its_ears_when_it_can():
