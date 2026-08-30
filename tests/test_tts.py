@@ -353,3 +353,48 @@ def test_the_volume_setting_reaches_the_samples(monkeypatch, tmp_path):
     played = np.frombuffer(bytes(stream.data), dtype="float32")
     assert len(played) == 24000 + 3600, "still played"
     assert not played.any(), "just silent"
+
+
+# ------------------------------------------------------------------- loudness
+
+
+def test_a_quiet_clip_is_brought_up_to_the_ceiling():
+    """Kokoro comes out a long way short of full scale, which is fine on a desk
+    speaker a foot away and not on a phone across a room."""
+    import numpy as np
+
+    from jarvis.tts import normalised
+
+    # Within the 4x cap, so it actually reaches the ceiling.
+    quiet = np.array([0.1, -0.3, 0.15], dtype="float32")
+    louder = normalised(np, quiet)
+    assert abs(float(np.max(np.abs(louder))) - 0.95) < 1e-5
+
+
+def test_it_never_goes_over_the_ceiling():
+    """Anything above one clips, which is why tts.volume can only attenuate."""
+    import numpy as np
+
+    from jarvis.tts import normalised
+
+    loud = np.array([0.9, -1.0, 0.99], dtype="float32")
+    assert float(np.max(np.abs(normalised(np, loud)))) <= 0.95 + 1e-5
+
+
+def test_near_silence_is_not_amplified_into_noise():
+    """A clip that is quiet because it is quiet stays quiet."""
+    import numpy as np
+
+    from jarvis.tts import normalised
+
+    hiss = np.array([0.001, -0.0005], dtype="float32")
+    assert float(np.max(np.abs(normalised(np, hiss)))) <= 0.001 * 4 + 1e-6
+
+
+def test_silence_is_left_alone():
+    import numpy as np
+
+    from jarvis.tts import normalised
+
+    nothing = np.zeros(8, dtype="float32")
+    assert float(np.max(np.abs(normalised(np, nothing)))) == 0.0

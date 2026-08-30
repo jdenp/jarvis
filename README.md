@@ -195,7 +195,7 @@ you want.
 ## Development
 
 ```powershell
-uv run pytest        # 631 tests, no hardware, model or network needed
+uv run pytest        # 642 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

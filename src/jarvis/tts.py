@@ -301,6 +301,7 @@ class KokoroSpeaker:
             text, voice=self._voice, speed=self._speed, lang=self._lang
         )
         samples = self._np.asarray(samples, dtype="float32")
+        samples = normalised(self._np, samples)
         # Not `if volume:` - zero is the one setting that has to be applied.
         if (volume := max(0.0, min(1.0, self.config.volume))) != 1.0:
             samples = samples * volume
@@ -328,6 +329,9 @@ class KokoroSpeaker:
             text, voice=self._voice, speed=self._speed, lang=self._lang
         )
         samples = self._np.asarray(samples, dtype="float32")
+        # A phone speaker has nothing spare, so this one goes out at the
+        # ceiling rather than at whatever Kokoro happened to produce.
+        samples = normalised(self._np, samples)
         if (volume := max(0.0, min(1.0, self.config.volume))) != 1.0:
             samples = samples * volume
         return as_wav(samples, rate)
@@ -397,6 +401,22 @@ def build_speaker(config: TtsConfig | None = None) -> Speaker:
     raise ValueError(
         f"Unknown TTS engine {config.engine!r}. Choose auto, kokoro, sapi, edge or none."
     )
+
+
+def normalised(np, samples, ceiling: float = 0.95, most: float = 4.0):
+    """Scaled so the loudest sample sits just under full scale.
+
+    Kokoro comes out a long way short of it, which is fine on a desk speaker a
+    foot away and not fine on a phone across a room. `tts.volume` cannot fix
+    that: it only ever attenuates, because anything above one clips.
+
+    Capped, so that a clip which is nearly silent because it *is* nearly silent
+    does not come back as amplified noise.
+    """
+    peak = float(np.max(np.abs(samples))) if len(samples) else 0.0
+    if peak <= 0:
+        return samples
+    return samples * min(most, ceiling / peak)
 
 
 def as_wav(samples, rate: int) -> bytes:

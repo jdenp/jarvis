@@ -637,6 +637,13 @@ anything older either has a clip or never will, and the page asks about every li
 It reproduced in Chrome the moment it was looked for, having survived three rounds of being
 reasoned about as an iPhone problem.
 
+**Loud enough to hear, without clipping to get there.** Kokoro comes out a long way short of
+full scale, which is unremarkable on a desk speaker a foot away and useless on a phone across
+a room. `tts.volume` cannot help: it is clamped to one because anything above that clips, so
+it can only ever make things quieter. Every clip is therefore scaled so its loudest sample
+sits just under full scale before the volume setting is applied - capped at four times, so
+that a clip which is quiet because it is quiet does not come back as amplified noise.
+
 **No WebSocket, and no auth of its own.** Chunks go up as ordinary POSTs, a quarter second
 at a time, because the payload is bytes rather than a container - the splitter cannot tell
 where one request ended and the next began, so the seams that would matter for a recording

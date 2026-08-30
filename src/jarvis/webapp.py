@@ -148,10 +148,6 @@ PAGE = """<!doctype html>
     font-style: italic; border-top: 1px solid #23262d;
   }
   #doing.on { display: block; }
-  #test {
-    background: none; border: none; color: #6b7280; text-decoration: underline;
-    padding: 4px; font-size: 12px;
-  }
   #rawline { font-size: 13px; color: #8a8f98; display: flex; gap: 8px; align-items: center; }
   select {
     background: #1b1f26; border: 1px solid #2b3038; color: inherit;
@@ -173,8 +169,7 @@ PAGE = """<!doctype html>
   <button id="mic">Use this microphone</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>
-  <div id="sent"><span id="lastplay"></span></div>
-  <button id="test">Test sound</button>
+  <div id="sent" class="quiet"><span id="lastplay"></span></div>
 </footer>
 <script>
 const RATE = 16000;
@@ -603,25 +598,6 @@ document.addEventListener('visibilitychange', () => {
     if (streaming) state.textContent = 'listening';
   }
 });
-
-// Deliberately inside a tap: if this is audible and a reply is not, the fault
-// is the unlocking rather than the phone. If neither is, it is the phone -
-// the ring/silent switch, or the media volume while something is playing.
-document.getElementById('test').onclick = async () => {
-  unlock();
-  const said = await (await fetch('spoken?since=0')).json();
-  const last = said.spoken[said.spoken.length - 1];
-  if (!last) {
-    show('jarvis', 'Nothing has been said yet, so there is no clip to try.');
-    return;
-  }
-  queued.length = 0;
-  playing = null;
-  show('jarvis', 'Playing the last reply. Audio is '
-    + (ctx ? ctx.state : 'not started') + ' at '
-    + (ctx ? ctx.sampleRate : 0) + ' Hz, route ' + routing() + '.');
-  await play(last.id);
-};
 
 listDevices();
 navigator.mediaDevices.addEventListener('devicechange', listDevices);
