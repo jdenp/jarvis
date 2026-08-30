@@ -42,6 +42,11 @@ REMOTE_IDLE_SECONDS = 3.0
 # silence. A quarter of the way into the wait for the next 250ms of audio.
 REMOTE_WAIT_SECONDS = 0.25
 
+# How much silence that wait is worth. The phrase splitter counts buffers and
+# takes each to be one buffer's worth of time, so handing back a single 32ms
+# buffer for every 250ms spent waiting runs its clock eight times slow.
+QUIET_BUFFERS = max(1, round(REMOTE_WAIT_SECONDS / (SAMPLES / SAMPLE_RATE)))
+
 
 class MicrophoneError(RuntimeError):
     """Raised when the input device cannot be opened."""
@@ -96,6 +101,13 @@ class RemoteStream:
     ordinary way. Past `idle_seconds` of it the stream goes back to sleep and
     blocks instead, so nothing is fed to Silero on behalf of a phone that is not
     there.
+
+    That silence has to arrive at the rate a device would have produced it, which
+    it did not for a while - one 32ms buffer per 250ms of waiting, so a phrase
+    that should have ended after a second of quiet needed nine, by which time the
+    stream had gone to sleep still holding it. The half sentence then came back
+    out the moment the phone said anything else, which from the far end looks
+    like a microphone that was off transcribing something anyway.
     """
 
     CHUNK = SAMPLES
@@ -141,7 +153,8 @@ class RemoteStream:
             elif self._closed.is_set():
                 return b""
             elif self.live and time.monotonic() - self._last <= self.idle_seconds:
-                return bytes(wanted)
+                # A wait's worth, not a buffer's. See the note above.
+                self._pending += bytes(wanted * QUIET_BUFFERS)
             else:
                 self._live.clear()
                 self._pending.clear()

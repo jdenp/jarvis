@@ -185,7 +185,7 @@ PAGE = """<!doctype html>
     Raw audio (no echo cancellation or noise gating)</label>
   <label id="phoneline"><input type="checkbox" id="phones">
     Headphone mode - listen while speaking</label>
-  <button id="mic">Use this microphone</button>
+  <button id="mic">Mic off</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>
 </footer>
@@ -560,17 +560,31 @@ async function hush() {
   pending = [];
 }
 
+// Said to the service as well as done here. It is holding whatever arrived
+// before the button was pressed, and half a sentence should not be waiting to
+// come out when the microphone is opened again.
+function tellMic(on) {
+  return fetch('microphone', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({on: on}),
+  }).catch(() => {});
+}
+
 async function stopMic() {
   streaming = false;
   mic.classList.remove('on');
   meter.classList.remove('on');
-  mic.textContent = 'Use this microphone';
+  mic.textContent = 'Mic off';
   state.textContent = 'connected';
   nowPlaying(false);
   await hush();
+  // After the local stop, so anything still in flight lands before the drain.
+  await tellMic(false);
 }
 
 async function startMic() {
+  await tellMic(true);
   try {
     await listen();
   } catch (err) {
@@ -584,7 +598,7 @@ async function startMic() {
   streaming = true;
   mic.classList.add('on');
   meter.classList.add('on');
-  mic.textContent = 'Stop using this microphone';
+  mic.textContent = 'Mic on';
   state.textContent = 'listening';
   nowPlaying(true);
 }

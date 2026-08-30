@@ -276,12 +276,29 @@ not stop a model typing one out; only checking what it said does. It now gets on
 say it in English and then the failure is reported out loud, because silence after eight tool
 calls is worse than admitting it could not manage.
 
-**It writes its own notes, after the answer has gone out.** A lesson only outlives the
+**It writes its own notes, once the room goes quiet.** A lesson only outlives the
 conversation it was learned in if somebody writes it down, and asking a model to remember
-mid-turn competes with the thing it is actually doing. So anything JARVIS says out loud is
-followed by one more call: look back, and was there anything in that worth still knowing next
-month? It runs after `_speak`, and speech is queued and played on another thread, so it
-happens in time nobody is waiting through.
+mid-turn competes with the thing it is actually doing. So a minute after the last answer,
+there is one more call: look back over everything since the last time you did this, and was
+any of it worth still knowing next month?
+
+It ran on the end of every turn for a while, which is a second model call on every single
+answer. The argument was that it was free - speech is queued and played on another thread,
+so nobody is waiting through it - and that was true of the wall clock and not of anything
+else. Most turns teach nothing, so most of those calls were spent proving it. The call runs
+on the listening thread, so a slow one is a JARVIS that hears nothing until it finishes, and
+a stalled one is worse: a live session lost two minutes that way, and learned nothing at the
+end of it. And a turn is the wrong unit anyway - somebody explains a thing over four
+sentences, and looking back at each of them separately sees four fragments where waiting
+sees the point.
+
+So the trigger is silence: `settle` is called from the listening loop every time nothing was
+heard, does nothing until the last turn is `brain.settle_seconds` old, and then looks back
+over the lot at once. It is idempotent and cheap, which is why it can be a check in a loop
+rather than a timer that every utterance would have to cancel. Chat mode has no idle moment
+to notice - its `hear` blocks on a keyboard - so `turn` calls it too, on the way in: coming
+back after a minute away is the same signal arriving late. The call has its own timeout,
+well under `brain.timeout_seconds`, because nothing about learning is worth going deaf for.
 
 Three things make it work rather than fill the file with rubbish. It is told that most turns
 teach nothing and that replying with nothing is the expected answer. It gets at most three
@@ -308,12 +325,13 @@ taskbar. That gate is gone, and it was never the right shape once the other half
 existed: what somebody tells you about themselves arrives in a turn with no tool calls in it at
 all. Nobody learns that their user rides on Sundays by clicking.
 
-So the trigger is that JARVIS spoke, which also rules out the case that matters - a reply of a
-single hyphen is somebody else's conversation, and overheard is not told. The pressure that the
-gate used to apply now sits entirely in the prompt, which says outright that most turns teach
-nothing, and in the ceiling of three lines a turn. That is a weaker guard than a gate and it is
-the thing to watch: the failure mode is a file full of what was on the taskbar, and it is
-visible the moment you open the file.
+So what counts is that JARVIS spoke, which also rules out the case that matters - a reply of a
+single hyphen is somebody else's conversation, and overheard is not told. A lull after nothing
+but hyphens looks back at nothing at all. The pressure that the gate used to apply now sits
+entirely in the prompt, which says outright that most turns teach nothing, and in the ceiling
+of three lines. That is a weaker guard than a gate and it is the thing to watch: the failure
+mode is a file full of what was on the taskbar, and it is visible the moment you open the
+file.
 
 **One file, and headings inside it rather than more files.** There were two grown files for a
 while, split by which mechanism wrote them - `remember()` into one, the looking back into the
@@ -718,6 +736,21 @@ microphone mute it does not own, and refuses. The documented way round that is a
 *element* is playing and an AudioContext is not one. It was built and the element was real - a
 valid silent wav generated in the page rather than pasted in as base64 - and the stem gave the
 same refusal. Taken out again. The lock screen half was never the problem and it stayed.
+
+**A quiet network has to sound like silence at the right speed.** The phrase splitter counts
+buffers and takes each to be one buffer's worth of time, because that is what a sound card
+hands it. `RemoteStream` was handing back one 32ms buffer for every 250ms it spent waiting
+for the next chunk, so while a phone was quiet the phrase clock ran eight times slow: a pause
+that should have ended a phrase after a second needed nine, and the stream gave up and went
+to sleep at three still holding half a sentence. That half sentence then came back out the
+moment the phone said anything else, which from the far end looks like a microphone that was
+off transcribing something anyway. A timed-out wait is now worth a wait's worth of silence.
+
+**The microphone button says so, rather than just going quiet.** A page that stops sending is
+indistinguishable from a phone in a tunnel, and the two want opposite things - the tunnel
+should keep the words it managed to send, the button should throw them away. So the page says
+which it is, and shutting it drains the queue and abandons what is mid phrase, exactly as the
+key at the desk has always done.
 
 **Being talked over, decided in the room the audio is in.** The page holds its microphone
 back while a clip is playing, which is right on a loudspeaker - the browser's echo

@@ -115,8 +115,9 @@ tree is empty until it has been focused, which of four identical buttons is the 
 works. None of that is in a model's weights and the next machine's list is different, so
 JARVIS keeps its own.
 
-**It will also learn about you.** After anything it says out loud it looks back over the turn
-and writes down what was worth keeping - and that includes what you told it about yourself:
+**It will also learn about you.** A minute after the conversation goes quiet it looks back
+over everything since it last did and writes down what was worth keeping - and that includes
+what you told it about yourself:
 your work, what you are building, what you like, how you want things done. All of it goes in
 `context/memories/memories.md`, in plain bullets under headings, on this machine and not in
 git. It is yours: open it, delete a line, rewrite a heading, or empty it. `brain.memories =
@@ -224,7 +225,7 @@ you want.
 ## Development
 
 ```powershell
-uv run pytest        # 654 tests, no hardware, model or network needed
+uv run pytest        # 661 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

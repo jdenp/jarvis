@@ -418,6 +418,27 @@ class VoiceService:
         self.microphone.resume()
         self.ui.note("This microphone is listening again.")
 
+    def page_microphone(self, on: bool) -> bool:
+        """The page's own microphone, opened or shut, because the page said so.
+
+        Not the same as the page merely stopping sending, which is how this used
+        to end. The stream goes quiet, the splitter keeps the phrase it was in
+        the middle of, and that half sentence comes back out the moment anything
+        arrives again - said before the button was pressed and delivered after it
+        was pressed a second time.
+
+        The desk has never behaved that way: shutting it drains what is queued
+        and abandons what is mid phrase. This is the same thing said over HTTP,
+        because this microphone is in another room.
+        """
+        if self.remote is None:
+            return False
+        if on:
+            self.remote.resume()
+        else:
+            self.remote.pause()
+        return on
+
     @property
     def headphones(self) -> bool:
         """Whether the microphone stays open while JARVIS is talking."""
@@ -620,6 +641,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
         elif path == "/typed":
             self._do_typed()
+        elif path == "/microphone":
+            self._do_microphone()
         elif path == "/audio":
             self._do_audio()
         elif path == "/gone":
@@ -663,6 +686,17 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self.service.typed(text)
         self._json(200, {"heard": text})
+
+    def _do_microphone(self) -> None:
+        """The page saying whether its own microphone is open."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            on = bool(payload["on"])
+        except (ValueError, KeyError, TypeError):
+            self._json(400, {"error": "expected a JSON body with an 'on' field"})
+            return
+        self._json(200, {"on": self.service.page_microphone(on)})
 
     def _do_headphones(self) -> None:
         """Listen while speaking, or stop. An empty body toggles it.

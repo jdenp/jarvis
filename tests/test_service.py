@@ -607,6 +607,7 @@ def test_the_page_is_absent_when_it_is_switched_off():
         assert post(port, "/audio", content=b"\x00\x00").status_code == 404
         assert post(port, "/typed", json={"text": "hello"}).status_code == 404
         assert get(port, "/spoken").status_code == 404
+        assert post(port, "/microphone", json={"on": False}).status_code == 404
     finally:
         service.stop()
         server.shutdown()
@@ -846,6 +847,37 @@ def test_the_desk_can_be_shut_from_the_page(app):
 
     assert post(port, "/resume").json() == {"paused": False}
     assert not microphone.paused
+
+
+def test_the_page_can_shut_its_own_microphone(app):
+    """Which is not the same as it merely stopping sending, and that is the
+    whole point of saying it out loud - see page_microphone."""
+    service, _desk, port = app
+    assert post(port, "/microphone", json={"on": False}).json() == {"on": False}
+    assert service.remote.paused is True
+
+    assert post(port, "/microphone", json={"on": True}).json() == {"on": True}
+    assert service.remote.paused is False
+
+
+def test_shutting_the_page_microphone_drops_only_its_own_phrases(app):
+    """Half a sentence said as the button was pressed should not be waiting to
+    come out when it is pressed again. The desk's phrases are in the same queue
+    and are nobody's to throw away."""
+    service, desk, port = app
+    shared = service.remote.sink
+    shared.put_nowait((service.remote, "half said on the phone"))
+    shared.put_nowait((desk, "said at the desk"))
+
+    post(port, "/microphone", json={"on": False})
+    assert shared.qsize() == 1
+    assert shared.get_nowait()[1] == "said at the desk"
+
+
+def test_a_microphone_request_that_makes_no_sense_is_refused(app):
+    _, _, port = app
+    assert post(port, "/microphone", json={}).status_code == 400
+    assert post(port, "/microphone", content=b"not json").status_code == 400
 
 
 def test_headphone_mode_can_be_switched_from_the_page(app):

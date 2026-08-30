@@ -267,6 +267,23 @@ def test_a_gap_in_the_network_reads_as_silence_not_as_the_end():
     assert stream.live, "still connected, just not talking"
 
 
+def test_silence_keeps_pace_with_the_clock_a_phrase_is_measured_on():
+    """The splitter counts buffers and takes each to be one buffer's worth of
+    time. Handing back a single 32ms buffer for every 250ms of waiting ran that
+    clock eight times slow, so a pause that should have ended a phrase after a
+    second needed nine - and the stream went to sleep first, still holding half
+    a sentence that came back out when the phone next said anything."""
+    stream = RemoteStream(idle_seconds=30)
+    stream.write(make_buffer(LOUD))
+    stream.read(SAMPLES)
+
+    started = time.monotonic()
+    for _ in range(8):
+        assert stream.read(SAMPLES) == bytes(SAMPLES * 2)
+    spent = time.monotonic() - started
+    assert spent < 0.75, f"eight waits rather than one, {spent:.2f}s"
+
+
 def test_a_stream_that_stays_quiet_goes_back_to_sleep():
     """Otherwise Silero scores silence forever on behalf of a phone that went
     into somebody's pocket an hour ago."""

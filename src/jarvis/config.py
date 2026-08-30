@@ -373,12 +373,16 @@ class BrainConfig:
     # the one that ships. Only this one grows on its own, so only this one is
     # capped.
     memories_file: str = "context/memories/memories.md"
-    # After anything it says out loud, and while the answer is being read out,
-    # JARVIS looks back over the turn and writes down whatever was worth
-    # keeping. It costs one model call of nobody's time, because the speech is
-    # still playing - and it is the only way a lesson outlives the conversation
-    # it was learned in without somebody typing it up.
+    # Once the conversation has gone quiet, JARVIS looks back over everything
+    # said since the last time it did and writes down whatever was worth
+    # keeping. The only way a lesson outlives the conversation it was learned
+    # in without somebody typing it up.
     consolidate: bool = True
+    # How long quiet is. It used to run on the end of every turn, which is a
+    # second model call on every single answer - most of them about nothing,
+    # because most turns teach nothing. A lull costs nobody anything and the one
+    # call sees what a run of turns added up to rather than one line out of it.
+    settle_seconds: float = 60.0
     # How much of the written file is read back. This is prompt, paid on every
     # single call - the only setting here that is - so it is capped, and past it
     # the top of the file stops being read, which is the right end to lose since

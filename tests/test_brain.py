@@ -44,12 +44,16 @@ class FakeModel:
         self.stopped: list = []
         self.limits: list[int | None] = []
         self.interrupt: list[list[str]] = []
+        self.timeouts: list[float | None] = []
+        self.seen: list[list[dict]] = []
         self.raise_next: Exception | None = None
 
     def context_limit(self) -> int:
         return self.limit
 
-    def reply(self, messages, tools=None, limit=None, watch=None, think=None, stop=None) -> Reply:
+    def reply(
+        self, messages, tools=None, limit=None, watch=None, think=None, stop=None, timeout=None
+    ) -> Reply:
         if self.raise_next is not None:
             raise self.raise_next
         if limit == 1:
@@ -58,6 +62,8 @@ class FakeModel:
         self.watched.append(watch is not None)
         self.stopped.append(stop)
         self.limits.append(limit)
+        self.timeouts.append(timeout)
+        self.seen.append(messages)
         # Whatever is queued to be said over the top of this one.
         if self.interrupt and watch is not None:
             from jarvis.brain import Interrupted
@@ -158,6 +164,16 @@ def looking_back(tmp_path, *replies, box=None) -> Brain:
         model=FakeModel(*replies),
         toolbox=box or refusing(),
     )
+
+
+def quiet(it) -> bool:
+    """Wind the clock so the conversation counts as having gone quiet.
+
+    Which is when it looks back now, rather than on the end of every turn.
+    """
+    if it._quiet_at is not None:
+        it._quiet_at -= it.settings.settle_seconds + 1
+    return it.settle()
 
 
 def refusing() -> Toolbox:
@@ -1550,6 +1566,7 @@ def test_what_a_turn_taught_is_written_down(tmp_path):
         said("## Windows\n- Minimising takes win+down twice from a maximised window."),
     )
     it.turn(["open teams"])
+    quiet(it)
 
     assert sections(tmp_path / "memories.md") == [
         ("Windows", ["Minimising takes win+down twice from a maximised window."])
@@ -1567,6 +1584,7 @@ def test_what_they_said_about_themselves_is_written_down_too(tmp_path):
         said("## Personal\n- They ride on Sunday mornings."),
     )
     it.turn(["i ride every sunday morning"])
+    quiet(it)
 
     assert sections(tmp_path / "memories.md") == [("Personal", ["They ride on Sunday mornings."])]
 
@@ -1576,6 +1594,7 @@ def test_a_turn_that_used_no_tools_is_looked_back_at_as_well(tmp_path):
     hands. Nothing about a person is learned that way."""
     it = looking_back(tmp_path, said("Half past two, sir."))
     it.turn(["what time is it"])
+    quiet(it)
     assert len(it.model.asked) == 2, "answered, and then asked what it learned"
 
 
@@ -1584,24 +1603,59 @@ def test_nothing_it_kept_quiet_about_is_looked_back_at(tmp_path):
     has not told you anything, and there is nothing to look back over."""
     it = looking_back(tmp_path, said("-"))
     it.turn(["...he moved to Perth last year"])
+    assert quiet(it) is False, "nothing was said, so there is nothing to look at"
     assert len(it.model.asked) == 1
     assert not (tmp_path / "memories.md").exists()
 
 
-def test_it_happens_after_the_answer_has_gone_out(tmp_path):
-    """Speech is queued and played on another thread, so a model call made now
-    costs nobody anything. Made before, it would be a pause they can hear."""
+def test_a_turn_does_not_stop_to_learn(tmp_path):
+    """It used to happen on the end of every turn, which is a second model call
+    on every single answer - most of them about nothing, and all of them on the
+    thread that is meant to be listening."""
     it = looking_back(
         tmp_path,
         calling("look_at_screen"),
         said("Teams is open, sir."),
         said("## Windows\n- Something learned."),
     )
-    spoken_at = []
-    it.voice.say = lambda text: spoken_at.append(len(it.model.asked))
     it.turn(["open teams"])
-    assert spoken_at == [2], "spoken after two calls, and the third is the looking back"
+    assert len(it.model.asked) == 2, "answered, and did not stop to learn"
+    assert not (tmp_path / "memories.md").exists()
+
+    assert quiet(it), "and then the room went quiet"
     assert len(it.model.asked) == 3
+
+
+def test_a_run_of_turns_is_one_look_back(tmp_path):
+    """The point of waiting: three answers cost three model calls rather than
+    six, and the one that does happen sees what the exchange added up to."""
+    it = looking_back(
+        tmp_path,
+        said("One, sir."),
+        said("Two, sir."),
+        said("Three, sir."),
+        said("## Personal\n- They ask a lot of questions."),
+    )
+    for asked in ("first", "second", "third"):
+        it.turn([asked])
+    assert len(it.model.asked) == 3
+
+    quiet(it)
+    assert len(it.model.asked) == 4, "one look back, not three"
+    assert "3 exchanges" in it.model.seen[-1][-1]["content"], "and it is told how far back"
+
+
+def test_a_stalled_look_back_gives_up_on_its_own(tmp_path):
+    """It runs on the listening thread, so a call that hangs is a JARVIS that
+    hears nothing until it stops hanging. Three minutes of that has happened,
+    and nothing was learned at the end of it."""
+    from jarvis.brain import LOOK_BACK_SECONDS
+
+    it = looking_back(tmp_path, said("Done, sir."), said("Nothing worth keeping."))
+    it.turn(["do something"])
+    quiet(it)
+    assert it.model.timeouts[-1] == LOOK_BACK_SECONDS
+    assert it.model.timeouts[0] is None, "and the answer itself keeps the long one"
 
 
 def test_most_turns_teach_nothing(tmp_path):
@@ -1614,6 +1668,7 @@ def test_most_turns_teach_nothing(tmp_path):
         said("Nothing worth writing down."),
     )
     it.turn(["open teams"])
+    quiet(it)
     assert not (tmp_path / "memories.md").exists()
 
 
@@ -1628,6 +1683,7 @@ def test_at_most_three_lines_from_one_turn(tmp_path):
         said("## Windows\n- One.\n- Two.\n- Three.\n- Four."),
     )
     it.turn(["do something"])
+    quiet(it)
     assert bullets(tmp_path / "memories.md") == ["One.", "Two.", "Three."]
 
 
@@ -1643,6 +1699,7 @@ def test_lines_are_filed_under_the_headings_they_came_back_with(tmp_path):
         ),
     )
     it.turn(["do something"])
+    quiet(it)
     assert sections(tmp_path / "memories.md") == [
         ("Applications", ["Teams is an MSIX package."]),
         ("Personal", ["They are left handed."]),
@@ -1660,6 +1717,7 @@ def test_a_line_with_no_heading_is_still_kept(tmp_path):
         said("- Something with no heading over it."),
     )
     it.turn(["do something"])
+    quiet(it)
     assert sections(tmp_path / "memories.md") == [("Other", ["Something with no heading over it."])]
 
 
@@ -1680,6 +1738,7 @@ def test_a_lesson_about_a_target_number_is_thrown_away(tmp_path):
         ),
     )
     it.turn(["close file explorer"])
+    quiet(it)
 
     assert bullets(tmp_path / "memories.md") == [
         "Explorer opens straight from run_command with no path."
@@ -1695,7 +1754,8 @@ def test_looking_back_never_touches_the_conversation(tmp_path):
         said("## Windows\n- Something learned."),
     )
     it.turn(["do something"])
-    assert not any("Look back over it" in str(m) for m in it.messages)
+    quiet(it)
+    assert not any("Look back over" in str(m) for m in it.messages)
     assert it.messages[-1]["content"] == "Done, sir."
 
 
@@ -1703,17 +1763,19 @@ def test_a_failure_while_looking_back_does_not_lose_the_answer(tmp_path):
     it = looking_back(tmp_path, calling("look_at_screen"), said("Done, sir."))
     it.model.replies = [calling("look_at_screen"), said("Done, sir.")]
 
-    def explode(messages, tools=None, limit=None, watch=None, think=None, stop=None):
+    def explode(messages, tools=None, limit=None, watch=None, think=None, stop=None, timeout=None):
         if len(it.model.asked) >= 2:
             raise RuntimeError("the endpoint fell over")
         return FakeModel.reply(it.model, messages, tools, limit, watch)
 
     it.model.reply = explode
     assert it.turn(["do something"]) == "Done, sir."
+    quiet(it)
 
 
 def test_it_can_be_switched_off(tmp_path):
     it = looking_back(tmp_path, calling("look_at_screen"), said("Done, sir."))
     it.settings = replace(it.settings, consolidate=False)
     it.turn(["do something"])
+    assert quiet(it) is False
     assert len(it.model.asked) == 2, "answered, and did not look back"

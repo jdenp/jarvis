@@ -93,6 +93,12 @@ PER_SCAN = re.compile(r"\btargets?\s+(number\s+)?\d", re.IGNORECASE)
 # it in, and this is asked after everything JARVIS says.
 LOOK_BACK_TOKENS = 160
 
+# Longest the looking back may take before it is abandoned. Its own, and far
+# under `brain.timeout_seconds`: this call happens on the listening thread, so
+# a stalled one is a JARVIS that hears nothing until it gives up. Three minutes
+# of that has happened, and nothing was learned at the end of it anyway.
+LOOK_BACK_SECONDS = 30.0
+
 # How many of them are kept from one turn. It is asked after everything JARVIS
 # says now, so the ceiling is what stops one talkative afternoon filling the
 # file on its own.
@@ -102,7 +108,8 @@ LOOK_BACK_LINES = 3
 # else's. Deliberately hard to say yes to: most turns teach nothing, and a list
 # that fills up with "Teams was open" is worse than an empty one.
 LOOK_BACK = """/no_think
-That is finished and they are hearing the answer now. Answer in one go.
+They have stopped talking. Look back over the last {since}, which is everything
+since you last did this rather than only the most recent. Answer in one go.
 
 Anything in it worth still knowing next month that is not already below? Two
 kinds count. How this DESKTOP behaves - a window that behaves oddly, a route
@@ -313,6 +320,7 @@ class Model:
         watch=None,
         think: bool | None = None,
         stop=None,
+        timeout: float | None = None,
     ) -> Reply:
         """One completion. `tools=None` leaves the model nothing to do but write.
 
@@ -343,9 +351,13 @@ class Model:
             "preserve_thinking": True,
         }
         if self.config.stream and not isinstance(self.ui, ui.Silent):
-            return self._streamed(payload, watch, stop)
+            return self._streamed(payload, watch, stop, timeout)
         try:
-            response = self._client.post(f"{self.base}/chat/completions", json=payload)
+            response = self._client.post(
+                f"{self.base}/chat/completions",
+                json=payload,
+                **({} if timeout is None else {"timeout": timeout}),
+            )
             response.raise_for_status()
             body = response.json()
         except httpx.HTTPError as exc:
@@ -354,7 +366,9 @@ class Model:
             raise ModelUnavailable(f"{self.base} did not return JSON ({exc}).") from exc
         return _read(body)
 
-    def _streamed(self, payload: dict, watch=None, stop=None) -> Reply:
+    def _streamed(
+        self, payload: dict, watch=None, stop=None, timeout: float | None = None
+    ) -> Reply:
         """The same completion, read as it is written.
 
         Worth the extra code for two reasons. The reasoning can be shown while it
@@ -377,7 +391,10 @@ class Model:
         looked_at = 0.0
         try:
             with self._client.stream(
-                "POST", f"{self.base}/chat/completions", json=payload
+                "POST",
+                f"{self.base}/chat/completions",
+                json=payload,
+                **({} if timeout is None else {"timeout": timeout}),
             ) as response:
                 response.raise_for_status()
                 for line in response.iter_lines():
@@ -576,6 +593,10 @@ class Brain:
         # Whether there is anything to abandon. Escape with nothing happening
         # should do nothing at all rather than put a prompt up for no reason.
         self._working = threading.Event()
+        # Turns answered since the last look back, and when the last one ended.
+        # None means there is nothing waiting to be learned from - see settle.
+        self._unlearned = 0
+        self._quiet_at: float | None = None
         self.thread: threading.Thread | None = None
 
     def system_prompt(self) -> str:
@@ -622,12 +643,16 @@ class Brain:
     # ------------------------------------------------------------------ a turn
 
     def turn(self, said: list[str]) -> str:
-        """Answer one utterance, then look back at it.
+        """Answer one utterance. Returns what was spoken, "" if nothing was.
 
-        Returns what was spoken, "" if nothing was. The looking back happens
-        after that, on purpose: speech is queued and played on another thread,
-        so a model call made now costs nobody anything.
+        Nothing is learned here. Somebody who has just started talking again is
+        the worst moment to spend a model call on last week's lesson, and they
+        are about to say something else anyway - see `settle`.
         """
+        # For a front end whose `hear` blocks, which is chat mode: there is no
+        # idle moment to notice in its loop, so the moment they come back after
+        # one is the next best thing.
+        self.settle()
         before = len(self.messages)
         self.stopped.clear()
         self._working.set()
@@ -643,13 +668,17 @@ class Brain:
                 logger.info("Cancelled - the turn was dropped.")
                 self.ui.note("Cancelled.")
                 return ""
-            # After anything it said out loud, which includes the turns that used
-            # no tools at all: half of what is worth keeping is something they
-            # said about themselves, and nobody learns that by clicking.
-            if self.settings.consolidate and self.settings.memories and spoken:
-                self._look_back()
+            # Counted, not acted on. Anything it said out loud counts, including
+            # the turns that used no tools: half of what is worth keeping is
+            # something they said about themselves, and nobody learns that by
+            # clicking.
+            if spoken:
+                self._unlearned += 1
             return spoken
         finally:
+            # From the end of the turn rather than the start of it. A turn that
+            # spent a minute on tools has not been a quiet minute.
+            self._quiet_at = time.monotonic()
             logger.info("Context: %s", self._meter())
             self._working.clear()
             self.stopped.clear()
@@ -668,8 +697,31 @@ class Brain:
         self.voice.hush()
         return True
 
-    def _look_back(self) -> None:
-        """Write down anything that turn taught, about the desk or about them.
+    def settle(self) -> bool:
+        """Look back, if the conversation has been quiet for long enough.
+
+        True if it did. Cheap and idempotent, so it can be called from the
+        listening loop every time nothing was heard rather than scheduled on a
+        timer that then has to be cancelled by every utterance.
+
+        It used to run on the end of every turn, which is a second model call on
+        every single answer and most of them about nothing. Quiet is both the
+        cheaper moment and the better one: nobody is waiting, and by then a run
+        of turns has usually happened, so the one call sees what an exchange
+        added up to rather than one line out of the middle of it.
+        """
+        if not (self.settings.consolidate and self.settings.memories):
+            return False
+        if not self._unlearned or self._quiet_at is None:
+            return False
+        if time.monotonic() - self._quiet_at < self.settings.settle_seconds:
+            return False
+        turns, self._unlearned, self._quiet_at = self._unlearned, 0, None
+        self._look_back(turns)
+        return True
+
+    def _look_back(self, turns: int = 1) -> None:
+        """Write down anything those turns taught, about the desk or about them.
 
         The only way a lesson outlives the conversation it was learned in
         without somebody typing it up. Everything about it is deliberately quiet:
@@ -679,7 +731,11 @@ class Brain:
         """
         self.ui.status("learning")
         known = memories.as_lines(self._known()) or "- nothing yet"
-        asked = [*self.messages, {"role": "user", "content": LOOK_BACK.format(known=known)}]
+        since = "exchange" if turns <= 1 else f"{turns} exchanges"
+        asked = [
+            *self.messages,
+            {"role": "user", "content": LOOK_BACK.format(known=known, since=since)},
+        ]
         try:
             # No reasoning, and a short leash. Reasoning earns its cost when a
             # tool has to be chosen, and this call has no tools: left on, it
@@ -696,6 +752,7 @@ class Brain:
                 limit=LOOK_BACK_TOKENS,
                 think=False,
                 stop=self.stopped.is_set,
+                timeout=LOOK_BACK_SECONDS,
             )
         except Cancelled:
             return
@@ -1200,6 +1257,9 @@ class Brain:
             self.ui.status(self.voice.waiting())
             said = self.voice.hear(LISTEN_SLICE_SECONDS)
             if not said:
+                # Nothing said is the whole signal. A minute of these is a
+                # conversation that has finished for now.
+                self.settle()
                 continue
             logger.info("Heard: %r", said)
             try:
