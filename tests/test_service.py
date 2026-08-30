@@ -795,9 +795,24 @@ def test_a_speaker_that_cannot_render_still_speaks_here(app):
     assert service.clips == {}
 
 
+def test_a_phone_in_a_pocket_still_has_the_floor(app):
+    """Locking the screen is not leaving. This used to hand the desk back after
+    forty quiet seconds and take it again on unlock, so the terminal announced
+    the handover both ways every time the screen went off - and the phone had
+    been listening the whole time."""
+    service, _microphone, port = app
+    get(port, "/spoken?since=0")
+    service.live.settle()
+    assert service.live.on_the_page
+
+    service._page_seen -= 90  # a minute and a half with the screen off
+    service.live.settle()
+    assert service.live.on_the_page, "still the page's floor"
+
+
 def test_a_page_that_stopped_polling_hands_the_voice_back(app):
-    """Closing the tab cannot say goodbye, so this is a timeout - and the desk
-    is silent for that long after you walk away from the page."""
+    """Closing the tab cannot always say goodbye, so this is the timeout under
+    it - and the desk stands down for that long after a page vanishes."""
     service, _, port = app
     service.speech.wav = b"RIFFrendered"
     get(port, "/spoken?since=0")

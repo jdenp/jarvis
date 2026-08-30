@@ -619,8 +619,20 @@ usual - a phone that gets no audio is worse than audio that came out of the wron
 Whether a page is open is answered by how recently one polled, because nothing else can
 answer it: a closed tab says nothing and a phone that walks out of range says less. The page
 long polls `/spoken` continuously, so a poll inside `PAGE_GONE` is a browser that is still
-there. The cost is stated rather than hidden - close the tab and the desk stays silent for up
-to forty seconds, which is one wait plus the trip.
+there.
+
+That window is ten minutes, which is not a guess at how long a page takes to answer. A page
+that closes says so on its way out, so the timeout is only ever reached by one that vanished
+without saying it - and the ordinary way a phone goes quiet is the screen going off in
+somebody's pocket. At forty seconds, and with backgrounding sending the goodbye as well,
+every lock and unlock handed the desk the floor and took it straight back, announcing both
+ways each time. Neither of those was true: a phone with its microphone open keeps running
+with the screen off, because the capture session is what holds the page awake.
+
+The cost is stated rather than hidden. A phone that dies or is force-quit without the beacon
+leaves the desk standing down for ten minutes, and the trade is deliberate - a desk that is
+quiet for a while is recoverable by waiting, where a floor that moves rooms every time a
+screen locks is not something you can wait out.
 
 Nothing is muted on that path, because nothing is being played here. What stops the page
 transcribing the reply it just played is the page itself: it holds the audio back while a

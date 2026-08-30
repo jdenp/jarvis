@@ -510,8 +510,10 @@ async function listen() {
   ctx.createMediaStreamSource(media).connect(node).connect(ctx.destination);
   timer = setInterval(flush, FLUSH_MS);
 
-  // The tab has to stay in front for any of this: backgrounded or locked, the
-  // browser suspends the audio graph and the stream simply stops.
+  // Kept awake, because a suspended graph is a stream that stops. In practice a
+  // phone with its microphone open keeps running with the screen off anyway -
+  // the capture session is what holds it - which is why going to the background
+  // no longer hands the desk back.
   try { wake = await navigator.wakeLock.request('screen'); } catch (err) { wake = null; }
 }
 
@@ -557,9 +559,11 @@ mic.onclick = () => {
   return streaming ? stopMic() : startMic();
 };
 
-// Backgrounding suspends the graph, so say so rather than looking connected -
-// and hand the desk back rather than holding a microphone this page has
-// stopped being able to use. A beacon because a closing page gets no promises.
+// A page on its way out hands the desk back, and a beacon is the only thing a
+// closing page can be relied on to finish. Closing only: this used to fire on
+// backgrounding as well, so locking the screen handed the desk back and
+// unlocking took it again, which is two announcements for a phone that never
+// stopped listening.
 function goodbye() {
   try {
     navigator.sendBeacon('gone');
@@ -572,7 +576,6 @@ addEventListener('pagehide', goodbye);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     state.textContent = streaming ? 'paused by the phone' : 'in the background';
-    goodbye();
   } else {
     // Coming back is a good moment to find the graph stopped.
     if (ctx && ctx.state !== 'running') ctx.resume();

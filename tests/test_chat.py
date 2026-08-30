@@ -128,6 +128,10 @@ def test_chat_mode_cannot_close_ears_it_does_not_have():
     from jarvis.config import Config
 
     talking = voice()
-    brain = Brain(replace(Config()), talking, model=object())
+    # Memories off: that file belongs to whichever machine this runs on, and
+    # JARVIS has written the tool's name into it here. The prompt is what is
+    # being asked about.
+    settings = replace(Config(), brain=replace(Config().brain, memories=False))
+    brain = Brain(settings, talking, model=object())
     assert "pause_transcription" not in brain.toolbox.names
     assert "pause_transcription" not in brain.messages[0]["content"]

@@ -307,7 +307,11 @@ def test_the_prompt_only_mentions_closing_its_ears_when_it_can():
     from jarvis.brain import Brain
     from test_brain import FakeVoice, brain
 
-    assert "pause_transcription" not in brain().messages[0]["content"]
+    # Memories off, because they are this machine's rather than the repository's
+    # and JARVIS has written the tool's name into them itself. What is being
+    # asked about here is the prompt, not what it learned last week.
+    quiet = replace(Config(), brain=replace(Config().brain, memories=False))
+    assert "pause_transcription" not in brain(config=quiet).messages[0]["content"]
 
     config = replace(
         Config(),

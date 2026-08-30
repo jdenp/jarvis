@@ -35,9 +35,12 @@ logger = logging.getLogger("jarvis.service")
 # so a caller that gives up in the meantime is the ordinary case.
 GONE_AWAY = (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)
 
-# How long after a page last polled it still counts as open. It polls `/spoken`
-# continuously, so this only has to outlast one wait plus the trip.
-PAGE_GONE = 40.0
+# How long after a page last polled it still counts as open. Long, because a
+# page that is really closing says so - this only covers one that vanished
+# without saying it, and the common reason a phone goes quiet is a screen that
+# went off in somebody's pocket. At forty seconds every lock and unlock handed
+# the floor back and took it again, announcing both ways each time.
+PAGE_GONE = 600.0
 
 # How long a goodbye is believed for. A page closing has requests already in
 # flight behind it, and those land a moment later and would put the floor
