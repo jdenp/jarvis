@@ -724,6 +724,7 @@ def test_the_live_line_does_not_claim_to_be_listening_while_deaf():
         def __init__(self):
             self.transcript = Transcript()
             self.config = Config()
+            self.paused = False
 
         def say(self, text):
             pass
@@ -732,8 +733,10 @@ def test_the_live_line_does_not_claim_to_be_listening_while_deaf():
     voice = ServiceVoice(service)
     assert voice.waiting() == "listening"
 
-    service.transcript.pause()
-    assert "not listening" in voice.waiting()
+    # The desk microphone, which is what the key shuts. Pausing the transcript
+    # is not it any more, and reading that was a line saying it could hear.
+    service.paused = True
+    assert "microphone is off" in voice.waiting()
     assert Config().service.hotkey in voice.waiting(), "and which key brings it back"
 
 

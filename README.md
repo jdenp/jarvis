@@ -52,26 +52,24 @@ every utterance to `logs/heard.jsonl`.
   front. Nothing said in the room is transcribed or logged until you press it again. It is
   the desk only: a phone on the web app keeps hearing, so you can leave the room muted and
   still talk to it from the next one. Or just ask - "stop listening, I'm on a call".
+- **Hold Num Lock for headphone mode**, which leaves the microphone open while JARVIS is
+  talking so you can cut a reply off mid sentence. Off on speakers, where it hears itself and
+  once answered its own weather forecast. `audio.listen_while_speaking` is where it starts;
+  the key moves it, and so does the button on the web app.
 - **A phrase ends after 1.2s of quiet** (`audio.pause_threshold`), set high on purpose:
   being cut off mid sentence is worse than waiting.
-
-Cutting it off once it is *speaking* needs the microphone open while it talks, which is off
-by default - with no echo cancellation it transcribes itself. On headphones, turn on
-`audio.listen_while_speaking`.
 
 ```powershell
 .\jarvis.ps1 chat        # same loop and same memories, no microphone - works over SSH
 ```
 
-**On the go, use the web app.** Set `service.start_webapp = true` and JARVIS serves a page
-that turns a phone into the microphone: hold the browser open, talk, and the reply comes
-back through the phone's loudspeaker rather than out of the speakers at the desk. There is a text box for
-when you cannot talk, a picker for which microphone the browser uses, and a stop-listening
-button, since a phone has no Num Lock key. It draws the same live line the terminal does, so
-you can see what it is doing while it does it. It stays on loopback with no auth of its own -
-reach it by putting
-`tailscale serve` in front of it, which also gives you the https a browser insists on before
-it will open a microphone. Off by default.
+## On the go
+
+JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
+the reply comes back through the phone's loudspeaker rather than out of the speakers at the
+desk. There is a text box for when you cannot talk, a picker for which microphone the browser
+uses, a headphone-mode button, and a stop-listening button since a phone has no Num Lock key.
+It draws the same live line the terminal does. On by default (`service.start_webapp`).
 
 While a page is open the browser has the whole conversation: the desk microphone stops being
 listened to, and the reply is rendered to a wav and played in the browser rather than out of
@@ -79,6 +77,36 @@ the speakers. Somebody holding a phone is not at the desk, so a desk microphone 
 listening to a room nobody is in. Close the tab and both come back within about half a
 minute. The voice half needs Kokoro - the other engines cannot be rendered without playing
 them, so with those it speaks at the desk as usual.
+
+### Reaching it from your phone
+
+The service is loopback with no auth of its own and stays that way. Tailscale goes in front:
+it terminates the TLS, authenticates against your tailnet, and leaves this socket exactly as
+private as it was. The https is the other half of why - a browser refuses a microphone
+outside a secure context, so plain `http://100.x.x.x:8770` will not work even though a phone
+on the tailnet can reach it.
+
+Once, in the [admin console](https://login.tailscale.com/admin/dns): turn on **MagicDNS** and
+**HTTPS Certificates**. Then, on the machine JARVIS runs on:
+
+```powershell
+tailscale serve --bg 8770
+```
+
+It prints the URL, which is your machine's name on your tailnet:
+
+```
+https://your-machine.your-tailnet.ts.net/
+  |-- / proxy http://127.0.0.1:8770
+```
+
+That URL is the machine, not the session, so it survives reboots and restarts and is worth
+bookmarking on the phone. Open it on a phone signed into the same tailnet, allow the
+microphone, and press **Use this microphone**. `tailscale serve status` shows what is being
+served and `tailscale serve reset` stops it.
+
+None of this is on the public internet - that is `tailscale funnel`, a different command, and
+this is not a thing to point it at.
 
 ## What it remembers
 
@@ -196,7 +224,7 @@ you want.
 ## Development
 
 ```powershell
-uv run pytest        # 642 tests, no hardware, model or network needed
+uv run pytest        # 654 tests, no hardware, model or network needed
 uv run ruff check .
 uv run ruff format .
 ```

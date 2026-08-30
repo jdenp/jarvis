@@ -1,4 +1,4 @@
-"""The key that stops and starts listening, from anywhere.
+"""The key that shuts the microphone, from anywhere. Two, if it is held.
 
 Two mechanisms with one meaning. A lock key is watched - Windows keeps its lamp
 state and any thread can read it - because a low level hook is not delivered
@@ -182,6 +182,73 @@ def test_it_can_be_read_on_this_machine():
     from jarvis.hotkey import LOCK_KEYS, _lock_state
 
     assert _lock_state(LOCK_KEYS["num lock"]) in (0, 1)
+
+
+# ------------------------------------------------------------------- the hold
+
+
+def with_hold(key: str = "num lock"):
+    """A listener whose hold is wired to something that says so."""
+    hotkey, calls = listener(key)
+    hotkey._on_hold = lambda: calls.append("headphones")
+    return hotkey, calls
+
+
+def test_holding_a_lock_key_is_the_other_action(monkeypatch):
+    """The lamp flips on the way down and says nothing about the way up, so how
+    long the key was held has to be asked for separately."""
+    monkeypatch.setattr("jarvis.hotkey._key_down", lambda code: True)
+    monkeypatch.setattr("jarvis.hotkey._HOLD_SECONDS", 0.01)
+    hotkey, calls = with_hold()
+    hotkey._pressed(0x90)
+    assert calls == ["headphones"], "and not a pause as well"
+
+
+def test_a_tap_is_still_a_tap_where_a_hold_exists(monkeypatch):
+    """Which is the whole cost of it: the tap waits for the key to come up
+    before it is called a tap, and on a real one that is a few milliseconds."""
+    monkeypatch.setattr("jarvis.hotkey._key_down", lambda code: False)
+    hotkey, calls = with_hold()
+    hotkey._pressed(0x90)
+    assert calls == ["pause"]
+
+
+def test_a_key_that_cannot_be_read_is_a_tap(monkeypatch):
+    """Better the one job it did before than a key that does nothing."""
+
+    def broken(code):
+        raise OSError("no user32")
+
+    monkeypatch.setattr("jarvis.hotkey._key_down", broken)
+    hotkey, calls = with_hold()
+    hotkey._pressed(0x90)
+    assert calls == ["pause"]
+
+
+def test_nothing_waits_around_when_no_hold_was_asked_for(monkeypatch):
+    reads = []
+    monkeypatch.setattr("jarvis.hotkey._key_down", lambda code: reads.append(code))
+    hotkey, calls = listener("num lock")
+    hotkey._pressed(0x90)
+    assert calls == ["pause"] and reads == [], "not even one read"
+
+
+def test_only_a_lock_key_can_be_held():
+    """A hooked key has already fired by the time it comes back up."""
+    from jarvis.hotkey import lock_code
+
+    assert lock_code("num lock") == 0x90
+    assert lock_code("num_lock") == 0x90
+    assert lock_code("f13") is None
+    assert lock_code("") is None
+
+
+def test_whether_it_is_down_can_be_read_on_this_machine():
+    """The same argument as the lamp: it has to answer off a thread with no
+    message pump, so it is worth asking Windows rather than a mock."""
+    from jarvis.hotkey import LOCK_KEYS, _key_down
+
+    assert _key_down(LOCK_KEYS["num lock"]) in (True, False)
 
 
 # ------------------------------------------------------------------- the hook

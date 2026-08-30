@@ -382,6 +382,51 @@ def test_listen_while_speaking_leaves_the_microphone_open():
     assert speech.said == ["Talking over myself."]
 
 
+def test_headphone_mode_starts_where_the_config_says():
+    service, _microphone, _speech = make_service()
+    assert service.headphones is False, "speakers, so it cannot hear itself"
+    wearing = replace(Config().audio, listen_while_speaking=True)
+    service, _microphone, _speech = make_service(audio=wearing)
+    assert service.headphones is True
+
+
+def test_headphone_mode_can_be_switched_without_a_restart():
+    """Headphones go on and come off during a day, which a config read at
+    startup cannot follow. It is the same switch, with a key on it."""
+    service, _microphone, speech = half_duplex()
+    assert service.wear_headphones(True) is True
+    service.say("Talking over myself.")
+    assert speech.muted_while_speaking == [False], "left open"
+
+    assert service.wear_headphones(False) is False
+    service.say("Not any more.")
+    assert speech.muted_while_speaking == [False, True]
+
+
+def test_holding_the_key_switches_headphone_mode(monkeypatch):
+    """A tap shuts the microphone and the same key held is the other thing,
+    because the moment you want it is the moment you have just put headphones
+    on and are not sitting in front of a config file."""
+    captured = {}
+
+    class FakeListener:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("jarvis.service.HotkeyListener", FakeListener)
+    service, microphone, _speech = make_service()
+    service._start_hotkey()
+
+    captured["on_hold"]()
+    assert service.headphones is True
+    captured["on_hold"]()
+    assert service.headphones is False
+    assert microphone.paused is False, "and the microphone was never shut"
+
+
 def test_pause_shuts_the_desk_microphone():
     service, microphone, _ = make_service()
     assert service.paused is False
@@ -453,19 +498,12 @@ def test_status_includes_paused():
     assert status["paused"] is False
 
 
-def test_full_duplex_is_the_default_now():
-    """So you can cut JARVIS off mid sentence. It costs the echo guard: on
-    speakers the microphone hears its own voice and only echo.py stands between
-    that and JARVIS answering itself."""
-    service, microphone, speech = make_service()
-    assert service.config.audio.listen_while_speaking is False
-    service.say("Talking over myself.")
-    assert microphone.muted is False, "never muted"
-    assert speech.said == ["Talking over myself."]
-
-
-def test_half_duplex_is_still_available_on_request():
-    service, _microphone, speech = half_duplex()
+def test_half_duplex_is_the_default():
+    """The microphone shuts while JARVIS talks, because on speakers it hears
+    its own voice and only echo.py stands between that and it answering
+    itself."""
+    service, _microphone, speech = make_service()
+    assert service.headphones is False
     service.say("Opening it now.")
     assert speech.muted_while_speaking == [True]
 
@@ -524,13 +562,13 @@ def test_hushing_drops_what_was_queued_and_cuts_off_what_is_playing():
 # ------------------------------------------------------------------- web app
 
 
-def webapp(**overrides):
+def webapp(on: bool = True, **overrides):
     """A service with the page switched on, behind a real HTTP server.
 
     Energy detection rather than Silero: this is about the plumbing, and there
     is no point loading a network to score buffers of zeroes with.
     """
-    settings = ServiceConfig(port=0, start_webapp=True, **overrides)
+    settings = ServiceConfig(port=0, start_webapp=on, **overrides)
     service, microphone, _speech = make_service(
         service=settings, audio=replace(Config().audio, vad="energy")
     )
@@ -559,15 +597,20 @@ def app():
         server.server_close()
 
 
-def test_the_page_is_absent_unless_it_was_switched_on(running):
-    """Off it is not there at all, which is how every other switch here
-    behaves - and this one opens a microphone."""
-    _, client, _ = running
-    port = client.config.port
-    assert get(port, "/").status_code == 404
-    assert post(port, "/audio", content=b"\x00\x00").status_code == 404
-    assert post(port, "/typed", json={"text": "hello"}).status_code == 404
-    assert get(port, "/spoken").status_code == 404
+def test_the_page_is_absent_when_it_is_switched_off():
+    """On by default, because it opens nothing until somebody puts Tailscale in
+    front of it. Off it is not there at all rather than present and refusing,
+    which is how every other switch here behaves."""
+    service, _microphone, port, server = webapp(on=False)
+    try:
+        assert get(port, "/").status_code == 404
+        assert post(port, "/audio", content=b"\x00\x00").status_code == 404
+        assert post(port, "/typed", json={"text": "hello"}).status_code == 404
+        assert get(port, "/spoken").status_code == 404
+    finally:
+        service.stop()
+        server.shutdown()
+        server.server_close()
 
 
 def test_the_page_is_served_when_it_is_on(app):
@@ -788,6 +831,32 @@ def test_the_desk_can_be_shut_from_the_page(app):
 
     assert post(port, "/resume").json() == {"paused": False}
     assert not microphone.paused
+
+
+def test_headphone_mode_can_be_switched_from_the_page(app):
+    """A phone has no Num Lock to hold, and the setting it flips is the desk's
+    anyway - what plays on the phone plays out of the phone."""
+    service, _microphone, port = app
+    assert post(port, "/headphones", json={"on": True}).json() == {"headphones": True}
+    assert service.headphones is True
+    assert get(port, "/status").json()["headphones"] is True
+
+    assert post(port, "/headphones", json={"on": False}).json() == {"headphones": False}
+    assert service.headphones is False
+
+
+def test_an_empty_headphone_request_is_a_toggle(app):
+    """Which is what the key does, so curl may as well say the same."""
+    service, _microphone, port = app
+    assert post(port, "/headphones").json() == {"headphones": True}
+    assert post(port, "/headphones").json() == {"headphones": False}
+    assert service.headphones is False
+
+
+def test_a_headphone_request_that_makes_no_sense_is_refused(app):
+    _, _, port = app
+    assert post(port, "/headphones", content=b"not json").status_code == 400
+    assert post(port, "/headphones", content=b"[]").status_code == 400
 
 
 def test_pausing_still_works_the_way_the_cli_asks_for_it(app):

@@ -15,12 +15,14 @@ to adapt than a list of options.
 - **LLM** - Qwen3.6-35B-A3B IQ4_XS on llama.cpp, 100k context, `--n-cpu-moe 22`
 - **Brain** - JARVIS's own loop against the same server, `brain.url = "http://127.0.0.1:8081/v1"`
 - **STT** - `small.en` on CUDA, `int8_float16`
-- **TTS** - SAPI, Microsoft Hazel
+- **TTS** - Kokoro `bm_george`, on the CPU
 
 VRAM is the binding constraint. llama-server alone leaves 810 MB free on the 12 GB card, and
 Whisper takes ~580 MB with ~340 MB of CUDA context on top - about 127 MB spare once everything
 is up. That is why speech detection stays on the CPU: Silero costs 0.19% of one core and no
-VRAM, where a GPU denoiser would have to be paid for out of `--n-cpu-moe`.
+VRAM, where a GPU denoiser would have to be paid for out of `--n-cpu-moe`. Kokoro is there
+for the same reason and it costs nothing to be - about 5x real time on this chip, so under
+a second for a sentence, against ~300 MB of VRAM for latency nobody can hear.
 
 ## The llama.cpp launcher
 
@@ -94,12 +96,31 @@ not recognized as an internal or external command`. Writing `.\llama-server.exe`
     "whisper_device": "auto",
     "whisper_compute_type": "int8_float16"
   },
+  "tts": {
+    "engine": "kokoro",
+    "kokoro_device": "cpu"
+  },
   "service": {
     "_why": "`jarvis next` waits as long as it is told to, so a long poll is safe here and returns empty far less often",
     "max_wait_seconds": 240
-  }
+  },
+  "_log": "20GB. Nothing on this disk needs the space and a week of transcripts is worth more.",
+  "log_max_mb": 20480
 }
 ```
+
+## The web app
+
+On, which is the default, and reached from a phone with one command on this machine:
+
+```powershell
+tailscale serve --bg 8770
+```
+
+The rest of it - MagicDNS, the certificate, and why the plain tailnet IP will not do - is in
+[Reaching it from your phone](../README.md#reaching-it-from-your-phone). Kokoro above is what
+makes it work at all: the reply has to be rendered to a wav for the browser to play, and SAPI
+and Edge cannot be rendered without playing them, so with those it speaks at the desk instead.
 
 ## Computer use
 

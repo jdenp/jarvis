@@ -79,6 +79,10 @@ class AudioConfig:
     # It costs less than it sounds. Talking over JARVIS while it is thinking
     # still works either way - the microphone is only shut while a reply is
     # actually being spoken, which is seconds at the end of a turn.
+    #
+    # Where it starts rather than where it stays: whether headphones are on is
+    # a thing that changes during the day, so holding the hotkey or pressing the
+    # headphone button on the web app flips it for the session.
     listen_while_speaking: bool = False
 
 
@@ -131,24 +135,33 @@ class ServiceConfig:
     # erroring.
     max_wait_seconds: float = 55.0
     transcript_file: str = "heard.jsonl"
-    # A page this service serves, so a phone can be the microphone. Off. On, it
-    # adds GET / and the endpoints under it, and a second capture source that
-    # streams into the same phrase splitter the room does - so JARVIS answers out
-    # loud at the desk and the page shows you what it said.
+    # A page this service serves, so a phone can be the microphone. It adds GET /
+    # and the endpoints under it, and a second capture source that streams into
+    # the same phrase splitter the room does.
+    #
+    # On. It was off, on the argument that anything opening a microphone should
+    # be opted into - but it opens nothing on its own. Nobody outside this
+    # machine can reach it until they have put `tailscale serve` in front of it
+    # themselves, and a phone with no browser on it costs one idle capture
+    # source that sleeps. Off, the page 404s with nothing to say why, which
+    # looks exactly like the feature being broken.
     #
     # This service is still loopback and still has no auth, and that is the whole
     # design: put `tailscale serve` in front of it and let Tailscale say who you
     # are. Do not bind this to anything routable instead. The browser needs the
     # https that gives you anyway - a microphone is refused outright without it.
-    start_webapp: bool = False
-    # Key that toggles transcription. Empty disables it. Avoid keys you type
+    start_webapp: bool = True
+    # Key that shuts this microphone. Empty disables it. Avoid keys you type
     # with - nothing is swallowed, so whatever is chosen still does its normal
     # job everywhere else. Num Lock earns it by being a key nothing else wants;
     # the cost is that pausing also flips the numeric keypad, which is the same
     # keypress doing both things.
     #
     # The three lock keys are watched rather than hooked, which is why they work
-    # with an elevated window in front and anything else does not. See hotkey.py.
+    # with an elevated window in front and anything else does not. Holding one
+    # for half a second is the other job: it flips listen_while_speaking. Only
+    # the lock keys, because a hooked key has already fired by the time it comes
+    # back up. See hotkey.py.
     hotkey: str = "num lock"
 
 

@@ -519,10 +519,13 @@ class ServiceVoice:
         Not always "listening": the microphone can be shut, by the hotkey or by
         the model itself, and a status line that claims to be listening while
         deaf is how a working feature comes to look broken.
+
+        The desk is named rather than implied, because this line is drawn on
+        the web app too and a phone there is still listening perfectly well.
         """
-        if self.service.transcript.paused:
+        if self.service.paused:
             key = self.service.config.service.hotkey or "resume_transcription"
-            return f"not listening - {key} to start again"
+            return f"the desk microphone is off - {key} to start it again"
         return "listening"
 
     # Having these is what puts the two transcription tools in the toolbox. Chat

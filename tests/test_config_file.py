@@ -156,6 +156,7 @@ def test_no_config_file_means_everything_is_active():
     assert config.screen.marks_file, "the marked screenshot has somewhere to go"
     assert config.audio.listen_while_speaking is False, "half duplex, so it cannot hear itself"
     assert config.service.hotkey, "the toggle key is bound"
+    assert config.service.start_webapp is True, "a phone can be the microphone"
 
 
 def test_the_annotated_example_says_exactly_what_the_defaults_are():

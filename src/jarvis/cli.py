@@ -208,6 +208,20 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         )
     )
     logger.info("Transcript: %s", config.log_dir / config.service.transcript_file)
+    if key := config.service.hotkey:
+        # A key with two jobs has to be said out loud. Nothing on screen tells a
+        # tap from a hold, and nobody holds a key down to find out.
+        from .hotkey import lock_code
+
+        if lock_code(key):
+            logger.info(
+                "%s shuts this microphone. Hold it for headphone mode (now %s), which "
+                "leaves the microphone open while JARVIS talks so you can cut a reply off.",
+                key.title(),
+                "on" if service.headphones else "off",
+            )
+        else:
+            logger.info("%s shuts this microphone.", key.title())
     if config.service.start_webapp:
         # Said out loud at startup for the same reason the line above it is: this
         # is still loopback and still has no auth of its own, and whether that is

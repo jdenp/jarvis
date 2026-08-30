@@ -108,6 +108,7 @@ def test_nothing_starts_without_a_model(tmp_path, monkeypatch, caplog):
     class Service:
         ui = None
         transcriber = None
+        headphones = False
 
         def __init__(self, config, **kwargs):
             self.speech = type("Speech", (), {"is_local": True})()

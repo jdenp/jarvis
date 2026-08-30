@@ -403,9 +403,9 @@ it is not barge-in on speech onset. Silero would give that, at about 0.3s, but i
 volume-blind by design - the point of it - so bleed from the headphones scores as speech and
 JARVIS would cut itself off mid word.
 
-It is gated on `audio.listen_while_speaking`, because with the microphone shut through a reply
-a phrase landing now was recorded before that reply started and is nobody talking over
-anything. Typing is not gated: nothing typed can be an echo and nothing typed arrives late.
+It is gated on headphone mode, because with the microphone shut through a reply a phrase
+landing now was recorded before that reply started and is nobody talking over anything.
+Typing is not gated: nothing typed can be an echo and nothing typed arrives late.
 
 **Tool results go in the log, not only on screen.** `run_command("start teams")` returned "the
 system cannot find the file", the model concluded Teams was not installed, and the log recorded
@@ -538,6 +538,17 @@ from the lamp before it, read eight times a second. It cannot be denied, it cann
 it drops the `keyboard` dependency for the default configuration. Anything without a lamp still
 hooks, and that is the only thing the extra is for now.
 
+**The same key held is a second key.** A lamp flips on the way down and says nothing about the
+way up, so how long a key was held has to be asked for separately: `GetAsyncKeyState`, which is
+not queue based either and so survives the same elevated window. The cost is that a tap can no
+longer fire the instant the lamp moves - it has to wait to find out that it was a tap, which on
+a real one is a few tens of milliseconds. A read that fails is a tap, because the worst that can
+do is leave the key doing the one job it did before there was a second one.
+
+Only the watched keys get it. A hooked key fires on the press and there is nothing left to
+decide by the time it comes back up, and inverting that so every key fired on release would
+make the common path worse to give the fallback a feature.
+
 **The same elevation wall is why Task Manager cannot be clicked.** An unelevated process is
 shown one element and no targets, forever, and its clicks and keystrokes go nowhere with no
 error. A live session read that as a window still drawing itself and spent four minutes
@@ -644,6 +655,19 @@ it can only ever make things quieter. Every clip is therefore scaled so its loud
 sits just under full scale before the volume setting is applied - capped at four times, so
 that a clip which is quiet because it is quiet does not come back as amplified noise.
 
+**Headphone mode is a switch, not a setting.** Whether the microphone can be left open through
+a reply depends on whether there are headphones on, and that changes several times a day -
+which is not a thing a config file read at startup can follow. `audio.listen_while_speaking` is
+now where it starts rather than where it stays: holding the hotkey flips it, the web app has a
+button for it, and `POST /headphones` is the same switch for anything else. It lives on the
+service rather than in the config because the config is frozen and should stay that way - a
+setting that rewrites itself is a setting nobody can predict.
+
+It reads as one key doing two unrelated things and it is really one question asked twice: the
+tap says nothing in this room should be heard, and the hold says everything in it should be,
+including while JARVIS is talking. The moment you want the second one is the moment you have
+just put headphones on, which is not a moment anybody spends in a config file.
+
 **Num Lock is a key on the desk, so it shuts the desk.** It used to pause the transcript,
 which is every source at once - so leaving the house with JARVIS muted took the phone down
 with it, and the one moment you most want to talk to it from another room is the moment you
@@ -669,8 +693,21 @@ The service stays bound to loopback with no authentication, which is the invaria
 written under and the one thing a feature like this could quietly destroy. `tailscale serve`
 goes in front: it terminates TLS, authenticates against the tailnet, and leaves this socket
 exactly as private as it was. It is not merely the convenient option either - a browser will
-not open a microphone outside a secure context, so the certificate is load-bearing. Off by
-default, absent rather than refusing when off, and named at startup when on.
+not open a microphone outside a secure context, so the certificate is load-bearing. Reaching
+the machine is not enough on its own: `http://100.x.x.x:8770` resolves from a phone on the
+tailnet and the browser still refuses the microphone, which reads as the page being broken.
+
+One `tailscale serve --bg 8770` does it, after MagicDNS and HTTPS certificates are enabled
+once in the tailnet's admin console - without those there is no name to put a certificate on.
+The URL is the machine's name rather than the session's, so it survives restarts of both ends
+and can be bookmarked. `tailscale funnel` is the neighbouring command that puts a thing on the
+public internet, and it is not this one.
+
+On by default, and absent rather than refusing when off. It was off, on the argument that
+anything opening a microphone should be opted into - but it opens nothing on its own: the page
+is unreachable until somebody has put Tailscale in front of it themselves, and with no browser
+open the cost is one capture source asleep on an empty queue. Off, the page 404s with nothing
+to say why, which looks exactly like the feature being broken.
 
 **The page has one failure and it is invisible, so it is measured on screen.** Silence from a
 browser microphone looks identical whether the device is muted, the wrong device is selected,
@@ -1002,11 +1039,13 @@ and failing means it was already set, which is the outcome wanted anyway.
 | `memories.py` | The list JARVIS writes for itself and reads back every turn |
 | `transcript.py` | Append-only record with blocking reads |
 | `client.py` | Client for the service, used by the CLI |
+| `web.py` | Searching and reading pages, the one thing here that leaves |
+| `logging_setup.py` | One log, rotated, with the console handler the UI takes over |
 | `microphone.py` | Background capture, phrase splitting, mute |
 | `vad.py` | Whether a buffer is speech: Silero, or loudness as a fallback |
 | `stt.py` | Local Whisper transcription, with Google as an opt in |
 | `tts.py` | Speech worker thread, Kokoro, SAPI and Edge backends, sentence splitting |
-| `hotkey.py` | The key that stops and starts listening, from anywhere |
+| `hotkey.py` | The key that shuts the microphone, and the same key held |
 | `screen.py` | Cutting the accessibility tree to numbered targets, and refusing stale ones |
 | `uia.py` | UI Automation through comtypes: the only Windows-specific module |
 | `hands.py` | Synthetic clicks and keystrokes, through SendInput |
@@ -1030,13 +1069,13 @@ Each is a Protocol or a factory, so a replacement only has to match the shape:
   transcribes everything first, so every cough costs a Whisper inference. Local, so it is
   wasted CPU rather than a privacy problem, but still wasteful
 - Speaker identification, so a room with two people in it does not confuse it
-- Acoustic echo cancellation, and it is now the biggest thing left.
-  `audio.listen_while_speaking` had to go back off: with no AEC an open microphone on
-  speakers transcribes JARVIS, and it answered its own weather forecast once. The text
-  comparison in `echo.py` is the only defence and a long reply beat it. Headphones make it
-  free and it can be turned on there. Real AEC on the capture path is what makes cutting a
-  reply off work in a room with speakers in it - note that talking over the *thinking* works
-  either way, since the microphone is only shut while a reply is actually being spoken
+- Acoustic echo cancellation, and it is now the biggest thing left. Headphone mode defaults
+  off for want of it: with no AEC an open microphone on speakers transcribes JARVIS, and it
+  answered its own weather forecast once. The text comparison in `echo.py` is the only
+  defence and a long reply beat it. Headphones make it free, which is why the key and the
+  page can switch it. Real AEC on the capture path is what would make cutting a reply off
+  work in a room with speakers in it - note that talking over the *thinking* works either
+  way, since the microphone is only shut while a reply is actually being spoken
 - Cutting the speech off on speech onset rather than on a finished phrase, which would take
   it from a couple of seconds down to about 0.3s. Needs a predicate that is not volume-blind,
   or it cuts itself off on its own bleed

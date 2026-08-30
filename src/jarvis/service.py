@@ -184,6 +184,10 @@ class VoiceService:
         self._page_seen = 0.0
         self._page_left = 0.0
         self._echo = EchoGuard()
+        # Where headphone mode starts. It moves, so it cannot live in the config.
+        self._headphones = threading.Event()
+        if config.audio.listen_while_speaking:
+            self._headphones.set()
         self._speaking = threading.Lock()
         self._speaking_count = 0
         self._running = threading.Event()
@@ -339,7 +343,7 @@ class VoiceService:
                 logger.debug("Ignored JARVIS hearing itself: %s", heard)
                 continue
             # Only when the microphone was open through the reply. See _stop_talking.
-            if self.config.audio.listen_while_speaking:
+            if self.headphones:
                 self._stop_talking()
             utterance = self.transcript.add(heard)
             logger.info("[%d] %s", utterance.id, heard)
@@ -370,6 +374,10 @@ class VoiceService:
             on_pause=self.pause,
             on_resume=self.resume,
             key=self.config.service.hotkey,
+            # Held rather than pressed. Two things one key does, because the
+            # moment you want the second one is the moment you have just put
+            # headphones on and are not at the keyboard to go looking.
+            on_hold=lambda: self.wear_headphones(not self.headphones),
         )
         self._hotkey.start()
 
@@ -407,6 +415,38 @@ class VoiceService:
         self.microphone.resume()
         self.ui.note("This microphone is listening again.")
 
+    @property
+    def headphones(self) -> bool:
+        """Whether the microphone stays open while JARVIS is talking."""
+        return self._headphones.is_set()
+
+    def wear_headphones(self, on: bool) -> bool:
+        """Listen while speaking, or stop. Returns where it landed.
+
+        `audio.listen_while_speaking` says where this starts and this is the
+        same switch with a key and a button on it, because which answer is
+        right changes during the day rather than between installs. On
+        headphones there is nothing for the microphone to hear, so a reply can
+        be talked over mid sentence. On speakers it hears itself, and the only
+        thing between that and JARVIS answering its own voice is the text
+        comparison in echo.py, which has been beaten once already.
+
+        Nothing is unmuted here. A reply already being spoken was started on the
+        old answer and finishes on it, which is a second or two rather than a
+        state to reconcile.
+        """
+        if on:
+            self._headphones.set()
+        else:
+            self._headphones.clear()
+        logger.info("Headphone mode %s.", "on" if on else "off")
+        self.ui.note(
+            "Headphone mode on - talk over me and I stop."
+            if on
+            else "Headphone mode off - this microphone shuts while I talk."
+        )
+        return on
+
     # ------------------------------------------------------------------ speak
 
     def say(self, text: str) -> None:
@@ -434,7 +474,7 @@ class VoiceService:
             logger.info("Sent to the web app rather than the speakers.")
             return
 
-        if self.config.audio.listen_while_speaking or self.microphone is None:
+        if self.headphones or self.microphone is None:
             self.speech.say(text)
             return
 
@@ -493,6 +533,7 @@ class VoiceService:
             "stt": self.config.stt.backend,
             "tts": self.config.tts.engine,
             "paused": self.paused,
+            "headphones": self.headphones,
             "webapp": self.stream is not None,
             "streaming": self.stream is not None and self.stream.live,
             "attached": self.live.on_the_page,
@@ -570,6 +611,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/resume":
             self.service.resume()
             self._json(200, {"paused": False})
+        elif path == "/headphones":
+            self._do_headphones()
         elif not self._webapp():
             self._json(404, {"error": "not found"})
         elif path == "/typed":
@@ -617,6 +660,22 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self.service.typed(text)
         self._json(200, {"heard": text})
+
+    def _do_headphones(self) -> None:
+        """Listen while speaking, or stop. An empty body toggles it.
+
+        Beside /pause rather than behind the web app switch, because it is a
+        thing this service does whether or not anything is serving a page.
+        """
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}") if length else {}
+            wanted = payload.get("on")
+        except (ValueError, AttributeError):
+            self._json(400, {"error": "expected a JSON body with an 'on' field"})
+            return
+        on = not self.service.headphones if wanted is None else bool(wanted)
+        self._json(200, {"headphones": self.service.wear_headphones(on)})
 
     def _live(self, query: dict) -> None:
         """Long poll the live line, so the page says what the terminal says."""

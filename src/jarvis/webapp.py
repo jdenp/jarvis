@@ -58,6 +58,11 @@ shuts the microphone in that room and leaves this one alone. Muting the room
 you have walked out of while still talking from the next one is the whole
 reason they are separate.
 
+Headphone mode beside it is the desk again, and the same key held down. It only
+means anything to the room with speakers in it: what plays here plays out of
+this phone, and the browser's own echo cancellation is what keeps that out of
+the microphone.
+
 The reply arrives the way everything else here does: by long polling, and it is
 played here rather than at the desk - a machine talking to an empty room is no
 use to somebody in another one. The service renders it to a wav and stops
@@ -107,11 +112,14 @@ PAGE = """<!doctype html>
   h1 { font-size: 15px; letter-spacing: .18em; margin: 0; color: #8a8f98; font-weight: 600; }
   #state { font-size: 13px; color: #6b7280; margin-left: auto; }
   #banner {
-    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    display: flex; align-items: center; gap: 8px; padding: 10px 16px;
     font-size: 14px; color: #8a8f98; border-bottom: 1px solid #23262d;
+    flex-wrap: wrap;
   }
   #banner.off { background: #3b2a12; color: #f5c77e; }
-  #banner button { margin-left: auto; padding: 8px 12px; font-size: 14px; }
+  #banner button { padding: 8px 12px; font-size: 13px; }
+  #banner button:first-of-type { margin-left: auto; }
+  #phones.on { background: #14532d; border-color: #2f7d4f; color: #d8f5e2; }
   #log {
     flex: 1; overflow-y: auto; padding: 16px;
     display: flex; flex-direction: column; gap: 12px;
@@ -160,6 +168,7 @@ PAGE = """<!doctype html>
 <body>
 <header><h1>JARVIS</h1><span id="state">connecting</span></header>
 <div id="banner"><span id="ears">Listening</span>
+  <button id="phones" title="Leave the desk microphone open through a reply">Headphones off</button>
   <button id="deafen">Stop listening</button></div>
 <div id="log"></div>
 <div id="doing"></div>
@@ -182,6 +191,7 @@ const state = document.getElementById('state');
 const banner = document.getElementById('banner');
 const ears = document.getElementById('ears');
 const deafen = document.getElementById('deafen');
+const phones = document.getElementById('phones');
 const mic = document.getElementById('mic');
 const meter = document.getElementById('meter');
 const level = document.getElementById('level');
@@ -206,7 +216,7 @@ function routing() {
   return navigator.audioSession ? navigator.audioSession.type : 'not supported';
 }
 
-let bytesSent = 0, loudest = 0, playing = null, deaf = false;
+let bytesSent = 0, loudest = 0, playing = null, deaf = false, wearing = false;
 
 let ctx = null, media = null, node = null, timer = null, wake = null;
 let pending = [], streaming = false, broken = '';
@@ -353,6 +363,7 @@ async function status() {
     try {
       const data = await (await fetch('status')).json();
       showEars(data.paused);
+      showPhones(data.headphones);
     } catch (err) { /* follow() is already saying so */ }
     await new Promise(done => setTimeout(done, 4000));
   }
@@ -388,6 +399,27 @@ deafen.onclick = async () => {
   const paused = !deaf;
   showEars(paused);  // said now; the next poll of /status confirms it
   await fetch(paused ? 'pause' : 'resume', {method: 'POST'});
+};
+
+function showPhones(on) {
+  wearing = on;
+  phones.classList.toggle('on', on);
+  phones.textContent = on ? 'Headphones on' : 'Headphones off';
+}
+
+// The desk again, and the same Num Lock key held down rather than pressed. It
+// leaves the microphone there open while JARVIS talks, so a reply can be cut
+// off mid sentence - which is free on headphones and is a machine transcribing
+// itself on speakers.
+phones.onclick = async () => {
+  unlock();
+  const on = !wearing;
+  showPhones(on);  // said now; the next poll of /status confirms it
+  await fetch('headphones', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({on: on}),
+  });
 };
 
 // Raw frames straight off the graph. Nothing is written to the output, so
