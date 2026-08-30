@@ -36,6 +36,11 @@ the phone chose and the same session asked for are not the same session. Safari
 16.4 and later; everything else ignores the assignment, which is the right
 failure, since the phones that need it are the ones that have it.
 
+It is asked for immediately before every clip, not once at the start. Set only
+in the unlock it worked perfectly whenever a button had just been pressed and
+never when a reply arrived on its own, which reads exactly like audio that does
+not work and is in fact audio playing into the earpiece.
+
 Playback goes through the context's own output. An <audio> element fed from a
 MediaStreamAudioDestinationNode was tried alongside it while the routing was
 still a mystery, and came out again once it was not.
@@ -168,6 +173,7 @@ PAGE = """<!doctype html>
   <button id="mic">Use this microphone</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>
+  <div id="sent"><span id="lastplay"></span></div>
   <button id="test">Test sound</button>
 </footer>
 <script>
@@ -185,6 +191,7 @@ const level = document.getElementById('level');
 const sent = document.getElementById('sent');
 const devices = document.getElementById('devices');
 const doing = document.getElementById('doing');
+const lastplay = document.getElementById('lastplay');
 const raw = document.getElementById('raw');
 raw.checked = localStorage.getItem('raw') === 'yes';
 // The loudspeaker. Asking for the session the phone had already chosen is what
@@ -279,9 +286,15 @@ async function play(id) {
   if (playing) return;
   while (queued.length) {
     const next = queued.shift();
+    // Said out loud at every step, because every layer of this fails silently:
+    // no line at all means nothing even tried.
+    lastplay.textContent = 'clip ' + next + ': fetching';
     try {
       const reply = await fetch('voice/' + next + '.wav');
-      if (!reply.ok) continue;  // spoken at the desk, so nothing to play
+      if (!reply.ok) {
+        lastplay.textContent = 'clip ' + next + ': spoken at the desk';
+        continue;
+      }
       if (!ctx) throw new Error('no audio context yet - tap anything once');
       if (ctx.state !== 'running') await ctx.resume();
       // Said out loud rather than played into the void: starting a source on a
@@ -289,12 +302,16 @@ async function play(id) {
       if (ctx.state !== 'running') {
         throw new Error('audio is ' + ctx.state + ', tap the page once');
       }
+      // Every time. iOS drifts back to the earpiece and says nothing about it.
+      setRoute();
 
       const buffer = await ctx.decodeAudioData(await reply.arrayBuffer());
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.connect(ctx.destination);
       playing = source;
+      lastplay.textContent = 'clip ' + next + ': playing '
+        + buffer.duration.toFixed(1) + 's on ' + routing();
       await new Promise((done, fail) => {
         // Its own length plus a margin. Never no limit: the queue behind this
         // is drained by whatever finishes here.
@@ -306,6 +323,7 @@ async function play(id) {
     } catch (err) {
       // Never swallowed. Silence with no explanation is the one failure this
       // page cannot afford twice.
+      lastplay.textContent = 'clip ' + next + ': ' + (err.message || err);
       show('jarvis', 'Could not play that here - ' + (err.name || '') + ' '
         + (err.message || err) + '. On an iPhone the ring/silent switch mutes'
         + ' this; the volume buttons while it is playing set the right level.');

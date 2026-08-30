@@ -623,6 +623,20 @@ and is drawn at whatever pace a terminal can manage, which is not a thing to put
 
 It took as long as it did because every layer failed silently. A media element refused outside a gesture rejects nothing you can see; a suspended AudioContext plays a buffer into nothing and raises no error; and a working page routed to the earpiece is indistinguishable from all of them. What eventually made it findable was putting the state on screen - the context state, its sample rate, and the route - rather than reasoning about which of them it might be.
 
+**Announcing a reply before making its audio.** The reply played on the phone only when a
+button had just been pressed, which read as every iOS gesture rule in the book and was none
+of them. `say` published the line to `/spoken` and then rendered the wav. The page asks for
+the audio the instant it hears there is a reply, so it arrived half a second before Kokoro
+had finished, got a 404, and took that for a line spoken at the desk - which is what a 404
+there legitimately means. Test sound worked because by then the clip had existed for a
+minute.
+
+So the rendering happens before the line is published, and `/voice` waits a couple of seconds
+for a clip that is still being made rather than answering at once. Only for the newest line:
+anything older either has a clip or never will, and the page asks about every line it sees.
+It reproduced in Chrome the moment it was looked for, having survived three rounds of being
+reasoned about as an iPhone problem.
+
 **No WebSocket, and no auth of its own.** Chunks go up as ordinary POSTs, a quarter second
 at a time, because the payload is bytes rather than a container - the splitter cannot tell
 where one request ended and the next began, so the seams that would matter for a recording

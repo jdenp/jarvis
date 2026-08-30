@@ -846,3 +846,47 @@ def test_starting_up_announces_nothing(app):
     service.live._floor = None
     service.live.settle()
     assert said == []
+
+
+def test_the_clip_is_ready_before_the_line_is_announced(app):
+    """The page asks for the audio the instant it hears there is a reply. With
+    the rendering afterwards it fetched a clip that did not exist yet, took the
+    404 for "spoken at the desk" and gave up - a reply with no sound, and
+    nothing in any log to say so. Test sound worked, because by then it was
+    there."""
+    service, _, port = app
+    get(port, "/spoken?since=0")
+    service.speech.wav = b"RIFFrendered"
+
+    published = []
+    rendering = service.speech.render
+    service.speech.render = lambda text: (published.append(service.spoken.cursor), rendering(text))[
+        1
+    ]
+
+    service.say("Spotify is open, sir.")
+    assert published == [0], "the line was announced before its audio existed"
+    assert service.clip(service.spoken.cursor) == b"RIFFrendered"
+
+
+def test_a_clip_still_being_made_is_waited_for(app):
+    """Announcing and storing are two statements and a page on loopback gets
+    between them. The ordering is the fix; this is the guard on it."""
+    service, _, _ = app
+    service.spoken.add("Spotify is open, sir.", always=True)
+    wanted = service.spoken.cursor
+
+    threading.Timer(0.2, lambda: service._keep(wanted, b"RIFFlate")).start()
+    assert service.clip(wanted, wait=3) == b"RIFFlate"
+
+
+def test_only_the_newest_line_is_worth_waiting_for(app):
+    """Anything older either has a clip or was spoken at the desk and never
+    will have one, and the page asks about every line it sees."""
+    service, _, _ = app
+    for _ in range(3):
+        service.spoken.add("Something said.", always=True)
+
+    started = time.monotonic()
+    assert service.clip(1, wait=5) is None
+    assert time.monotonic() - started < 1, "an old line is answered at once"

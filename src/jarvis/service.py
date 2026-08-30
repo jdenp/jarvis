@@ -44,6 +44,11 @@ PAGE_GONE = 40.0
 # straight back - announcing the handover twice and undoing it in between.
 GOODBYE = 2.0
 
+# How long /voice waits for a clip that is still being rendered. Only the gap
+# between publishing a line and storing its audio, which is one statement -
+# but the page is on loopback and gets between them.
+CLIP_WAIT = 2.0
+
 # Rendered replies kept for the page to fetch. Two seconds of speech is about
 # 100KB and the browser asks for one the moment it hears about it.
 KEEP_CLIPS = 8
@@ -175,6 +180,7 @@ class VoiceService:
         # the line in `spoken`. A handful: they are seconds old by the time the
         # browser has them and nothing ever asks for an old one twice.
         self.clips: OrderedDict[int, bytes] = OrderedDict()
+        self._rendered = threading.Condition()
         self._page_seen = 0.0
         self._page_left = 0.0
         self._echo = EchoGuard()
@@ -280,14 +286,28 @@ class VoiceService:
         """
         return time.monotonic() - self._page_seen < PAGE_GONE
 
-    def clip(self, spoken_id: int) -> bytes | None:
-        """The audio for one line of `spoken`, if it was rendered for the page."""
-        return self.clips.get(spoken_id)
+    def clip(self, spoken_id: int, wait: float = 0.0) -> bytes | None:
+        """The audio for one line of `spoken`, if it was rendered for the page.
+
+        Waits a moment for one that is on its way. Publishing the line and
+        keeping the clip are two statements and the page is quick enough to get
+        between them, which reads as a reply with no audio - so the ordering is
+        the fix and this is the guard on it.
+        """
+        with self._rendered:
+            # Only the newest line can still be on its way. Anything older either
+            # has a clip or was spoken at the desk and never will have one, and
+            # the page asks about every line it sees.
+            if wait and spoken_id >= self.spoken.cursor:
+                self._rendered.wait_for(lambda: spoken_id in self.clips, timeout=wait)
+            return self.clips.get(spoken_id)
 
     def _keep(self, spoken_id: int, wav: bytes) -> None:
-        self.clips[spoken_id] = wav
-        while len(self.clips) > KEEP_CLIPS:
-            self.clips.popitem(last=False)
+        with self._rendered:
+            self.clips[spoken_id] = wav
+            while len(self.clips) > KEEP_CLIPS:
+                self.clips.popitem(last=False)
+            self._rendered.notify_all()
 
     def feed(self, pcm: bytes) -> None:
         """Take a chunk of audio from the page, as though it were the room.
@@ -389,14 +409,20 @@ class VoiceService:
             return
         logger.info("say: %s", text)
         self.ui.spoke(text)
-        line = self.spoken.add(text, always=True)
         self._echo.remember(text)
 
         # A page is open, so the reply belongs in the room the page is in.
         # Nothing is played here at all, which also means nothing to mute: the
         # browser's own echo cancellation is what keeps it from hearing itself,
         # and the page stops sending while a clip is playing.
-        if self.live.on_the_page and (wav := self.speech.render(text)) is not None:
+        #
+        # Rendered before the line is published, because the page asks for the
+        # audio the instant it hears there is a reply - and half a second of
+        # Kokoro later is far too late. A clip that has not been made yet looks
+        # exactly like one that never will be.
+        wav = self.speech.render(text) if self.live.on_the_page else None
+        line = self.spoken.add(text, always=True)
+        if wav is not None:
             self._keep(line.id, wav)
             logger.info("Sent to the web app rather than the speakers.")
             return
@@ -609,7 +635,7 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._json(400, {"error": "expected /voice/<id>.wav"})
             return
-        wav = self.service.clip(wanted)
+        wav = self.service.clip(wanted, wait=CLIP_WAIT)
         if wav is None:
             # Ordinary rather than exceptional: the page asks for every line it
             # sees, and a line spoken at the desk has no clip to fetch.
