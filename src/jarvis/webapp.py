@@ -83,8 +83,19 @@ warning people learn to ignore. The number is the whole of it.
 A squeeze on an AirPod is a play/pause aimed at the media session iOS gives a
 page that is playing audio, so those two are handled and mapped to the
 microphone - the one control worth having when the phone is in a pocket and the
-screen is off. It was already doing half of that by accident: pausing from the
-lock screen suspends the audio graph, which stops the capture on its way past.
+screen is off. The lock screen buttons worked from the first attempt and the
+stem did not, because Safari hands headset buttons to a page only while a media
+*element* is playing on it, and an AudioContext is not one. So a half second of
+silence loops in an `<audio>` tag whenever the microphone is meant to be on.
+Without it the firmware reads the squeeze as an attempt to mute a microphone it
+does not control and refuses it out loud.
+
+Being talked over is the same question asked from the other end. The page holds
+its audio back while a clip is playing, which is right on a loudspeaker and
+exactly wrong on headphones: the interruption went nowhere and the reply talked
+over the top of it. On headphones it keeps sending, and a phrase arriving while
+a clip runs stops the clip - the same evidence the desk uses, decided here
+because the audio is here and the service cannot stop what it is not playing.
 
 The raw switch is the other suspect. Echo cancellation, noise suppression and
 gain control are asked for by default because the browser plays the reply a
@@ -213,7 +224,7 @@ function routing() {
 
 let bytesSent = 0, loudest = 0, playing = null;
 
-let ctx = null, media = null, node = null, timer = null, wake = null;
+let ctx = null, media = null, node = null, timer = null, wake = null, keepalive = null;
 let pending = [], streaming = false, broken = '';
 
 function show(who, text) {
@@ -243,6 +254,11 @@ async function follow(path, key, who) {
       for (const item of items) {
         show(who, item.text);
         if (key === 'spoken' && !first) play(item.id);
+        // Somebody talked over the reply. The same rule the desk uses, and
+        // the same evidence: a phrase arriving while a clip is playing was
+        // said over the top of it. Only on headphones, where an open
+        // microphone through a reply is not the reply coming back.
+        if (key === 'heard' && !first && phones.checked) hushPlayback();
       }
       cursor = data.cursor;
       state.textContent = broken || (streaming ? 'listening' : 'connected');
@@ -280,7 +296,47 @@ function unlock() {
     awake.start(0);
   }
   if (ctx.state !== 'running') ctx.resume();
+  // Started inside the tap, like everything else here. iOS routes headset
+  // buttons to whatever media element is playing, and an AudioContext is not
+  // one - see nowPlaying.
+  if (!keepalive) {
+    keepalive = new Audio(silence(0.5));
+    keepalive.loop = true;
+  }
+  keepalive.play().catch(() => {});
   setRoute();
+}
+
+// Half a second of nothing, built here rather than pasted in as a kilobyte of
+// base64. Eight bit, 8 kHz and mono, because none of that matters when every
+// sample is silence.
+function silence(seconds) {
+  const rate = 8000, samples = Math.round(rate * seconds);
+  const bytes = new Uint8Array(44 + samples);
+  const put = (at, text) => {
+    for (let i = 0; i < text.length; i++) bytes[at + i] = text.charCodeAt(i);
+  };
+  const u32 = (at, n) => {
+    bytes[at] = n & 255; bytes[at + 1] = (n >> 8) & 255;
+    bytes[at + 2] = (n >> 16) & 255; bytes[at + 3] = (n >> 24) & 255;
+  };
+  put(0, 'RIFF'); u32(4, 36 + samples); put(8, 'WAVEfmt ');
+  u32(16, 16); bytes[20] = 1; bytes[22] = 1;
+  u32(24, rate); u32(28, rate); bytes[32] = 1; bytes[34] = 8;
+  put(36, 'data'); u32(40, samples);
+  bytes.fill(128, 44);  // eight bit silence is the middle, not zero
+  let text = '';
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return 'data:audio/wav;base64,' + btoa(text);
+}
+
+// Drop what is playing and everything behind it. Called when a phrase lands
+// while a clip is running, which is the definition of being talked over.
+function hushPlayback() {
+  queued.length = 0;
+  if (playing) {
+    try { playing.stop(); } catch (err) { /* already finished */ }
+  }
 }
 
 async function play(id) {
@@ -440,7 +496,10 @@ function flush() {
 
   // Its own voice is not worth transcribing, and the browser's echo
   // cancellation is aimed at the speaker rather than at a file being played.
-  if (playing) return;
+  // Headphone mode says there is nothing in the room to hear the reply, which
+  // is the one case where this hold-back is what stops you interrupting: the
+  // words went nowhere and JARVIS talked over the top of them.
+  if (playing && !phones.checked) return;
 
   bytesSent += pcm.byteLength;
   // Two decimals, because the difference between a silent device and a very
@@ -573,6 +632,15 @@ async function startMic() {
 // audio graph, which stopped the capture as a side effect. This makes that the
 // intent rather than a side effect, and gives the play half something to do.
 function nowPlaying(on) {
+  // The element rather than the AudioContext, and this is the whole trick.
+  // Safari hands headset buttons to a page only while a media element is
+  // playing on it, so half a second of silence on a loop is what makes a
+  // squeeze on an AirPod arrive here instead of being refused by the
+  // firmware as an attempt to mute a microphone it does not control.
+  if (keepalive) {
+    if (on) keepalive.play().catch(() => {});
+    else keepalive.pause();
+  }
   const session = navigator.mediaSession;
   if (!session) return;
   session.playbackState = on ? 'playing' : 'paused';
@@ -589,12 +657,21 @@ function nowPlaying(on) {
 
 function mediaKeys() {
   const session = navigator.mediaSession;
-  if (!session) return;
-  try {
-    session.setActionHandler('pause', () => { if (streaming) stopMic(); });
-    session.setActionHandler('play', () => { unlock(); if (!streaming) startMic(); });
-  } catch (err) {
-    // An action the browser will not hand over. Nothing is worse than before.
+  if (session) {
+    try {
+      session.setActionHandler('pause', () => { if (streaming) stopMic(); });
+      session.setActionHandler('play', () => { unlock(); if (!streaming) startMic(); });
+    } catch (err) {
+      // An action the browser will not hand over. Nothing is worse than before.
+    }
+  }
+  // An earbud taken out, or a phone call arriving. The session is gone either
+  // way and a microphone that thinks it is still open is a page saying it is
+  // listening to nothing.
+  if (navigator.audioSession && navigator.audioSession.addEventListener) {
+    navigator.audioSession.addEventListener('statechange', () => {
+      if (navigator.audioSession.state === 'interrupted' && streaming) stopMic();
+    });
   }
   nowPlaying(false);
 }

@@ -705,6 +705,30 @@ somebody shutting the desk has not asked for the sentence their phone sent a mom
 be forgotten. So a queued phrase carries which microphone made it, and a drain puts back
 everything that is not its own.
 
+**A squeeze on an AirPod needs a media element, not an AudioContext.** The lock screen
+buttons worked the first time they were tried and the stem did not - it answered with
+"cannot control mic with AirPods Pro", which sounds like a permission problem and is not
+one. Safari hands headset buttons to a page only while a media *element* is playing on it.
+The reply plays through an AudioContext, which is not one, so the session iOS showed was
+real enough for the on-screen controls and invisible to the firmware, which read the
+squeeze as an attempt to mute a microphone it does not control and refused it.
+
+So half a second of silence loops in an `<audio>` tag whenever the microphone is meant to
+be on, generated in the page rather than pasted in as a kilobyte of base64. `play` and
+`pause` are then bound to starting and stopping the microphone, which is the only control
+worth having when the phone is in a pocket and the screen is off.
+
+**Being talked over, decided in the room the audio is in.** The page holds its microphone
+back while a clip is playing, which is right on a loudspeaker - the browser's echo
+cancellation is aimed at a speaker in the room, not at a file the page is playing - and
+exactly wrong on headphones. Interrupting did nothing: the words were never sent, so
+nothing was transcribed and the reply carried on over the top of them.
+
+On headphones it keeps sending, and a phrase arriving while a clip runs stops the clip.
+That is the same evidence `_stop_talking` uses at the desk and it is deliberately decided
+in the page instead: the service cannot cut off a reply it is not playing, and by the time
+a phrase exists the audio is already several seconds into a phone in another room.
+
 **There is no tool for starting to listen again.** There was, and the shape of it was
 wrong from the start: the microphone `resume_transcription` would open is the one that
 would have had to hear somebody ask for it, so it was reachable exactly when it was not
