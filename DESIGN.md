@@ -545,6 +545,11 @@ longer fire the instant the lamp moves - it has to wait to find out that it was 
 a real one is a few tens of milliseconds. A read that fails is a tap, because the worst that can
 do is leave the key doing the one job it did before there was a second one.
 
+The threshold started at 0.6s and went to 1.5s, because an ordinary firm press reached 0.6
+and the wrong thing happened. The two actions are not equal: shutting the microphone is what
+people come to this key for, and headphone mode is the occasional one, so the error worth
+designing out is a tap read as a hold rather than the reverse.
+
 Only the watched keys get it. A hooked key fires on the press and there is nothing left to
 decide by the time it comes back up, and inverting that so every key fired on release would
 make the common path worse to give the fallback a feature.

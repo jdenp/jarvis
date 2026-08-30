@@ -32,9 +32,10 @@ logger = logging.getLogger("jarvis.hotkey")
 # Ignore key auto-repeat while the key is held down.
 _DEBOUNCE_SECONDS = 0.3
 
-# A press still down after this is the other action. Long enough that an ordinary
-# press cannot reach it, short enough that nobody lets go early wondering.
-_HOLD_SECONDS = 0.6
+# A press still down after this is the other action. Deliberately long: at 0.6 an
+# ordinary firm press reached it, and shutting the microphone is the job people
+# come to this key for.
+_HOLD_SECONDS = 1.5
 
 # How often the key is asked whether it is still down, within a hold.
 _HOLD_POLL = 0.03

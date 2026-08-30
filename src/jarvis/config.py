@@ -159,9 +159,9 @@ class ServiceConfig:
     #
     # The three lock keys are watched rather than hooked, which is why they work
     # with an elevated window in front and anything else does not. Holding one
-    # for half a second is the other job: it flips listen_while_speaking. Only
-    # the lock keys, because a hooked key has already fired by the time it comes
-    # back up. See hotkey.py.
+    # for a second and a half is the other job: it flips listen_while_speaking.
+    # Only the lock keys, because a hooked key has already fired by the time it
+    # comes back up. See hotkey.py.
     hotkey: str = "num lock"
 
 

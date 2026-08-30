@@ -125,8 +125,8 @@ start_webapp = true
 # works: "num lock", "numlock", "num_lock".
 #
 # The three lock keys are watched rather than hooked, which is why they keep
-# working with an elevated window in front. Hold one for half a second and it
-# flips listen_while_speaking instead of shutting the microphone.
+# working with an elevated window in front. Hold one for a second and a half and
+# it flips listen_while_speaking instead of shutting the microphone.
 hotkey = "num lock"
 
 [screen]
