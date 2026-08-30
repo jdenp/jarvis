@@ -258,10 +258,11 @@ class BrainConfig:
     # Tool calls allowed in one turn before the loop stops and asks for the
     # answer. This costs patience rather than context - somebody is waiting
     # through every one of them - so it is the one cap not set by the token
-    # budget. Twelve, because eight ran out on a real request: look, focus,
-    # look, click, look, type, look, check is already eight with nothing
-    # having gone wrong.
-    max_steps: int = 12
+    # budget. Eight ran out on a real request - look, focus, look, click,
+    # look, type, look, check is already eight with nothing having gone
+    # wrong - and twelve is only four more than that, which is one mistake
+    # and its recovery. Sixteen leaves room to be wrong once and carry on.
+    max_steps: int = 16
     # Turns of conversation kept. Cut whole turns rather than messages - half a
     # turn leaves a tool result whose call is gone, which some endpoints reject.
     # 20 rather than 6 because the meter said so: the prompt sits at 2.6k of a

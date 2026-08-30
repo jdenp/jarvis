@@ -61,7 +61,7 @@
     "api_key": "",
     "temperature": 0.4,
     "max_tokens": 2000,
-    "max_steps": 12,
+    "max_steps": 16,
     "history_turns": 20,
     "timeout_seconds": 180.0,
     "stream": true,

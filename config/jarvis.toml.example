@@ -187,9 +187,10 @@ max_tokens = 2000
 # This costs patience rather than context - somebody is waiting through every one
 # - so it is the one cap not set by the token budget. Eight ran out on a real
 # request: look, focus, look, click, look, type, look, check is eight with
-# nothing having gone wrong. The turn cannot end silent either way; the last call
-# is made with the tools taken away, so prose is the only move left.
-max_steps = 12
+# nothing having gone wrong, and twelve is one mistake and its recovery past
+# that. The turn cannot end silent either way; the last call is made with the
+# tools taken away, so prose is the only move left.
+max_steps = 16
 # Turns of conversation kept. Cut whole turns rather than messages - half a turn
 # leaves a tool result whose call is gone, which some endpoints reject outright.
 history_turns = 20
