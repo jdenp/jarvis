@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from jarvis.config import Config
-from jarvis.memories import as_prompt, bullets, load, remember, sections
+from jarvis.memories import as_prompt, bullets, load, remember, rewrite, sections
 
 
 def known(root, limit=2000):
@@ -83,26 +83,76 @@ def test_a_missing_file_is_simply_no_memories(tmp_path):
     assert known(tmp_path / "not-there") == []
 
 
-def test_the_top_of_the_file_goes_when_it_is_full(tmp_path):
-    """The bottom is where the newest lines are, so this is the right end to
-    lose: the desk changes, and a lesson about an application that has since
-    been updated is worse than no lesson."""
+def test_a_file_over_the_cap_is_not_read_at_all(tmp_path):
+    """Reading as much as fits sounds kinder and is not. The top is where the
+    oldest and best worn lessons are, so losing that end quietly is how a stale
+    duplicate further down ends up believed instead."""
     path = tmp_path / "memories.md"
     for n in range(10):
         remember(path, "Windows", f"Lesson number {n} about this desktop")
 
-    kept = flat(tmp_path, 120)
-    assert kept, "something has to survive"
-    assert kept[-1].startswith("Lesson number 9")
-    assert not any(x.startswith("Lesson number 0") for x in kept)
-    assert len(flat(tmp_path, 0)) == 10, "nothing is deleted, only left unread"
+    assert flat(tmp_path, 120) == [], "all of it or none of it"
+    assert len(flat(tmp_path, 0)) == 10, "nothing is deleted, and 0 is no cap"
+    assert len(flat(tmp_path, 100_000)) == 10
+
+
+def test_the_reference_files_beside_it_are_read_anyway(tmp_path):
+    """They are written by hand and bounded by hand. One runaway file JARVIS
+    wrote is no reason to forget how Windows works."""
+    (tmp_path / "navigation").mkdir()
+    (tmp_path / "navigation" / "os.md").write_text(
+        "## Windows\n- Typed by hand\n", encoding="utf-8"
+    )
+    path = tmp_path / "memories.md"
+    for n in range(10):
+        remember(path, "Windows", f"Lesson number {n} about this desktop")
+
+    assert flat(tmp_path, 120) == ["Typed by hand"]
 
 
 def test_being_full_is_said_out_loud(tmp_path):
     path = tmp_path / "memories.md"
     for n in range(6):
         remember(path, "Windows", f"Lesson number {n} about this desktop", limit=100)
-    assert "no longer read back" in remember(path, "Windows", "One more thing", limit=100)
+    said = remember(path, "Windows", "One more thing", limit=100)
+    assert "none of it is read back" in said
+    assert "memories.md" in said
+
+
+def test_one_section_can_be_rewritten_without_touching_the_others(tmp_path):
+    """The other half of `remember`, which only ever appends - right for a lesson
+    learned in a turn, and no use at all for merging six of them into one."""
+    path = tmp_path / "memories.md"
+    remember(path, "Windows", "Alt tab does a thing")
+    remember(path, "Windows", "Alt tab does the same thing")
+    remember(path, "Personal", "They are left handed")
+
+    assert rewrite(path, "Windows", ["Alt tab does one thing"]) is True
+    assert dict(sections(path)) == {
+        "Windows": ["Alt tab does one thing"],
+        "Personal": ["They are left handed"],
+    }
+
+
+def test_a_rewrite_of_something_that_is_not_there_changes_nothing(tmp_path):
+    path = tmp_path / "memories.md"
+    remember(path, "Windows", "Alt tab does a thing")
+
+    assert rewrite(path, "Applications", ["Teams is an MSIX package"]) is False
+    assert rewrite(path, "Windows", []) is False
+    assert rewrite(path, "Windows", ["   "]) is False
+    assert dict(sections(path)) == {"Windows": ["Alt tab does a thing"]}
+
+
+def test_a_rewritten_file_is_still_one_somebody_can_read(tmp_path):
+    """It is markdown on purpose - the list is meant to be edited by hand, and a
+    section run into the one below it is not."""
+    path = tmp_path / "memories.md"
+    remember(path, "Windows", "One")
+    remember(path, "Personal", "Two")
+    rewrite(path, "Windows", ["One, tidied"])
+
+    assert "- One, tidied\n\n## Personal" in path.read_text(encoding="utf-8")
 
 
 def test_nothing_learned_yet_adds_nothing_to_the_prompt():

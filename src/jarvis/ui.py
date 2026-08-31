@@ -48,6 +48,7 @@ COLOUR = {
     "art": "\033[38;5;208m",
     "loud": "\033[1m",
     "warn": "\033[33m",
+    "bad": "\033[31m",
     "tool": "\033[35m",
 }
 
@@ -129,6 +130,7 @@ class Silent:
     def watch_tools(self, listener) -> None: ...
     def note(self, text: str) -> None: ...
     def warn(self, text: str) -> None: ...
+    def alarm(self, text: str) -> None: ...
     def status(self, text: str) -> None: ...
     def watch(self, listener) -> None: ...
     def thinking(self, text: str) -> None: ...
@@ -268,6 +270,10 @@ class Ui:
 
     def warn(self, text: str) -> None:
         self.line(paint("warn", text, self.colour))
+
+    def alarm(self, text: str) -> None:
+        """Louder than a warning, for the ones that cost you something."""
+        self.line(paint("bad", text, self.colour))
 
     # ------------------------------------------------------------------ live
 
@@ -487,6 +493,10 @@ class LogToUi(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             where = record.name.removeprefix("jarvis.")
-            self.ui.warn(f"  ! {where}: {record.getMessage()}")
+            line = f"  ! {where}: {record.getMessage()}"
+            if record.levelno >= logging.ERROR:
+                self.ui.alarm(line)
+            else:
+                self.ui.warn(line)
         except Exception:  # a broken log line must not take the process with it
             self.handleError(record)

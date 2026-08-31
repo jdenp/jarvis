@@ -107,6 +107,13 @@ LOOK_BACK_SECONDS = 30.0
 MODEL_POLL_SECONDS = 5.0
 MODEL_SAY_SECONDS = 60.0
 
+# A section long enough to be worth rewriting, and the room the rewrite gets on
+# top of what it was handed. Under the first, merging costs a model call to save
+# a line nobody was going to read twice anyway.
+COMPACT_OVER = 8
+COMPACT_ROOM = 200
+COMPACT_SECONDS = 30.0
+
 # How many of them are kept from one turn. It is asked after everything JARVIS
 # says now, so the ceiling is what stops one talkative afternoon filling the
 # file on its own.
@@ -139,6 +146,25 @@ scan. Nothing about this conversation itself.
 
 Already written down:
 {known}"""
+
+# Asked on the same idle pass, once something has been added. Deliberately not
+# asked to think about whether the lines are true - only whether the same thing
+# is written down more than once, which is a question with a right answer.
+COMPACT = """/no_think
+Here is one heading from your own notes. Write it out again, shorter.
+
+{section}
+
+Merge the lines that say the same thing in different words. Drop anything that
+was only true at the time - what was open, what was running, what somebody was
+in the middle of. Keep every distinct fact: a route that works, the name a
+program is really installed under, something they told you about themselves.
+Invent nothing, and keep the order they are in.
+
+You read this list before every answer, so a fact written three ways costs you
+three times and teaches you once. Answer with the heading and its bullets and
+nothing else. If it is already tight, write it back unchanged.
+"""
 
 # What an old tool result is replaced with once the window gets tight. Named,
 # because "you ran look_at_screen here" is worth keeping and the three thousand
@@ -677,6 +703,13 @@ class Brain:
             return ""
         return memories.as_prompt(self._known())
 
+    def memories_too_big(self) -> int:
+        """What the written file costs, when that is too much to read at all."""
+        if not self.settings.memories:
+            return 0
+        path = self._written()[0]
+        return memories.over_limit(memories.sections(path), self.settings.max_memory_chars)
+
     def _known(self) -> memories.Groups:
         """Every line of it, reference and learned, as the prompt will see it."""
         if not self.settings.memories:
@@ -816,12 +849,61 @@ class Brain:
             for lesson in lessons
         ]
         path = tools.memory_file(self.config)
+        wrote = False
         for heading, lesson in learned[:LOOK_BACK_LINES]:
             if PER_SCAN.search(lesson):
                 logger.info("Not kept, target numbers do not survive the scan: %s", lesson)
                 continue
             logger.info("Learned under %s: %s", heading, lesson)
             memories.remember(path, heading, lesson, self.settings.max_memory_chars)
+            wrote = True
+        if wrote:
+            self._compact(path)
+
+    def _compact(self, path: Path) -> None:
+        """Merge the repeats out of the longest section, after something is added.
+
+        Appending is all `remember` does, so a lesson learned three times in three
+        wordings sits there three times - and this file is prompt, paid on every
+        single call. One heading per look back, the longest, because that is where
+        the waste is and a whole file is more than one answer has room for.
+
+        Only ever accepted when it comes back shorter and still parses under the
+        same heading. A rewrite is the one operation here that can lose something,
+        so it is the one that has to earn it.
+        """
+        groups = memories.sections(path)
+        if not groups:
+            return
+        heading, lessons = max(groups, key=lambda pair: len(pair[1]))
+        if len(lessons) < COMPACT_OVER:
+            return
+
+        section = [(heading, lessons)]
+        self.ui.status("tidying")
+        try:
+            reply = self.model.reply(
+                [{"role": "user", "content": COMPACT.format(section=memories.as_lines(section))}],
+                tools=None,
+                limit=COMPACT_ROOM + memories.spent(section) // 3,
+                think=False,
+                stop=self.stopped.is_set,
+                timeout=COMPACT_SECONDS,
+            )
+        except Cancelled:
+            return
+        except Exception:
+            logger.exception("Compacting failed; carrying on without it.")
+            return
+
+        if reply.truncated:
+            logger.info("Not compacted, the rewrite of %s ran out of room.", heading)
+            return
+        written = dict(memories.sections_in(reply.text)).get(heading)
+        if not written or len(written) >= len(lessons):
+            logger.info("Nothing to compact under %s.", heading)
+            return
+        memories.rewrite(path, heading, written)
 
     def _answer(self, said: list[str]) -> str:
         """One utterance, worked and spoken. Returns what was said out loud."""
@@ -1466,6 +1548,13 @@ def start(config: Config, service, voice=None, terminal=None) -> Brain:
         len(brain.toolbox.names),
         ", ".join(brain.toolbox.names),
     )
+    if cost := brain.memories_too_big():
+        logger.error(
+            "Couldn't load %s, exceeded character limit (%d of %d).",
+            tools.memory_file(config).name,
+            cost,
+            config.brain.max_memory_chars,
+        )
     if config.brain.images and model.can_see() is False:
         logger.warning(
             "brain.images is on but %s reports no vision, so look_at_image will send a "

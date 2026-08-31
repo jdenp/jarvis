@@ -59,6 +59,8 @@ def load(root: Path, written: Sequence[Path] = (), limit: int = 2000) -> Groups:
     Trimming the curated half to make room for the accumulated half would be the
     wrong way round, so reference comes first and comes whole.
 
+    A written file over the cap is left out altogether - see `over_limit`.
+
     Only the bullets and the headings over them. The prose around them is for
     whoever opens the file, and would be tokens spent saying nothing to a model.
     """
@@ -71,7 +73,9 @@ def load(root: Path, written: Sequence[Path] = (), limit: int = 2000) -> Groups:
     for found in sorted(root.rglob("*.md")):
         groups = sections(found)
         if found.resolve() in grown:
-            learned = merged(learned, capped(groups, limit))
+            if over_limit(groups, limit):
+                continue
+            learned = merged(learned, groups)
         else:
             reference = merged(reference, groups)
     return merged(reference, learned)
@@ -146,30 +150,21 @@ def merged(groups: Groups, more: Groups) -> Groups:
     return out
 
 
-def capped(groups: Groups, limit: int) -> Groups:
-    """As much of one file as fits, counting back from the last line in it.
+def spent(groups: Groups) -> int:
+    """What a file of bullets costs in the prompt, in characters."""
+    return sum(len(lesson) + 3 for _, lessons in groups for lesson in lessons)
 
-    Past the cap the top of the file stops being read. The bottom is where the
-    newest lines are, so this is the right end to lose: the desk changes, and a
-    lesson about an application that has since been updated is worse than none.
+
+def over_limit(groups: Groups, limit: int) -> int:
+    """What it costs, when that is over the limit. 0 when it is not.
+
+    All of it or none of it. Reading as much as fits sounds kinder and is not:
+    the top of the file is where the oldest and best worn lessons are, so
+    quietly losing that end is how a stale duplicate further down ends up
+    believed instead. Better to say so once, loudly, and read nothing.
     """
-    if limit <= 0:
-        return groups
-
-    kept: Groups = []
-    spent = 0
-    for name, lessons in reversed(groups):
-        room: list[str] = []
-        for lesson in reversed(lessons):
-            spent += len(lesson) + 3
-            if spent > limit:
-                break
-            room.append(lesson)
-        if room:
-            kept.append((name, list(reversed(room))))
-        if spent > limit:
-            break
-    return list(reversed(kept))
+    cost = spent(groups)
+    return cost if 0 < limit < cost else 0
 
 
 def remember(path: Path, heading: str, lesson: str, limit: int = 2000) -> str:
@@ -196,12 +191,10 @@ def remember(path: Path, heading: str, lesson: str, limit: int = 2000) -> str:
         return f"Could not write it down - {exc}"
 
     logger.info("Remembered under %s: %s", heading, lesson)
-    kept = sum(len(lessons) for _, lessons in capped(sections(path), limit))
-    dropped = len(existing) + 1 - kept
-    if dropped > 0:
+    if cost := over_limit(sections(path), limit):
         return (
-            f"Remembered. The list is full, so the {dropped} at the top of it are no "
-            "longer read back - edit the file if one of those mattered."
+            f"Remembered, but {path.name} is now {cost} characters against a limit "
+            f"of {limit}, so none of it is read back until it is trimmed."
         )
     return f"Remembered, under {heading}. It is in your prompt from the next thing they say."
 
@@ -227,6 +220,40 @@ def filed(body: str, heading: str, lesson: str) -> str:
         end -= 1
     lines.insert(end, f"- {lesson}")
     return "\n".join(lines) + "\n"
+
+
+def rewrite(path: Path, heading: str, lessons: Sequence[str]) -> bool:
+    """Swap one section's bullets for a shorter set. False if nothing changed.
+
+    The other half of `remember`, which only ever appends - right for a lesson
+    learned in a turn, and no use at all for merging six of them into one.
+    """
+    heading = clean(heading)
+    body = [f"- {' '.join(lesson.split())}" for lesson in lessons if lesson.strip()]
+    if not body:
+        return False
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+
+    wanted = f"## {heading}".lower()
+    at = next((i for i, line in enumerate(lines) if line.strip().lower() == wanted), None)
+    if at is None:
+        return False
+    end = at + 1
+    while end < len(lines) and not lines[end].startswith("#"):
+        end += 1
+
+    gap = [""] if end > at + 1 and not lines[end - 1].strip() else []
+    lines[at + 1 : end] = body + gap
+    try:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not write %s - %s", path, exc)
+        return False
+    logger.info("Compacted %s down to %d line(s).", heading, len(body))
+    return True
 
 
 def as_prompt(groups: Groups) -> str:

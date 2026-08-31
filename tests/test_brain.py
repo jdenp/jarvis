@@ -1709,6 +1709,84 @@ def test_a_run_of_turns_is_one_look_back(tmp_path):
     assert "3 exchanges" in it.model.seen[-1][-1]["content"], "and it is told how far back"
 
 
+def test_a_section_that_has_grown_is_tidied_once_something_is_added(tmp_path):
+    """`remember` only appends, so a lesson learned three times in three wordings
+    sits there three times - and this file is prompt, paid on every call."""
+    from jarvis.memories import remember, sections
+
+    path = tmp_path / "memories.md"
+    for n in range(9):
+        remember(path, "Windows", f"Alt tab does thing number {n}")
+
+    it = looking_back(
+        tmp_path,
+        said("Done, sir."),
+        said("## Windows\n- One more thing."),
+        said("## Windows\n- Alt tab does several things.\n- One more thing."),
+    )
+    it.turn(["do something"])
+    quiet(it)
+
+    assert dict(sections(path)) == {"Windows": ["Alt tab does several things.", "One more thing."]}
+
+
+def test_a_tidy_up_that_came_back_no_shorter_is_thrown_away(tmp_path):
+    """A rewrite is the one thing here that can lose a line, so it only lands when
+    it is genuinely shorter than what it replaces."""
+    from jarvis.memories import remember, sections
+
+    path = tmp_path / "memories.md"
+    for n in range(9):
+        remember(path, "Windows", f"Alt tab does thing number {n}")
+    before = dict(sections(path))["Windows"]
+
+    it = looking_back(
+        tmp_path,
+        said("Done, sir."),
+        said("## Windows\n- One more thing."),
+        said("## Personal\n- Under a heading nobody asked about."),
+    )
+    it.turn(["do something"])
+    quiet(it)
+
+    after = dict(sections(path))
+    assert after["Windows"] == [*before, "One more thing."]
+    assert "Personal" not in after, "and the stray heading was not written either"
+
+
+def test_a_look_back_that_learned_nothing_does_not_tidy_either(tmp_path):
+    """It would fail the same way every idle minute otherwise, over a file that
+    has not changed since the last time it failed."""
+    from jarvis.memories import remember
+
+    path = tmp_path / "memories.md"
+    for n in range(9):
+        remember(path, "Windows", f"Alt tab does thing number {n}")
+
+    it = looking_back(tmp_path, said("Done, sir."), said("Nothing worth keeping."))
+    it.turn(["do something"])
+    quiet(it)
+    assert len(it.model.asked) == 2, "answered and looked back, and stopped there"
+
+
+def test_a_memory_file_too_big_to_read_is_not_read_at_all(tmp_path):
+    """Said in red at startup rather than quietly losing the top of the file,
+    which is where the oldest and best worn lessons are."""
+    from jarvis.memories import remember
+
+    path = tmp_path / "memories.md"
+    for n in range(20):
+        remember(path, "Windows", f"Alt tab does thing number {n}")
+
+    it = looking_back(tmp_path, said("Hello, sir."))
+    assert it.memories_too_big() == 0
+    assert "Alt tab" in it.system_prompt()
+
+    it.settings = replace(it.settings, max_memory_chars=100)
+    assert it.memories_too_big() > 100
+    assert "Alt tab" not in it.system_prompt()
+
+
 def test_a_stalled_look_back_gives_up_on_its_own(tmp_path):
     """It runs on the listening thread, so a call that hangs is a JARVIS that
     hears nothing until it stops hanging. Three minutes of that has happened,

@@ -394,11 +394,12 @@ class BrainConfig:
     # call sees what a run of turns added up to rather than one line out of it.
     settle_seconds: float = 60.0
     # How much of the written file is read back. This is prompt, paid on every
-    # single call - the only setting here that is - so it is capped, and past it
-    # the top of the file stops being read, which is the right end to lose since
-    # the desk changes and a lesson can go stale. The reference files beside it
-    # are not counted.
-    max_memory_chars: int = 4000
+    # single call - the only setting here that is - so it is capped. Going over
+    # it drops the whole file rather than quietly losing the top of it, and says
+    # so in red at startup. Large on purpose: the point of the cap is to catch a
+    # file that has run away, not to ration what JARVIS may know. The reference
+    # files beside it are not counted.
+    max_memory_chars: int = 20000
     # Who JARVIS is. Empty means context/soul/jarvis.md, which is where the
     # prompt lives - prose, tuned by reading it out loud and changing a word,
     # with no copy in the code to drift from. Character and behaviour only:

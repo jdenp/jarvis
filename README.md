@@ -136,7 +136,9 @@ context/
 ```
 
 Every markdown file under `memories` is read into the prompt, so adding your own is dropping
-a file in. `brain.max_memory_chars` caps how much of the grown one comes back.
+a file in. `brain.max_memory_chars` caps the grown one - over it, none of it is read and it
+says so in red at startup. When the room goes quiet it also rewrites its longest heading
+shorter, merging what it has written down more than once.
 
 ## The voice
 

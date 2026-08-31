@@ -244,6 +244,21 @@ def test_a_warning_arrives_as_part_of_the_conversation():
     assert "belongs in the file" not in body, "INFO stays out of the terminal"
 
 
+def test_an_error_is_louder_than_a_warning():
+    """A warning is a thing to know about later. An error at startup is a thing
+    that is not going to work, and it has to survive a wall of orange."""
+    ui, written = screen(colour=True)
+    logger = logging.getLogger("jarvis.test-ui-loud")
+    logger.propagate = False
+    logger.addHandler(LogToUi(ui))
+    logger.warning("something to know about later")
+    logger.error("Couldn't load memories.md, exceeded character limit.")
+
+    warned, failed = written.getvalue().splitlines()
+    assert COLOUR["warn"] in warned and COLOUR["bad"] not in warned
+    assert COLOUR["bad"] in failed
+
+
 # -------------------------------------------------------------------- thinking
 
 

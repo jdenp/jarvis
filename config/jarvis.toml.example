@@ -284,9 +284,10 @@ consolidate = true
 # what a run of turns added up to rather than one line out of the middle of it.
 settle_seconds = 60.0
 # How much of it is read back. This is prompt, paid on every call, so it is
-# capped; past it the top of the file stops being read, which is the right end to
-# lose since the desk changes and a lesson can go stale.
-max_memory_chars = 4000
+# capped. Going over drops the whole file rather than quietly losing the top of
+# it, and says so in red at startup. Large on purpose: the cap is here to catch a
+# file that has run away, not to ration what JARVIS is allowed to know.
+max_memory_chars = 20000
 # Who JARVIS is. Empty means context/soul/brain.md, which is where the prompt
 # lives: prose, tuned by reading it out loud and changing a word, with no copy in
 # the code to drift from. Shorter is better - the more instructions it carries the

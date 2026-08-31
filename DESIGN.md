@@ -363,10 +363,29 @@ under them and told to reuse one rather than start a second for the same thing. 
 merge across files, so a `## Windows` it wrote lands under the shipped `## Windows` in
 `os-navigation.md` rather than beside it.
 
-The cap moved with it. Counting back from the newest line no longer means anything once lines
-are filed rather than appended, so past `brain.max_memory_chars` the top of the file stops
-being read. It is a rougher rule than the old one and it is honest about what it is: the file
-is markdown, and a section that has stopped earning its keep is deleted by deleting it.
+The cap moved with it, and then changed shape. Reading as much of the file as fits sounds
+kinder than refusing to read it, and it is not: the top is where the oldest and best worn
+lessons are, so losing that end quietly is how a stale duplicate further down gets believed
+instead. Not hypothetically - a note saying `start teams` works had been learned twice, the
+correct version first, and JARVIS acted on the wrong copy and spent four tool calls failing
+to open Teams while the right one sat above the cut. So it is all of it or none of it,
+`brain.max_memory_chars` is 20,000 rather than 4,000, and going over it is an error in red at
+startup rather than nothing at all. The cap is there to catch a file that has run away, not
+to ration what JARVIS is allowed to know.
+
+**Appending is not the same as remembering.** `remember()` only ever appends, which is right
+for a lesson learned in a turn and no use at all once the same fact has been learned three
+times in three wordings. The file had 124 bullets in it by the end of August, four of them
+about the same dog and two of them wrong about the name of the person at the desk, and every
+one was prompt paid on every call.
+
+So the idle pass got a second job. Once the looking back has written something, it takes the
+longest section, hands the model that section on its own, and asks for it back shorter -
+merge what repeats, drop what was only true at the time, invent nothing. One heading, because
+a whole file is more than one answer has room for and the longest is where the waste is. The
+rewrite only lands if it comes back shorter, parses under the same heading, and did not run
+out of tokens on the way: it is the one operation here that can lose a line, so it is the one
+that has to earn it.
 
 **Reasoning and the answer share one budget, which is how a turn ends in silence.** The worst
 failure so far had no symptom at all: `brain.max_tokens` was 600, sized for a forty word

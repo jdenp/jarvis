@@ -85,7 +85,7 @@
     "memories_file": "context/memories/memories.md",
     "consolidate": true,
     "settle_seconds": 60.0,
-    "max_memory_chars": 4000,
+    "max_memory_chars": 20000,
     "system_prompt_file": ""
   },
   "log_level": "INFO",
