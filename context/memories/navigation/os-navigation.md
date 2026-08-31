@@ -84,6 +84,14 @@ for whoever opens the file.
 - Look before acting and again afterwards. Anything you do redraws something and
   the numbers move; a number from the scan before is refused rather than
   clicked, but a refusal still costs a call.
+- Terminal windows are the hard case and there is usually more than one open.
+  The title does not settle which is which - several are the same word, and
+  Claude Code renames its own to whatever session is selected - and the
+  accessibility scan carries no text out of any of them, focused or not. So
+  read one before doing anything to it: a screenshot, or a shell command
+  against whatever it is running. Choosing by title has picked the wrong
+  window, and typing into the wrong terminal is not something a later look
+  can undo.
 - Some windows report a full tree of coordinates while minimised, left over from
   wherever they were last drawn. Focusing one is the only thing that fixes it.
 - A window that reports elements but no targets is still building itself. Wait
