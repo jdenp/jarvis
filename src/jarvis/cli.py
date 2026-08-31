@@ -227,8 +227,7 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
         # is still loopback and still has no auth of its own, and whether that is
         # safe depends entirely on what somebody put in front of it.
         logger.info(
-            "Web app on http://%s:%d - loopback, and no auth of its own. "
-            "Reach it from a phone with `tailscale serve`, not by binding it wider.",
+            "Web app on http://%s:%d - loopback, no auth. `tailscale serve` reaches it.",
             config.service.host,
             config.service.port,
         )
@@ -236,8 +235,7 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
 
     if we_are_admin():
         logger.warning(
-            "Running as administrator. Elevated windows can be driven, and every command "
-            "run_command runs is an administrator command with nothing asked first."
+            "Running as administrator - every command runs elevated, nothing asked first."
         )
 
     from . import brain

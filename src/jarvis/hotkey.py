@@ -153,7 +153,6 @@ class HotkeyListener:
 
         self._watcher = threading.Thread(target=run, name="hotkey", daemon=True)
         self._watcher.start()
-        logger.info("Watching the %s key to toggle (works whatever has focus).", self._key)
 
     def _look(self, code: int) -> bool:
         """One read of the lamp. False when there is no point reading again.

@@ -6,10 +6,15 @@ A voice assistant for a Windows desktop that runs entirely on the machine it is 
 It listens, works out what you wanted, does it - clicking real buttons on real windows,
 running real commands - and says what happened. No wake word, no cloud, no API key.
 
+Designed running on a 12 GB RTX 4070 Ti with Qwen3.6-35B-A3B. More setup details in
+[`docs/example-configuration.md`](docs/example-configuration.md).
+
 **The reply is the speech.** There is no tool for talking, so there is nothing to forget:
 what the model writes is what comes out of the speakers.
 
 **Windows only.** The ears would port; the hands are UI Automation and `SendInput`.
+
+![JARVIS starting up and answering in the terminal](docs/images/startup.png)
 
 ## Setup
 

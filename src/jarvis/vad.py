@@ -116,6 +116,10 @@ class SileroDetector:
         return self._active
 
 
+# Said once a run: two microphones are built at startup, on the same settings.
+_announced = False
+
+
 def build_detector(config: AudioConfig | None = None):
     """Construct the detector named by ``config.vad``, falling back if asked."""
     config = config or AudioConfig()
@@ -133,9 +137,12 @@ def build_detector(config: AudioConfig | None = None):
             raise
         logger.warning("Silero is unavailable (%s), falling back to loudness.", exc)
         return EnergyDetector(config)
-    logger.info(
-        "Speech detection: silero, threshold %.2f, holding to %.2f.",
-        config.vad_threshold,
-        config.vad_threshold - config.vad_hysteresis,
-    )
+    global _announced
+    if not _announced:
+        _announced = True
+        logger.info(
+            "Speech detection: silero, threshold %.2f, holding to %.2f.",
+            config.vad_threshold,
+            config.vad_threshold - config.vad_hysteresis,
+        )
     return detector
