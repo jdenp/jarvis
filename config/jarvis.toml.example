@@ -45,16 +45,17 @@ pause_quiet_fraction = 0.85
 # note that a reply starting inside this window is dropped.
 echo_guard_seconds = 0.5
 # Full duplex: the microphone stays open through a reply, so it can be cut off
-# mid sentence. Off, because on speakers it transcribes itself - there is no echo
-# cancellation here and the only defence is the text comparison in echo.py, which
-# a long reply has already beaten once. On headphones there is nothing to hear,
-# so turn it on there. Talking over JARVIS while it is thinking works either way;
-# this only covers the seconds a reply is actually being spoken.
+# mid sentence. On, now that echo_cancellation below takes this machine's own
+# output back out of this microphone - the reply goes to the speakers like
+# anything else, so it is cancelled like anything else. It was off for a long
+# time because on speakers the microphone transcribed the reply, and the only
+# defence was the text comparison in echo.py, which a long reply had beaten.
+# Turn it off with cancellation off. Talking over JARVIS while it is thinking
+# works either way; this only covers the seconds a reply is being spoken.
 #
-# Where it starts rather than where it stays. Headphones go on and come off
-# during a day, so holding the hotkey flips it, as does the headphone button on
-# the web app.
-listen_while_speaking = false
+# Where it starts rather than where it stays: holding the hotkey flips it, as
+# does the button on the web app.
+listen_while_speaking = true
 # Subtract this machine's own output from this microphone, so a video, a game
 # or JARVIS's own voice on the speakers is not transcribed as though somebody
 # said it. WASAPI hands back the mix going to the speakers and WebRTC's AEC3

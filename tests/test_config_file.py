@@ -154,7 +154,8 @@ def test_no_config_file_means_everything_is_active():
     config = Config.load(path=None, environ={})
     assert config.screen.control is True, "clicking and typing, not only looking"
     assert config.screen.marks_file, "the marked screenshot has somewhere to go"
-    assert config.audio.listen_while_speaking is False, "half duplex, so it cannot hear itself"
+    assert config.audio.echo_cancellation is True, "it does not transcribe the speakers"
+    assert config.audio.listen_while_speaking is True, "so it can be interrupted"
     assert config.service.hotkey, "the toggle key is bound"
     assert config.service.start_webapp is True, "a phone can be the microphone"
 

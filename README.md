@@ -63,10 +63,12 @@ every utterance to `logs/heard.jsonl`.
   the desk only: a phone on the web app keeps hearing, so you can leave the room muted and
   still talk to it from the next one. Or just ask - "stop listening, I'm on a call".
 
-- **Hold Num Lock for headphone mode**, which leaves the microphone open while JARVIS is
-  talking so you can cut a reply off mid sentence. Off on speakers, where it hears itself and
-  once answered its own weather forecast. `audio.listen_while_speaking` is where it starts;
-  the key moves it, and so does the button on the web app.
+- **The microphone stays open while JARVIS talks**, so you can cut a reply off mid sentence.
+  This used to be off - on speakers it heard itself, and once answered its own weather
+  forecast - and it is on now because `audio.echo_cancellation` takes this machine's own
+  output back out of the microphone, and a reply goes to the speakers like anything else.
+  `audio.listen_while_speaking` is where it starts; **holding Num Lock** moves it, and so
+  does the button on the web app.
 
 - **A phrase ends after 1.2s of quiet** (`audio.pause_threshold`), set high on purpose:
   being cut off mid sentence is worse than waiting.
@@ -82,7 +84,7 @@ every utterance to `logs/heard.jsonl`.
 
 JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
 the reply comes back through the phone rather than out of the speakers at the desk. There is a
-text box for when you cannot talk, a microphone picker, a headphone mode checkbox, the same
+text box for when you cannot talk, a microphone picker, a listen-while-speaking checkbox, the same
 live line the terminal draws, and the tool calls underneath - tap one for the whole of it. On
 by default (`service.start_webapp`).
 

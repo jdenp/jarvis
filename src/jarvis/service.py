@@ -190,7 +190,8 @@ class VoiceService:
         self._page_seen = 0.0
         self._page_left = 0.0
         self._echo = EchoGuard()
-        # Where headphone mode starts. It moves, so it cannot live in the config.
+        # Where listen_while_speaking starts. It moves, so it cannot live in the
+        # config - the hotkey held down and the button on the page both flip it.
         self._headphones = threading.Event()
         if config.audio.listen_while_speaking:
             self._headphones.set()
@@ -464,11 +465,14 @@ class VoiceService:
 
         `audio.listen_while_speaking` says where this starts and this is the
         same switch with a key and a button on it, because which answer is
-        right changes during the day rather than between installs. On
-        headphones there is nothing for the microphone to hear, so a reply can
-        be talked over mid sentence. On speakers it hears itself, and the only
-        thing between that and JARVIS answering its own voice is the text
-        comparison in echo.py, which has been beaten once already.
+        right changes during the day rather than between installs.
+
+        It used to be about headphones: on speakers the microphone heard the
+        reply and the only thing between that and JARVIS answering its own
+        voice was the text comparison in echo.py, which a long reply had
+        already beaten. With `audio.echo_cancellation` on it is not about
+        headphones any more - the reply goes to the speakers like anything
+        else, so it is cancelled like anything else.
 
         Nothing is unmuted here. A reply already being spoken was started on the
         old answer and finishes on it, which is a second or two rather than a
@@ -478,11 +482,11 @@ class VoiceService:
             self._headphones.set()
         else:
             self._headphones.clear()
-        logger.info("Headphone mode %s.", "on" if on else "off")
+        logger.info("listen_while_speaking %s.", "on" if on else "off")
         self.ui.note(
-            "Headphone mode on - talk over me and I stop."
+            "Listening while I talk - say something and I stop."
             if on
-            else "Headphone mode off - this microphone shuts while I talk."
+            else "Not listening while I talk - this microphone shuts until I finish."
         )
         return on
 

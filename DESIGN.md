@@ -824,18 +824,24 @@ it can only ever make things quieter. Every clip is therefore scaled so its loud
 sits just under full scale before the volume setting is applied - capped at four times, so
 that a clip which is quiet because it is quiet does not come back as amplified noise.
 
-**Headphone mode is a switch, not a setting.** Whether the microphone can be left open through
-a reply depends on whether there are headphones on, and that changes several times a day -
-which is not a thing a config file read at startup can follow. `audio.listen_while_speaking` is
-now where it starts rather than where it stays: holding the hotkey flips it, the web app has a
-button for it, and `POST /headphones` is the same switch for anything else. It lives on the
-service rather than in the config because the config is frozen and should stay that way - a
-setting that rewrites itself is a setting nobody can predict.
+**Listening while speaking is a switch, not a setting.** Whether the microphone can be left
+open through a reply used to depend on whether there were headphones on, and that changes
+several times a day - which is not a thing a config file read at startup can follow.
+`audio.listen_while_speaking` is where it starts rather than where it stays: holding the
+hotkey flips it, the web app has a button for it, and `POST /headphones` is the same switch
+for anything else. It lives on the service rather than in the config because the config is
+frozen and should stay that way - a setting that rewrites itself is a setting nobody can
+predict.
 
 It reads as one key doing two unrelated things and it is really one question asked twice: the
 tap says nothing in this room should be heard, and the hold says everything in it should be,
-including while JARVIS is talking. The moment you want the second one is the moment you have
-just put headphones on, which is not a moment anybody spends in a config file.
+including while JARVIS is talking.
+
+It defaults on now, and it stopped being about headphones at all: echo cancellation takes
+this machine's own output back out of this microphone, and JARVIS's own voice goes to the
+speakers like any other sound, so it is cancelled like any other sound. The endpoint is
+still called `/headphones` because renaming a wire protocol to fix a name is not worth the
+breakage, but nothing a user reads says headphones any more.
 
 **Num Lock is a key on the desk, so it shuts the desk.** It used to pause the transcript,
 which is every source at once - so leaving the house with JARVIS muted took the phone down

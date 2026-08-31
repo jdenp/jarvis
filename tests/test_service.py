@@ -166,8 +166,9 @@ def waited(until, seconds: float = 2.0) -> bool:
 def half_duplex(**overrides) -> tuple[VoiceService, FakeMicrophone, FakeSpeech]:
     """A service that mutes while speaking.
 
-    Half duplex is the default, and this stays explicit anyway: anything testing
-    the echo gate should say which mode it means rather than inherit it.
+    Not the default any more - echo cancellation took this machine's own voice
+    back out of its own microphone, so the microphone can stay open. Anything
+    testing the echo gate says which mode it means rather than inheriting it.
     """
     audio = replace(Config().audio, listen_while_speaking=False, **overrides)
     return make_service(audio=audio)
@@ -382,12 +383,12 @@ def test_listen_while_speaking_leaves_the_microphone_open():
     assert speech.said == ["Talking over myself."]
 
 
-def test_headphone_mode_starts_where_the_config_says():
+def test_listening_while_speaking_starts_where_the_config_says():
     service, _microphone, _speech = make_service()
-    assert service.headphones is False, "speakers, so it cannot hear itself"
-    wearing = replace(Config().audio, listen_while_speaking=True)
-    service, _microphone, _speech = make_service(audio=wearing)
-    assert service.headphones is True
+    assert service.headphones is True, "on, because the reply is cancelled too"
+    shut = replace(Config().audio, listen_while_speaking=False)
+    service, _microphone, _speech = make_service(audio=shut)
+    assert service.headphones is False
 
 
 def test_headphone_mode_can_be_switched_without_a_restart():
@@ -403,10 +404,10 @@ def test_headphone_mode_can_be_switched_without_a_restart():
     assert speech.muted_while_speaking == [False, True]
 
 
-def test_holding_the_key_switches_headphone_mode(monkeypatch):
+def test_holding_the_key_switches_listening_while_speaking(monkeypatch):
     """A tap shuts the microphone and the same key held is the other thing,
-    because the moment you want it is the moment you have just put headphones
-    on and are not sitting in front of a config file."""
+    because the moment you want it is a moment you are not sitting in front of
+    a config file."""
     captured = {}
 
     class FakeListener:
@@ -420,10 +421,11 @@ def test_holding_the_key_switches_headphone_mode(monkeypatch):
     service, microphone, _speech = make_service()
     service._start_hotkey()
 
+    was = service.headphones
     captured["on_hold"]()
-    assert service.headphones is True
+    assert service.headphones is not was
     captured["on_hold"]()
-    assert service.headphones is False
+    assert service.headphones is was
     assert microphone.paused is False, "and the microphone was never shut"
 
 
@@ -498,11 +500,20 @@ def test_status_includes_paused():
     assert status["paused"] is False
 
 
-def test_half_duplex_is_the_default():
-    """The microphone shuts while JARVIS talks, because on speakers it hears
-    its own voice and only echo.py stands between that and it answering
-    itself."""
+def test_full_duplex_is_the_default():
+    """The microphone stays open while JARVIS talks, so a reply can be cut off
+    mid sentence. It used to be the other way round because on speakers the
+    microphone heard the reply; echo cancellation is what changed that - the
+    reply goes to the speakers like anything else, so it is cancelled too."""
     service, _microphone, speech = make_service()
+    assert service.headphones is True
+    service.say("Opening it now.")
+    assert speech.muted_while_speaking == [False]
+
+
+def test_half_duplex_still_shuts_the_microphone_when_it_is_asked_to():
+    """For a machine where cancellation is off or does not work."""
+    service, _microphone, speech = half_duplex()
     assert service.headphones is False
     service.say("Opening it now.")
     assert speech.muted_while_speaking == [True]
@@ -731,8 +742,10 @@ def test_the_page_does_not_listen_without_a_queue_to_share(caplog):
 
 def test_the_phone_is_muted_while_jarvis_talks_as_well(app):
     """A phone in the same room hears the reply coming out of the desk speakers
-    as clearly as the desk does."""
+    as clearly as the desk does. Only when the desk is being muted at all -
+    cancellation is the desk's, and a phone is not behind it."""
     service, desk, _ = app
+    service.wear_headphones(False)
     phone = FakeMicrophone()
     service.live.web = phone
 
@@ -919,9 +932,10 @@ def test_headphone_mode_can_be_switched_from_the_page(app):
 def test_an_empty_headphone_request_is_a_toggle(app):
     """Which is what the key does, so curl may as well say the same."""
     service, _microphone, port = app
-    assert post(port, "/headphones").json() == {"headphones": True}
-    assert post(port, "/headphones").json() == {"headphones": False}
-    assert service.headphones is False
+    was = service.headphones
+    assert post(port, "/headphones").json() == {"headphones": not was}
+    assert post(port, "/headphones").json() == {"headphones": was}
+    assert service.headphones is was
 
 
 def test_a_headphone_request_that_makes_no_sense_is_refused(app):

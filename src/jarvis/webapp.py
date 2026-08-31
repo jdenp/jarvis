@@ -209,7 +209,7 @@ PAGE = """<!doctype html>
   <label id="rawline"><input type="checkbox" id="raw">
     Raw audio (no echo cancellation or noise gating)</label>
   <label id="phoneline"><input type="checkbox" id="phones">
-    Headphone mode - listen while speaking</label>
+    Listen while speaking - interrupt me mid sentence</label>
   <button id="mic">Mic off</button>
   <div id="meter"><div id="level"></div></div>
   <div id="sent"></div>

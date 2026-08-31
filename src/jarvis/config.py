@@ -69,21 +69,21 @@ class AudioConfig:
     # How long after JARVIS stops talking to keep ignoring the microphone.
     echo_guard_seconds: float = 0.5
     # Full duplex: the microphone stays open while JARVIS talks, so a reply can
-    # be cut off mid sentence - late, once the phrase has ended, rather than on
-    # the first syllable. OFF, because on speakers it transcribes itself -
-    # there is no acoustic echo cancellation here, and the only thing between
-    # that and JARVIS answering its own voice is the text comparison in echo.py,
-    # which has already been beaten once by a long reply. On headphones there is
-    # nothing to hear and this is free; turn it on there.
+    # be cut off mid sentence. On, now that `echo_cancellation` takes this
+    # machine's own output back out of this microphone - JARVIS's own voice goes
+    # to the speakers like anything else, so it is cancelled like anything else.
+    # It was off for a long time because on speakers it transcribed itself, and
+    # the only thing standing between that and JARVIS answering its own voice
+    # was the text comparison in echo.py, which a long reply had already beaten.
     #
-    # It costs less than it sounds. Talking over JARVIS while it is thinking
-    # still works either way - the microphone is only shut while a reply is
-    # actually being spoken, which is seconds at the end of a turn.
+    # Turn it off with cancellation off, or on a machine where cancellation does
+    # not work - it costs less than it sounds, because talking over JARVIS while
+    # it is thinking works either way. The microphone is only shut while a reply
+    # is actually being spoken, which is seconds at the end of a turn.
     #
-    # Where it starts rather than where it stays: whether headphones are on is
-    # a thing that changes during the day, so holding the hotkey or pressing the
-    # headphone button on the web app flips it for the session.
-    listen_while_speaking: bool = False
+    # Where it starts rather than where it stays. Holding the hotkey or pressing
+    # the button on the web app flips it for the session.
+    listen_while_speaking: bool = True
     # Subtract this machine's own output from this microphone, so a video, a
     # game or JARVIS's own voice on the speakers is not transcribed as if
     # somebody said it. WASAPI hands back the mix going to the speakers and

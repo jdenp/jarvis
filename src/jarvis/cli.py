@@ -215,8 +215,8 @@ def run_serve(config: Config, args: argparse.Namespace, logger) -> int:
 
         if lock_code(key):
             logger.info(
-                "%s shuts this microphone. Hold it for headphone mode (now %s) so "
-                "JARVIS can be interrupted mid-speech.",
+                "%s shuts this microphone. Hold it to listen while speaking (now %s), "
+                "so JARVIS can be interrupted mid-speech.",
                 key.title(),
                 "on" if service.headphones else "off",
             )
