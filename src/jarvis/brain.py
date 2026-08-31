@@ -149,7 +149,10 @@ Already written down:
 
 # Asked on the same idle pass, once something has been added. Deliberately not
 # asked to think about whether the lines are true - only whether the same thing
-# is written down more than once, which is a question with a right answer.
+# is written down more than once, which is a question with a right answer. The
+# paragraph about observations is there because the first hand written pass at
+# this turned four notes about Teams into 'take a screenshot instead', and JARVIS
+# stopped reading the accessibility tree in Teams at all.
 COMPACT = """/no_think
 Here is one heading from your own notes. Write it out again, shorter.
 
@@ -160,6 +163,11 @@ was only true at the time - what was open, what was running, what somebody was
 in the middle of. Keep every distinct fact: a route that works, the name a
 program is really installed under, something they told you about themselves.
 Invent nothing, and keep the order they are in.
+
+Leave every line as the observation it already is. A note that something is true
+must not come back as an instruction to always do something: one window whose
+text does not show up is a fact about that window, and rewriting it as advice
+turns it into a habit that fires everywhere.
 
 You read this list before every answer, so a fact written three ways costs you
 three times and teaches you once. Answer with the heading and its bullets and

@@ -387,6 +387,13 @@ rewrite only lands if it comes back shorter, parses under the same heading, and 
 out of tokens on the way: it is the one operation here that can lose a line, so it is the one
 that has to earn it.
 
+It is also told to leave every line as the observation it already is, which was not obvious
+until the first pass at this - done by hand, not by the model - merged four notes about Teams
+into "take a screenshot and read that instead". JARVIS stopped scanning the accessibility
+tree in Teams altogether and started photographing the chat list, which is the one screen
+that cannot answer "read my unread messages". A fact rewritten as advice is a habit, and a
+habit fires everywhere rather than on the window it was learned from.
+
 **Reasoning and the answer share one budget, which is how a turn ends in silence.** The worst
 failure so far had no symptom at all: `brain.max_tokens` was 600, sized for a forty word
 reply, and a hard think produced 2473 characters of reasoning that stopped mid sentence with
