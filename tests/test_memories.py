@@ -10,7 +10,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 from jarvis.config import Config
-from jarvis.memories import as_prompt, bullets, load, remember, rewrite, sections
+from jarvis.memories import (
+    as_prompt,
+    assimilate,
+    bullets,
+    load,
+    remember,
+    rewrite,
+    sections,
+)
 
 
 def known(root, limit=2000):
@@ -153,6 +161,40 @@ def test_a_rewritten_file_is_still_one_somebody_can_read(tmp_path):
     rewrite(path, "Windows", ["One, tidied"])
 
     assert "- One, tidied\n\n## Personal" in path.read_text(encoding="utf-8")
+
+
+def test_a_session_is_folded_into_the_file_that_outlives_it(tmp_path):
+    """A file merge, not a model call: both halves use the same headings, so a
+    line filed under `## Windows` this afternoon goes under `## Windows`."""
+    session, disk = tmp_path / "session.md", tmp_path / "memories.md"
+    remember(disk, "Windows", "Alt tab does a thing")
+    remember(session, "Windows", "Alt tab does another thing")
+    remember(session, "Personal", "They are left handed")
+
+    assert assimilate(session, disk) == 2
+    assert dict(sections(disk)) == {
+        "Windows": ["Alt tab does a thing", "Alt tab does another thing"],
+        "Personal": ["They are left handed"],
+    }
+    assert not session.exists(), "and the session file is spent"
+
+
+def test_folding_in_a_line_that_is_already_there_does_not_double_it(tmp_path):
+    session, disk = tmp_path / "session.md", tmp_path / "memories.md"
+    remember(disk, "Windows", "Alt tab does a thing")
+    remember(session, "Windows", "Alt tab does a thing")
+
+    assimilate(session, disk)
+    assert dict(sections(disk)) == {"Windows": ["Alt tab does a thing"]}
+
+
+def test_nothing_to_fold_in_leaves_everything_alone(tmp_path):
+    session, disk = tmp_path / "session.md", tmp_path / "memories.md"
+    remember(disk, "Windows", "Alt tab does a thing")
+
+    assert assimilate(session, disk) == 0
+    assert assimilate(disk, disk) == 0, "and one file is never folded into itself"
+    assert dict(sections(disk)) == {"Windows": ["Alt tab does a thing"]}
 
 
 def test_nothing_learned_yet_adds_nothing_to_the_prompt():

@@ -157,7 +157,11 @@ def looking_back(tmp_path, *replies, box=None) -> Brain:
     """One that does look back, writing somewhere harmless."""
     config = replace(
         Config(),
-        brain=replace(Config().brain, memories_file=str(tmp_path / "memories.md")),
+        brain=replace(
+            Config().brain,
+            memories_file=str(tmp_path / "memories.md"),
+            session_memories_file=str(tmp_path / "session.md"),
+        ),
     )
     return Brain(
         config,
@@ -1785,6 +1789,58 @@ def test_a_memory_file_too_big_to_read_is_not_read_at_all(tmp_path):
     it.settings = replace(it.settings, max_memory_chars=100)
     assert it.memories_too_big() > 100
     assert "Alt tab" not in it.system_prompt()
+
+
+def test_what_it_writes_down_mid_turn_goes_at_the_end_of_the_prompt(tmp_path):
+    """The system prompt is the front of the cache, so changing it costs the
+    server the whole conversation again - a minute, measured. remember() writes
+    to a file at the other end instead, where a change costs what follows it."""
+    from jarvis.memories import remember
+
+    it = looking_back(tmp_path, said("Noted, sir."))
+    front = it.messages[0]["content"]
+    remember(tmp_path / "session.md", "Windows", "Alt tab does a thing")
+    it.turn(["hello"])
+
+    assert it.messages[0]["content"] == front, "the front of the prompt did not move"
+    assert "Alt tab does a thing" in it.model.seen[-1][-1]["content"], "it went on the end"
+    assert "Alt tab does a thing" not in str(it.messages), "and was not kept in the history"
+
+
+def test_the_learning_phase_folds_the_session_into_the_file_that_outlives_it(tmp_path):
+    """Where the one expensive thing it causes is paid by nobody."""
+    from jarvis.memories import remember, sections
+
+    it = looking_back(tmp_path, said("Done, sir."), said("Nothing worth keeping."))
+    remember(tmp_path / "session.md", "Windows", "Alt tab does a thing")
+    it.turn(["do something"])
+    quiet(it)
+
+    assert dict(sections(tmp_path / "memories.md")) == {"Windows": ["Alt tab does a thing"]}
+    assert not (tmp_path / "session.md").exists()
+    assert "Alt tab does a thing" in it.messages[0]["content"], "and it is at the front now"
+    assert it.model.preloads == 1, "and the new prompt was warmed while the room was quiet"
+
+
+def test_a_session_a_crash_left_behind_is_folded_in_before_the_first_prompt(tmp_path):
+    from jarvis.memories import remember, sections
+
+    remember(tmp_path / "session.md", "Windows", "Alt tab does a thing")
+    it = looking_back(tmp_path, said("Hello, sir."))
+    assert it.absorb() == 1
+    assert dict(sections(tmp_path / "memories.md")) == {"Windows": ["Alt tab does a thing"]}
+    assert "Alt tab does a thing" in it.messages[0]["content"]
+
+
+def test_the_learning_phase_carries_tool_schemas_it_will_never_call(tmp_path):
+    """Not to use one. llama.cpp renders the schemas into the front of the
+    prompt, so leaving them out is a different prompt from token zero and the
+    server reads the whole conversation again - which is what timed this out
+    three times in a fortnight."""
+    it = looking_back(tmp_path, said("Done, sir."), said("Nothing worth keeping."))
+    it.turn(["do something"])
+    quiet(it)
+    assert it.model.asked[-1][1] is True, "the same shape of request as a turn"
 
 
 def test_a_stalled_look_back_gives_up_on_its_own(tmp_path):

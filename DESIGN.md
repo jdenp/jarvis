@@ -394,6 +394,40 @@ tree in Teams altogether and started photographing the chat list, which is the o
 that cannot answer "read my unread messages". A fact rewritten as advice is a habit, and a
 habit fires everywhere rather than on the window it was learned from.
 
+**Two memory files, sorted by how often they change.** Every request llama-server gets is
+read left to right, and the note it keeps about token 9,000 is computed from the 8,999 in
+front of it. The cache is a chain: change one token near the front and every note after it
+is arithmetic that has to be done again. Here that is fifteen thousand tokens at about 227 a
+second, which is how "You're welcome, sir" came to take sixty-six seconds. The reasoning
+behind that answer was fifteen words long.
+
+What changed at the front was `memories.md`. It is rendered into the system prompt, `_answer`
+rebuilds `messages[0]` on every turn, and `remember()` had been called during the turn
+before. Both minute-long turns that afternoon sit directly behind a `remember()`.
+
+Moving the whole block to the end does not fix it. The conversation grows by a message a
+turn, so a block sitting behind it moves every turn and is re-read every turn - 3.5k tokens
+each time, trading one bad turn for every turn being mediocre. Splitting it does. The stable
+file stays at the very front, which is the best place in a prompt for something that never
+changes: read once, and every request afterwards rides on it for free. `remember()` writes
+to a small session file rendered at the end, where changing it costs only the tokens after
+it. The learning phase folds one into the other, rebuilds the prompt and warms it with a
+throwaway call, so the one unavoidable re-read lands in the minute when nobody is talking.
+
+Folding in costs no model call at all. Both halves use the same headings, so it is a merge -
+`## Windows` this afternoon goes under `## Windows`, `remember` refuses the repeats, and the
+compaction pass on the same idle minute tidies whatever is left.
+
+**The learning phase carries tool schemas it will never call.** The same cache seen from the
+other side. `Model.reply` only sets `payload["tools"]` when there are any, and llama.cpp
+renders the schemas into the front of the prompt - about 1.8k tokens of them. A call that
+drops them is a different prompt from token zero, so the server reads the entire
+conversation again before writing a word. The learning phase had thirty seconds to do that
+in, and timed out three times in a fortnight. It sends the schemas now, purely so the prefix
+matches, and the leash went to ninety seconds. `_final_word()` still drops them and still
+pays, because there it buys something: a last word that can call another tool is not a last
+word.
+
 **Reasoning and the answer share one budget, which is how a turn ends in silence.** The worst
 failure so far had no symptom at all: `brain.max_tokens` was 600, sized for a forty word
 reply, and a hard think produced 2473 characters of reasoning that stopped mid sentence with

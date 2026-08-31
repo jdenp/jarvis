@@ -83,6 +83,7 @@
     "shell_output_chars": 4000,
     "memories": true,
     "memories_file": "context/memories/memories.md",
+    "session_memories_file": "logs/session-memories.md",
     "consolidate": true,
     "settle_seconds": 60.0,
     "max_memory_chars": 20000,

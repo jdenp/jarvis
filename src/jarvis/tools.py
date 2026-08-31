@@ -763,7 +763,7 @@ def _memory_tools(config: Config) -> list[Tool]:
         return []
     from . import memories
 
-    path = memory_file(config)
+    path = session_file(config)
 
     def remember(heading: str, lesson: str) -> str:
         return memories.remember(path, heading, lesson, config.brain.max_memory_chars)
@@ -805,8 +805,17 @@ def _memory_tools(config: Config) -> list[Tool]:
 
 
 def memory_file(config: Config) -> Path:
-    """The file remember() writes to. Relative names sit under the project root."""
+    """The file a session's notes are folded into. Relative names sit under the
+    project root."""
     return under_root(config.brain.memories_file)
+
+
+def session_file(config: Config) -> Path:
+    """The file remember() writes to now, which is the one at the end of the
+    prompt. Falls back to the stable file when it is not configured.
+    """
+    named = config.brain.session_memories_file
+    return under_root(named) if named else memory_file(config)
 
 
 def under_root(named: str) -> Path:

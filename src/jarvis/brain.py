@@ -93,11 +93,13 @@ PER_SCAN = re.compile(r"\btargets?\s+(number\s+)?\d", re.IGNORECASE)
 # it in, and this is asked after everything JARVIS says.
 LOOK_BACK_TOKENS = 160
 
-# Longest the looking back may take before it is abandoned. Its own, and far
+# Longest the learning phase may take before it is abandoned. Its own, and far
 # under `brain.timeout_seconds`: this call happens on the listening thread, so
 # a stalled one is a JARVIS that hears nothing until it gives up. Three minutes
-# of that has happened, and nothing was learned at the end of it anyway.
-LOOK_BACK_SECONDS = 30.0
+# of that has happened, and nothing was learned at the end of it anyway. It was
+# 30s and timed out three times in a fortnight, every one of them a whole
+# conversation being read again rather than a model with nothing to say.
+LOOK_BACK_SECONDS = 90.0
 
 # How often the endpoint is asked whether it is up yet, while waiting for it at
 # startup, and how often that wait says so out loud. Every five seconds because
@@ -718,12 +720,60 @@ class Brain:
         path = self._written()[0]
         return memories.over_limit(memories.sections(path), self.settings.max_memory_chars)
 
+    def session_notes(self) -> str:
+        """The block at the end of the prompt: what this session wrote down.
+
+        Last on purpose. The stable file is at the very front, where a prompt
+        that never changes is read once and every request afterwards rides on it
+        for free. This half changes in the middle of a turn, and at the end a
+        change costs the handful of tokens after it rather than every note the
+        server has made about the whole conversation.
+        """
+        return memories.as_session(self._session_known())
+
+    def _session_known(self) -> memories.Groups:
+        """What this session has written down and not yet folded in."""
+        path = self._session_path()
+        if not path or not self.settings.memories:
+            return []
+        return memories.sections(path)
+
+    def _session_path(self) -> Path | None:
+        """Where remember() writes now, when that is a file of its own."""
+        path = tools.session_file(self.config)
+        return None if path == tools.memory_file(self.config) else path
+
+    def absorb(self) -> int:
+        """Fold this session's notes into the file that outlives it.
+
+        On the idle pass, and at startup for whatever a crash left behind. Both
+        are moments where the expensive part - a system prompt that has changed,
+        so a whole conversation the server has to read again - is paid by
+        nobody. Doing it mid turn is what used to put a minute in front of "You
+        are welcome, sir".
+        """
+        path = self._session_path()
+        if not path or not self.settings.memories:
+            return 0
+        moved = memories.assimilate(
+            path, tools.memory_file(self.config), self.settings.max_memory_chars
+        )
+        if moved:
+            self.messages[0] = {"role": "system", "content": self.system_prompt()}
+        return moved
+
     def _known(self) -> memories.Groups:
         """Every line of it, reference and learned, as the prompt will see it."""
         if not self.settings.memories:
             return []
         written = self._written()
-        return memories.load(written[0].parent, written, self.settings.max_memory_chars)
+        session = self._session_path()
+        return memories.load(
+            written[0].parent,
+            written,
+            self.settings.max_memory_chars,
+            ignore=[session] if session else (),
+        )
 
     def _written(self) -> tuple[Path, ...]:
         """The one file JARVIS adds to, which is the one that gets capped."""
@@ -819,7 +869,8 @@ class Brain:
         question is asked over a copy and the answer is thrown away.
         """
         self.ui.status("learning")
-        known = memories.as_lines(self._known()) or "- nothing yet"
+        seen = memories.merged(self._known(), self._session_known())
+        known = memories.as_lines(seen) or "- nothing yet"
         since = "exchange" if turns <= 1 else f"{turns} exchanges"
         asked = [
             *self.messages,
@@ -837,7 +888,7 @@ class Brain:
             # `/no_think` went in the prompt as well.
             reply = self.model.reply(
                 asked,
-                tools=None,
+                tools=self.toolbox.specs(),
                 limit=LOOK_BACK_TOKENS,
                 think=False,
                 stop=self.stopped.is_set,
@@ -846,11 +897,11 @@ class Brain:
         except Cancelled:
             return
         except Exception:
-            logger.exception("Looking back failed; carrying on without it.")
+            logger.exception("Learning phase failed; carrying on without it.")
             return
 
         if reply.thinking:
-            logger.info("looking back: %s", " ".join(reply.thinking.split()))
+            logger.info("learning: %s", " ".join(reply.thinking.split()))
         learned = [
             (heading, lesson)
             for heading, lessons in memories.sections_in(reply.text)
@@ -865,8 +916,16 @@ class Brain:
             logger.info("Learned under %s: %s", heading, lesson)
             memories.remember(path, heading, lesson, self.settings.max_memory_chars)
             wrote = True
-        if wrote:
+
+        moved = self.absorb()
+        if wrote or moved:
             self._compact(path)
+            # The file at the front of the prompt has changed, so every note the
+            # server made about this conversation is stale. Pay for that here,
+            # in the quiet, rather than in front of the next thing they say.
+            self.messages[0] = {"role": "system", "content": self.system_prompt()}
+            if self.settings.preload:
+                self.preload()
 
     def _compact(self, path: Path) -> None:
         """Merge the repeats out of the longest section, after something is added.
@@ -1038,8 +1097,11 @@ class Brain:
         the answer to work already done.
         """
         self.ui.status("thinking")
+        messages = self.messages
+        if notes := self.session_notes():
+            messages = [*messages, {"role": "system", "content": notes}]
         reply = self.model.reply(
-            self.messages,
+            messages,
             tools,
             limit=limit,
             watch=(lambda: self.voice.hear(0.0)) if tools else None,
@@ -1556,6 +1618,8 @@ def start(config: Config, service, voice=None, terminal=None) -> Brain:
         len(brain.toolbox.names),
         ", ".join(brain.toolbox.names),
     )
+    # Whatever a crash left behind, before the first prompt is built from it.
+    brain.absorb()
     if cost := brain.memories_too_big():
         logger.error(
             "Couldn't load %s, exceeded character limit (%d of %d).",

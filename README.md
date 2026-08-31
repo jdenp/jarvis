@@ -140,6 +140,11 @@ a file in. `brain.max_memory_chars` caps the grown one - over it, none of it is 
 says so in red at startup. When the room goes quiet it also rewrites its longest heading
 shorter, merging what it has written down more than once.
 
+What it writes down mid conversation lands in `logs/session-memories.md` first and is folded
+into the file above when the room goes quiet. That is about speed, not bookkeeping: the
+grown file sits at the front of the prompt, and editing the front of a prompt costs the
+model the whole conversation again - a minute here, measured, in front of a two word answer.
+
 ## The voice
 
 | `tts.engine` | What it is | Cost |

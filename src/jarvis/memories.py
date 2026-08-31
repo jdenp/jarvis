@@ -50,7 +50,12 @@ picks up about the person at it. Anything about one conversation does not.
 Groups = list[tuple[str, list[str]]]
 
 
-def load(root: Path, written: Sequence[Path] = (), limit: int = 2000) -> Groups:
+def load(
+    root: Path,
+    written: Sequence[Path] = (),
+    limit: int = 2000,
+    ignore: Sequence[Path] = (),
+) -> Groups:
     """Everything known, grouped by heading, ready for the prompt.
 
     Every markdown file under `root`, at any depth. The ones in `written` are
@@ -61,6 +66,10 @@ def load(root: Path, written: Sequence[Path] = (), limit: int = 2000) -> Groups:
 
     A written file over the cap is left out altogether - see `over_limit`.
 
+    `ignore` is the session's own notes, which belong at the end of the prompt
+    and would be in it twice if this picked them up as well. Named rather than
+    kept out by where they live, because where they live is a config option.
+
     Only the bullets and the headings over them. The prose around them is for
     whoever opens the file, and would be tokens spent saying nothing to a model.
     """
@@ -68,9 +77,12 @@ def load(root: Path, written: Sequence[Path] = (), limit: int = 2000) -> Groups:
         return []
 
     grown = {path.resolve() for path in written}
+    skip = {path.resolve() for path in ignore}
     reference: Groups = []
     learned: Groups = []
     for found in sorted(root.rglob("*.md")):
+        if found.resolve() in skip:
+            continue
         groups = sections(found)
         if found.resolve() in grown:
             if over_limit(groups, limit):
@@ -261,6 +273,40 @@ def as_prompt(groups: Groups) -> str:
     if not groups:
         return ""
     return "WHAT YOU HAVE LEARNED SO FAR:\n" + as_lines(groups)
+
+
+def as_session(groups: Groups) -> str:
+    """The same for the block at the end of the prompt rather than the front."""
+    if not groups:
+        return ""
+    return (
+        "WHAT YOU HAVE WRITTEN DOWN SINCE THIS SESSION STARTED. It is not in the "
+        "list above yet - it is folded in when the room goes quiet.\n" + as_lines(groups)
+    )
+
+
+def assimilate(session: Path, disk: Path, limit: int = 2000) -> int:
+    """Fold what one session wrote into the file that outlives it.
+
+    A file merge and not a model call, because both halves use the same
+    headings: a lesson filed under `## Windows` this afternoon goes under
+    `## Windows`. `remember` refuses the repeats, and tidying what is left is
+    the compaction pass on the same idle minute.
+    """
+    if session == disk:
+        return 0
+    moved = 0
+    for heading, lessons in sections(session):
+        for lesson in lessons:
+            remember(disk, heading, lesson, limit)
+            moved += 1
+    if moved:
+        logger.info("Folded %d session note(s) into %s.", moved, disk.name)
+        try:
+            session.unlink()
+        except OSError as exc:
+            logger.warning("Could not clear %s - %s", session, exc)
+    return moved
 
 
 def as_lines(groups: Groups) -> str:

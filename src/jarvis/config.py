@@ -383,6 +383,14 @@ class BrainConfig:
     # the one that ships. Only this one grows on its own, so only this one is
     # capped.
     memories_file: str = "context/memories/memories.md"
+    # Where remember() writes during a session. Kept out of context/memories,
+    # because everything under there is read into the front of the prompt where
+    # a prompt that never changes is cached once and ridden for free - and this
+    # half changes mid turn. It goes at the end instead, where changing it costs
+    # the few tokens after it rather than every note the server has made about
+    # the conversation, and it is folded into the file above when the room goes
+    # quiet. Empty writes straight to the file above, the way it used to.
+    session_memories_file: str = "logs/session-memories.md"
     # Once the conversation has gone quiet, JARVIS looks back over everything
     # said since the last time it did and writes down whatever was worth
     # keeping. The only way a lesson outlives the conversation it was learned

@@ -273,6 +273,14 @@ shell_output_chars = 4000
 # context/memories is read, so os-navigation.md beside it is read too.
 memories = true
 memories_file = "context/memories/memories.md"   # under the project root, or absolute
+# Where remember() writes during a session, before the learning phase folds it
+# into the file above. Deliberately not under context/memories: everything
+# there goes at the front of the prompt, which is the right place for something
+# that never changes and the worst place for something that changes mid turn -
+# a changed front means the server reads the whole conversation again. This
+# half goes at the end instead, where a change costs the tokens after it.
+# Empty writes straight to the file above, the way it used to.
+session_memories_file = "logs/session-memories.md"
 # Once the conversation has gone quiet, JARVIS looks back over everything said
 # since the last time it did and writes down whatever was worth keeping. The only
 # way a lesson outlives the conversation it was learned in without somebody
