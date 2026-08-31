@@ -1,6 +1,6 @@
 [project]
 name = "jarvis"
-version = "0.19.0"
+version = "0.20.0"
 description = "Jarvis - A local voice and computer-use assistant for Windows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +31,11 @@ kokoro = ["kokoro-onnx>=0.4", "onnxruntime>=1.20"]
 # utterance and costs ~340MB of VRAM, most of it the CUDA context rather than
 # the model - so it is worth it only if the GPU is otherwise idle.
 cuda = ["nvidia-cublas-cu12>=12.4", "nvidia-cudnn-cu12>=9,<10"]
+# Subtracting this machine's own output from the microphone, so a video playing
+# on the speakers is not transcribed as if somebody said it. PyAudioWPatch is a
+# PyAudio fork that adds WASAPI loopback, which is how the reference signal is
+# captured; it sits alongside pyaudio rather than replacing it.
+echo = ["PyAudioWPatch>=0.2.12", "pywebrtc-audio>=0.1"]
 # Global hotkey support (Pause/Break key to pause transcription). Optional -
 # install with `uv sync --extra hotkey` if you want the shortcut.
 hotkey = ["keyboard>=0.13"]

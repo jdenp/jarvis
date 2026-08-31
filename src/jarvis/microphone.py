@@ -27,6 +27,7 @@ from types import TracebackType
 
 import speech_recognition as sr
 
+from . import aec
 from .config import AudioConfig
 from .vad import SAMPLE_RATE, SAMPLES, build_detector
 
@@ -282,6 +283,21 @@ class Microphone:
         PhraseEnd and because gating per buffer is simpler than working out
         after the fact when a delivered phrase was recorded.
         """
+        # The desk only. `source` is given for the web app, whose microphone is
+        # in whatever room the phone is in - not the one these speakers are in.
+        cancelling = (
+            None
+            if self._given
+            else aec.canceller(self.config, source.SAMPLE_RATE, source.SAMPLE_WIDTH)
+        )
+        try:
+            self._read(source, cancelling)
+        finally:
+            if cancelling:
+                cancelling.stop()
+
+    def _read(self, source, cancelling) -> None:
+        """The loop itself, so the canceller has somewhere to be closed."""
         seconds_per_buffer = source.CHUNK / source.SAMPLE_RATE
         if not self.detector.calibrates and source.SAMPLE_RATE != SAMPLE_RATE:
             logger.warning(
@@ -307,6 +323,13 @@ class Microphone:
                 self.detector.reset()
                 pause, recorded, spoken = None, 0, 0
                 continue
+
+            # Both the decision and the audio, because the raw buffer still has
+            # the speakers in it and Whisper transcribed some of a video out of
+            # one. See the note in aec.py: the trade is word errors on a person
+            # talking over the speakers, and it is the right way round.
+            if cancelling is not None:
+                buffer = cancelling.clean(buffer)
 
             speech = self.detector.is_speech(buffer)
             frames.append(buffer)

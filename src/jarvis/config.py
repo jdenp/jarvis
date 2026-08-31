@@ -84,6 +84,32 @@ class AudioConfig:
     # a thing that changes during the day, so holding the hotkey or pressing the
     # headphone button on the web app flips it for the session.
     listen_while_speaking: bool = False
+    # Subtract this machine's own output from this microphone, so a video, a
+    # game or JARVIS's own voice on the speakers is not transcribed as if
+    # somebody said it. WASAPI hands back the mix going to the speakers and
+    # WebRTC's AEC3 learns the path from them to here - measured on this desk,
+    # 13 dB, which is the difference between Whisper writing down a whole video
+    # and writing down nothing. Needs `uv sync --extra echo`; without it this
+    # says so once and carries on. The desk microphone only: a phone on the web
+    # app is in a different room and these speakers are not its echo.
+    echo_cancellation: bool = False
+    # How far above the leftover echo something has to be before it counts as a
+    # person, while the speakers are playing. Cancelling alone is a subtraction
+    # and cannot touch what the speakers add themselves - they distort when they
+    # are loud - so what survives is gated as well. 3 is about 10 dB. Higher is
+    # stricter and will start eating quiet speech over loud audio; 0 turns the
+    # gate off and leaves cancelling on its own.
+    echo_gate_margin: float = 0.0
+    # Seconds the reference is held back before it is cancelled against, which
+    # has to land it inside the canceller's filter - about 100ms of reach. Too
+    # little and the reference arrives before the echo, too much and it arrives
+    # after; both measure as almost no cancellation at all. It is a straight
+    # line, 10ms of this for 10ms of delay, and it depends on how much latency
+    # this machine's capture paths add. Measured on one desk: 0.12 put the
+    # reference 64ms ahead of the microphone and cancelled 34 dB, where 0.40 put
+    # it 219ms behind and cancelled 1 dB. Turn `log_level` to DEBUG to see what
+    # it is achieving.
+    echo_reference_delay: float = 0.12
 
 
 @dataclass(frozen=True)

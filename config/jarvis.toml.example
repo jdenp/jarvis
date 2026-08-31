@@ -55,6 +55,31 @@ echo_guard_seconds = 0.5
 # during a day, so holding the hotkey flips it, as does the headphone button on
 # the web app.
 listen_while_speaking = false
+# Subtract this machine's own output from this microphone, so a video, a game
+# or JARVIS's own voice on the speakers is not transcribed as though somebody
+# said it. WASAPI hands back the mix going to the speakers and WebRTC's AEC3
+# learns the path from them to here. Measured on one desk: 13 dB, which is the
+# difference between Whisper writing down a whole video and writing down
+# nothing, for 0.9% of one core and 9ms of capture delay. Needs
+# `uv sync --extra echo`; without it this says so once and carries on. The desk
+# microphone only - a phone on the web app is in a room these speakers are not.
+echo_cancellation = false
+# How far above the leftover echo something has to be before it counts as a
+# person, while the speakers are playing. Cancelling is a subtraction and cannot
+# touch what the speakers add themselves - they distort when they are loud, and
+# measured on one desk the suppression ran anywhere from 3 dB to 24 dB - so what
+# survives is judged as well as cancelled. 3 is about 10 dB. Raise it if audio
+# still gets transcribed, lower it if your own voice gets eaten over loud audio,
+# 0 turns the gate off and leaves cancelling on its own.
+echo_gate_margin = 0.0
+# Seconds the reference is held back before it is cancelled against, which has
+# to land it inside the canceller's filter - about 100ms of reach. Too little and
+# the reference arrives before the echo, too much and it arrives after, and both
+# measure as almost no cancellation. Straight line, 10ms of this for 10ms of
+# delay, and the right value depends on this machine's capture latencies.
+# Measured on one desk: 0.12 put the reference 64ms ahead of the microphone and
+# cancelled 34 dB, where 0.40 put it 219ms behind and cancelled 1 dB.
+echo_reference_delay = 0.12
 
 [stt]
 # whisper runs on this machine. google is free and needs no model download, but

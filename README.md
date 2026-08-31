@@ -167,6 +167,39 @@ curl.exe -L -o models/voices-v1.0.bin "$base/voices-v1.0.bin"
 `tts.kokoro_voice` picks who it sounds like, and the first letter picks the accent -
 `bm_george` and `bm_lewis` are British men, `bf_emma` British women, `am_`/`af_` American.
 
+## Not hearing your own speakers
+
+A video playing at the desk is speech, and JARVIS used to transcribe it and sometimes answer
+it. It does not have to: this machine is the one playing the sound, so it has an exact copy of
+what went to the speakers, and what the microphone hears is that copy filtered by the room.
+WASAPI hands back the mix going to a render endpoint and WebRTC's AEC3 learns the room and
+subtracts it.
+
+```powershell
+uv sync --extra kokoro --extra echo    # name every extra you want, see below
+```
+
+Then `audio.echo_cancellation = true`. Measured on the desk in
+[`docs/example-configuration.md`](docs/example-configuration.md), against a real video at full
+volume: 34 dB, which takes Silero from hearing speech in 418 buffers out of 440 to fourteen,
+and Whisper from a paragraph of the video to nothing at all. It costs 0.6% of one core, no
+VRAM, and about 1.5% word error in a quiet room.
+
+**`audio.echo_reference_delay` is the one number that matters**, and it depends on this
+machine rather than on yours. The reference has to arrive inside the canceller's filter, which
+reaches back about 100ms. Here 0.12 puts it 64ms ahead of the microphone and cancels 34 dB,
+while 0.40 put it 219ms behind and cancelled 1 dB - so if cancellation is poor, this is the
+first and probably the only thing to change. It is a straight line: 10ms of it for 10ms of
+delay.
+
+Talking over the speakers still works, at the cost of some accuracy - roughly a quarter of
+your words when a video is louder than you. `audio.echo_gate_margin` throws away anything not
+clearly above the leftover echo, which is stricter and eats quiet speech; it is off because
+cancelling turned out to be enough on its own.
+
+One note on the extras, which is a footgun: `uv sync --extra echo` syncs to *only* that extra
+and uninstalls the others. Name all of them every time.
+
 ## Screen control
 
 Handing a model the whole accessibility tree does not work: a Teams window is 810 nodes and a

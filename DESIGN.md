@@ -79,6 +79,47 @@ accurate; the model is better placed to judge than a string match.
 dropped at DEBUG, so it vanished without trace and looked identical to a hang. It logs at
 INFO now, naming the word to use.
 
+**A machine playing a video knows exactly what it played.** JARVIS transcribed whatever was
+on the speakers and occasionally answered it, and the fix is not cleverness about speech, it
+is bookkeeping: the sound came from here, so there is a perfect copy of it, and what the
+microphone hears is that copy filtered by the room. WASAPI's loopback mode exists for this and
+Microsoft says so. WebRTC's AEC3 learns the filter and subtracts it.
+
+The measured result is worth stating plainly, because it decides how it is used: 34 dB against
+a real video at full volume, which took Silero from hearing speech in 418 buffers out of 440
+to fourteen and Whisper from a paragraph to an empty string. 0.6% of one core, no VRAM.
+
+**Two things nearly killed it, and both were mine rather than the algorithm's.** The reference
+was resampled 48k to 16k with plain interpolation, which folds everything above 8 kHz back
+down as content that was never in the room - a third of the cancellation, gone, and the filter
+had less to fit. Averaging three samples instead fixed it. Then the backlog: `take` hands out
+the oldest reference it holds, so the size of that backlog *is* how late the reference arrives,
+and AEC3's filter only reaches back about 100ms. At 400ms of backlog the reference ran 219ms
+behind the microphone and cancellation measured 1.2 dB. At 120ms it ran 64ms ahead - about the
+real acoustic delay - and measured 33.8 dB. Same code, same audio, one constant.
+
+Both were found by measuring the shipped pipeline rather than a bench rig, which is the actual
+lesson. The rig had a different resampler and perfect pairing, so it read 13 to 24 dB while
+the thing that ran read 1.2, and an hour went on tuning suppressors on top of a broken
+reference. `stream_delay_ms` is a red herring at any value; AEC3 finds the delay itself, but
+only within its window.
+
+**What gets transcribed is the cancelled audio, and that is a deliberate loss.** Transcribing
+what the microphone actually heard reads much better - 6% word error against 27% for somebody
+talking over the speakers, because the residual suppressor takes the front off a sentence. But
+the raw audio still has the video in it, and Whisper wrote some of it down. A JARVIS that
+occasionally answers a YouTube video is worse than one that occasionally mishears you. Muddled
+is recoverable; out of nowhere is not.
+
+Automatic gain control is off for the same reason, and it is the most tempting knob here: it
+recovers the level the canceller takes off a voice, and it lifts the residual echo 5.6x while
+it does it. With it on, Whisper transcribed a "Thank you." out of a room where only a video
+was playing.
+
+**The desk microphone only.** The web app's microphone is in whatever room the phone is in,
+and these speakers are not its echo - the browser already applies AEC3 to the phone's own
+output, which is what the **Raw audio** checkbox turns off.
+
 **Own the capture loop, so a phrase can end while the room is still noisy.**
 `speech_recognition` ends a phrase after `pause_threshold` of *consecutive* buffers below the
 energy threshold, and resets that count on any single buffer above it. One keyboard click a

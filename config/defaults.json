@@ -13,7 +13,10 @@
     "pause_threshold": 1.2,
     "pause_quiet_fraction": 0.85,
     "echo_guard_seconds": 0.5,
-    "listen_while_speaking": false
+    "listen_while_speaking": false,
+    "echo_cancellation": false,
+    "echo_gate_margin": 0.0,
+    "echo_reference_delay": 0.12
   },
   "stt": {
     "backend": "whisper",
