@@ -275,7 +275,7 @@ class BrainConfig:
     # Turns of conversation kept. Cut whole turns rather than messages - half a
     # turn leaves a tool result whose call is gone, which some endpoints reject.
     # 20 rather than 6 because the meter said so: the prompt sits at 2.6k of a
-    # 98k window, so six turns was throwing away conversation to save nothing.
+    # 64k window, so six turns was throwing away conversation to save nothing.
     # Trimming is also the one thing that invalidates a cached prefix, since
     # everything after the system prompt shifts - so trimming rarely is faster
     # than trimming often, on top of remembering more.
@@ -296,19 +296,19 @@ class BrainConfig:
     # Most of the window the conversation may take up. history_turns counts
     # turns and turns are not the same size: a greeting is 50 tokens and a turn
     # that scans a crowded window twice is 6000, so twenty of the second kind
-    # would overflow a 98k window and the request would simply fail. Whichever
+    # would overflow a 64k window and the request would simply fail. Whichever
     # of the two bites first wins. 0 leaves only the turn count.
     max_context_fraction: float = 0.7
     # Where the droppable half of the conversation starts being emptied, as a
     # fraction of the window. Droppable is reasoning and tool results; what
     # stays is what was asked, what was called and what was answered. Both go
     # oldest first, whichever comes first, because a thought and the scan it
-    # led to are worth the same nothing an hour later. 0.7 is about 69k of a
-    # 98k window. 0 turns it off and leaves dropping whole turns as the only
+    # led to are worth the same nothing an hour later. 0.7 is about 45k of a
+    # 64k window. 0 turns it off and leaves dropping whole turns as the only
     # way down.
     squash_fraction: float = 0.7
     # When emptying is not enough, summarise. As a fraction of the ceiling
-    # above rather than of the window: at 0.7 and 0.8 it means 56k of a 98k
+    # above rather than of the window: at 0.7 and 0.8 it means 36k of a 64k
     # window made up of nothing but prompts, replies and calls, with every
     # result and every thought already gone. The oldest half of that is
     # replaced by one paragraph of what happened, in the model's own words -

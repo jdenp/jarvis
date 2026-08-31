@@ -237,7 +237,7 @@ page_chars = 6000              # an article is sentences; the rest is navigation
 context_limit = 0
 # Most of the window the conversation may take up. history_turns counts turns and
 # turns are not the same size: a greeting is 50 tokens and a turn that scans a
-# crowded window twice is 6000, so twenty of the second kind would overflow a 98k
+# crowded window twice is 6000, so twenty of the second kind would overflow a 64k
 # window and the request would fail outright rather than degrade. Whichever of
 # the two bites first wins. 0 leaves only the turn count.
 max_context_fraction = 0.7
