@@ -236,7 +236,6 @@ class VoiceService:
         self.live.web = Microphone(self.config.audio, source=self.stream, sink=sink)
         self.live.web.start()
         self.live.settle()
-        logger.info("Web app listening as well.")
 
     @property
     def microphone(self):

@@ -72,7 +72,7 @@ every utterance to `logs/heard.jsonl`.
 
 ## On the go
 
-<img src="docs/images/phone.jpg" width="280"
+<img src="docs/images/phone.jpg" width="240"
      alt="The page on a phone, mid conversation, with the microphone open">
 
 JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and

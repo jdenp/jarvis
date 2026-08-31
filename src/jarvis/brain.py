@@ -284,7 +284,8 @@ class Model:
             response = self._client.get(f"{self.base}/models", timeout=5.0)
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            return str(exc)
+            # First line only - httpx puts an MDN link on the second.
+            return str(exc).strip().partition("\n")[0] or type(exc).__name__
         return ""
 
     def wait_until_available(self, seconds: float, every: float = MODEL_POLL_SECONDS) -> str:

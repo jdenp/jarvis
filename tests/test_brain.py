@@ -295,6 +295,17 @@ def test_a_model_that_is_already_up_is_not_waited_for():
     assert len(tries) == 1
 
 
+def test_a_reason_is_the_one_line_that_says_what_happened():
+    """httpx puts an MDN link on the second line of every status error, and
+    that is not news to anybody reading a startup log."""
+    import httpx
+
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503)))
+    why = Model(Config().brain, client=client).available()
+    assert "503" in why
+    assert "\n" not in why and "mozilla" not in why
+
+
 def sent(config, **kwargs) -> dict:
     """The body of one request, with a canned reply behind it."""
     import httpx

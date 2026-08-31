@@ -246,7 +246,6 @@ class Microphone:
         self._running.set()
         self._thread = threading.Thread(target=self._capture, name="jarvis-capture", daemon=True)
         self._thread.start()
-        logger.info("Listening (%s).", self.detector.name)
 
     def _calibrate(self) -> None:
         """Measure ambient noise, if the detector actually uses a threshold."""
