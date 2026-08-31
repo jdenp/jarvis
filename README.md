@@ -1,4 +1,4 @@
-# JARVIS
+![JARVIS](docs/images/banner.png)
 
 > **J**ust **A** **R**ather **V**ery **I**ntelligent **S**ystem
 
@@ -49,16 +49,20 @@ every utterance to `logs/heard.jsonl`.
 - **Talk over it.** Speaking abandons the half written answer and the turn carries on knowing
   what you just said. Everything it already found is kept, so "no, the other one" builds on
   the look that has already happened.
+
 - **Or type.** Start typing in the window it is running in and the line goes in exactly where
   speech does. Escape throws it away; escape on an empty line stops whatever it is doing.
+
 - **Num Lock shuts this microphone**, from anywhere, including with an admin window in
   front. Nothing said in the room is transcribed or logged until you press it again. It is
   the desk only: a phone on the web app keeps hearing, so you can leave the room muted and
   still talk to it from the next one. Or just ask - "stop listening, I'm on a call".
+
 - **Hold Num Lock for headphone mode**, which leaves the microphone open while JARVIS is
   talking so you can cut a reply off mid sentence. Off on speakers, where it hears itself and
   once answered its own weather forecast. `audio.listen_while_speaking` is where it starts;
   the key moves it, and so does the button on the web app.
+
 - **A phrase ends after 1.2s of quiet** (`audio.pause_threshold`), set high on purpose:
   being cut off mid sentence is worse than waiting.
 
@@ -68,27 +72,25 @@ every utterance to `logs/heard.jsonl`.
 
 ## On the go
 
-JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
-the reply comes back through the phone's loudspeaker rather than out of the speakers at the
-desk. There is a text box for when you cannot talk, a picker for which microphone the browser
-uses, and a checkbox for headphone mode. It draws the same live line the terminal does, and
-the same tool calls under the conversation - what ran and the first line of what came back,
-one row each, tap one for the whole of it. On by default (`service.start_webapp`).
+<img src="docs/images/phone.jpg" width="280"
+     alt="The page on a phone, mid conversation, with the microphone open">
 
-While a page is open the browser has the whole conversation: the desk microphone stops being
-listened to, and the reply is rendered to a wav and played in the browser rather than out of
-the speakers. Somebody holding a phone is not at the desk, so a desk microphone there is
-listening to a room nobody is in. Close the tab and both come back within about half a
-minute. The voice half needs Kokoro - the other engines cannot be rendered without playing
-them, so with those it speaks at the desk as usual.
+JARVIS serves a page that turns a phone into the microphone: open it, keep it open, talk, and
+the reply comes back through the phone rather than out of the speakers at the desk. There is a
+text box for when you cannot talk, a microphone picker, a headphone mode checkbox, the same
+live line the terminal draws, and the tool calls underneath - tap one for the whole of it. On
+by default (`service.start_webapp`).
+
+While a page is open the desk microphone stops being listened to - somebody holding a phone is
+not at the desk. Close the tab and it comes back within about half a minute. Speaking through
+the browser needs Kokoro; the other engines speak at the desk as usual.
 
 ### Reaching it from your phone
 
-The service is loopback with no auth of its own and stays that way. Tailscale goes in front:
-it terminates the TLS, authenticates against your tailnet, and leaves this socket exactly as
-private as it was. The https is the other half of why - a browser refuses a microphone
-outside a secure context, so plain `http://100.x.x.x:8770` will not work even though a phone
-on the tailnet can reach it.
+The service is loopback with no auth of its own and stays that way - Tailscale goes in front
+and does the TLS and the authentication. The https matters: a browser refuses a microphone
+outside a secure context, so plain `http://100.x.x.x:8770` will not work even from on the
+tailnet.
 
 Once, in the [admin console](https://login.tailscale.com/admin/dns): turn on **MagicDNS** and
 **HTTPS Certificates**. Then, on the machine JARVIS runs on:
@@ -97,17 +99,10 @@ Once, in the [admin console](https://login.tailscale.com/admin/dns): turn on **M
 tailscale serve --bg 8770
 ```
 
-It prints the URL, which is your machine's name on your tailnet:
-
-```
-https://your-machine.your-tailnet.ts.net/
-  |-- / proxy http://127.0.0.1:8770
-```
-
-That URL is the machine, not the session, so it survives reboots and restarts and is worth
-bookmarking on the phone. Open it on a phone signed into the same tailnet, allow the
-microphone, and press **Mic off** to turn it on. `tailscale serve status` shows what is being
-served and `tailscale serve reset` stops it.
+It prints an `https://your-machine.your-tailnet.ts.net/` URL, which is the machine rather than
+the session, so it survives reboots and is worth bookmarking. Open it on a phone signed into
+the same tailnet, allow the microphone, and press **Mic off** to turn it on.
+`tailscale serve status` shows what is served and `tailscale serve reset` stops it.
 
 None of this is on the public internet - that is `tailscale funnel`, a different command, and
 this is not a thing to point it at.
