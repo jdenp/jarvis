@@ -85,11 +85,19 @@ class ConsoleVoice:
     def _enqueue(self, said: str) -> None:
         """Where a typed line lands, off the reader thread.
 
+        `Typing.read_line` wipes its own echo of the line once Enter is
+        pressed, on the assumption that whoever gets it draws it back as
+        something permanent - `ServiceVoice.hear` does that through the
+        transcript. There is no transcript here, so it is drawn directly, or
+        the line is gone the moment it is sent: typed, shown while typing,
+        wiped, never seen again.
+
         A command runs here rather than being queued, the same as it always
         did - `/quit` cannot put anything sensible in a queue of things to
         say, so it sets a flag instead and `hear` raises `Quit` the next time
         it is asked for a fresh line rather than mid-turn.
         """
+        self.ui.heard(said)
         if said.startswith("/"):
             try:
                 self.command(said)

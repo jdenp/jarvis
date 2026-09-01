@@ -110,6 +110,16 @@ def test_a_line_from_the_queue_is_heard():
     assert talking.hear(1.0) == ["play some music"]
 
 
+def test_a_line_from_the_queue_is_drawn_rather_than_vanishing():
+    """`Typing.read_line` wipes its own echo on Enter, on the assumption that
+    whoever gets the line draws it back as something permanent. Without that,
+    a typed line is shown while typing and then never seen again."""
+    written = io.StringIO()
+    talking = queued(written)
+    talking._enqueue("play some music")
+    assert "you > play some music" in written.getvalue()
+
+
 def test_the_mid_task_check_returns_what_was_typed_without_blocking():
     """This is the whole fix: steering a turn in progress needs `hear(0.0)` to
     actually find something, unlike the blocking path above it."""
@@ -137,6 +147,7 @@ def test_a_command_from_the_queue_is_answered_immediately():
     talking = queued(written)
     talking._enqueue("/dance")
     assert talking.hear(0.0) == []
+    assert "you > /dance" in written.getvalue(), "the command itself is drawn too"
     assert "No such command as /dance" in written.getvalue()
 
 
