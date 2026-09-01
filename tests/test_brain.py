@@ -1823,6 +1823,21 @@ def test_what_it_writes_down_mid_turn_goes_at_the_end_of_the_prompt(tmp_path):
     assert "Alt tab does a thing" not in str(it.messages), "and was not kept in the history"
 
 
+def test_the_session_notes_do_not_go_on_as_a_second_system_message(tmp_path):
+    """Some chat templates raise outright if a system message is not first -
+    GLM-4.x among them - and appending one here put a second one at the end
+    of every request that had anything unassimilated to say."""
+    from jarvis.memories import remember
+
+    it = looking_back(tmp_path, said("Noted, sir."))
+    remember(tmp_path / "session.md", "Windows", "Alt tab does a thing")
+    it.turn(["hello"])
+
+    sent = it.model.seen[-1]
+    assert sent[-1] == {"role": "user", "content": sent[-1]["content"]}
+    assert [m["role"] for m in sent].count("system") == 1
+
+
 def test_the_learning_phase_folds_the_session_into_the_file_that_outlives_it(tmp_path):
     """Where the one expensive thing it causes is paid by nobody."""
     from jarvis.memories import remember, sections

@@ -1100,7 +1100,11 @@ class Brain:
         self.ui.status("thinking")
         messages = self.messages
         if notes := self.session_notes():
-            messages = [*messages, {"role": "system", "content": notes}]
+            # `user`, not `system` - some chat templates raise outright if a
+            # system message shows up anywhere but first (GLM-4.x among them),
+            # and appending one here put a second one at the end of every
+            # request. `EARLIER` below hits the same rule for the same reason.
+            messages = [*messages, {"role": "user", "content": notes}]
         reply = self.model.reply(
             messages,
             tools,
