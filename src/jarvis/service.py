@@ -360,7 +360,7 @@ class VoiceService:
 
         Reported by the terminal rather than by the brain, which is the route
         the live line already takes - see Doing. The brain does not know whether
-        anything is drawing it, and code mode has no service to tell.
+        anything is drawing it.
 
         Published once the call is finished, so every row arrives complete. What
         is happening while it runs is on the live line already, and a row that

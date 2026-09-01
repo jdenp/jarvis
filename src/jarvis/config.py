@@ -270,9 +270,9 @@ class BrainConfig:
     # case is JARVIS winning the race and a 35B model taking a minute or two to
     # load off disk. Refusing to start there is refusing over a few seconds of
     # bad luck. It is checked every few seconds and says so while it waits; 0
-    # goes back to failing at once. Only the service waits - `jarvis code` is
-    # somebody sitting at a keyboard, and a prompt that never comes back is
-    # worse than being told the endpoint is down.
+    # goes back to failing at once. Only the service waits - the terminal
+    # front end is somebody sitting at a keyboard, and a prompt that never
+    # comes back is worse than being told the endpoint is down.
     wait_for_model_seconds: float = 600.0
     # Sent as `model`, and llama-server ignores it - it serves whatever was
     # loaded. Only matters for an endpoint that hosts more than one.
@@ -297,7 +297,7 @@ class BrainConfig:
     # look, type, look, check is already eight with nothing having gone
     # wrong - and twelve is only four more than that, which is one mistake
     # and its recovery. Sixteen leaves room to be wrong once and carry on.
-    # Zero or less means no cap at all - what `jarvis code` sets, since
+    # Zero or less means no cap at all - for a terminal front end, where
     # nobody is spending patience on a screen filling with edits.
     max_steps: int = 16
     # Turns of conversation kept. Cut whole turns rather than messages - half a

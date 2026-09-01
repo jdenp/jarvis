@@ -120,9 +120,9 @@ def test_a_watcher_that_throws_does_not_take_the_terminal_with_it():
 
 def test_the_banner_says_what_is_running():
     ui, written = screen()
-    ui.banner("0.8.0", ["code mode - 8 tools"])
+    ui.banner("0.8.0", ["terminal front end - 8 tools"])
     assert "JARVIS 0.8.0" in written.getvalue()
-    assert "code mode - 8 tools" in written.getvalue()
+    assert "terminal front end - 8 tools" in written.getvalue()
 
 
 def test_nothing_is_painted_without_a_terminal():

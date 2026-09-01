@@ -46,18 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(
         dest="command",
-        metavar="[serve | code | say | next | status | look | click | screenshot]",
+        metavar="[serve | say | next | status | look | click | screenshot]",
     )
 
     serve = sub.add_parser("serve", help="run the voice service (the default with no arguments)")
     serve.add_argument("--no-http", action="store_true", help="transcribe to file only, no API")
-
-    talk = sub.add_parser(
-        "code", help="type to JARVIS instead of speaking - no microphone, no step limit"
-    )
-    talk.add_argument(
-        "--verbose", action="store_true", help="show tool results and warnings on screen too"
-    )
 
     speak = sub.add_parser("say", help="speak text through the running service")
     speak.add_argument("text", nargs="+", help="what to say")
@@ -603,15 +596,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "tools":
             return run_tools(config, args)
         return run_status(config)
-
-    if args.command == "code":
-        # No microphone and no service, so this runs anywhere an ssh session
-        # does. Logging stays off the screen unless asked for - the tool calls
-        # are printed by the code front end and duplicating them is noise.
-        configure(config.log_dir, config.log_level, console=args.verbose, max_mb=config.log_max_mb)
-        from .code import run as run_code
-
-        return run_code(config, args.verbose)
 
     logger = configure(config.log_dir, config.log_level, max_mb=config.log_max_mb)
     logger.info(_banner())

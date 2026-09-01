@@ -252,7 +252,6 @@ it. `brain.web = false` removes both tools.
 .\jarvis.ps1 look                  # number what is clickable in the window in front
 .\jarvis.ps1 click 12 --expecting Reply
 .\jarvis.ps1 screenshot            # a picture of the window in front
-.\jarvis.ps1 code                  # type to it instead of speaking, no microphone
 .\jarvis.ps1 tools                 # what the brain can do, as the model is told it
 .\jarvis.ps1 config                # every setting in effect, and where it came from
 .\jarvis.ps1 --list-devices        # find your microphone

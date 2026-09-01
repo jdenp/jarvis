@@ -265,7 +265,7 @@ enough to be dumb. It says what it is waiting for and repeats itself once a minu
 because a process that sits silent for two minutes and then works is indistinguishable
 from one that has hung - and this one is holding the microphone while it does it.
 
-Only the service waits. `jarvis code` is somebody sitting at a keyboard who asked a
+Only the service waits. The terminal front end is somebody sitting at a keyboard who asked a
 question, and they are better told the endpoint is down than left in front of a prompt
 that never comes back.
 
@@ -956,8 +956,8 @@ is posted, and a refused microphone leaves its error in the status line rather t
 overwritten by the next poll. A meter that does not move is a device problem; a meter that
 moves with nothing transcribed is this end's problem. That distinction is the whole point.
 
-**Code mode is a front end, not a second implementation.** `jarvis code` is the same
-`Brain`, the same `Toolbox` and the same memories, with `ConsoleVoice` in place of
+**The terminal front end is not a second implementation.** The same
+`Brain`, the same `Toolbox` and the same memories, with a keyboard input loop in place of
 `ServiceVoice` - two methods, `hear(timeout)` and `say(text)`, and `run_forever` cannot tell
 them apart. A test compares the two signatures so that adding an argument to one breaks
 loudly rather than only at runtime in the other.
@@ -965,7 +965,7 @@ loudly rather than only at runtime in the other.
 It earns its place twice. Over SSH there is no audio device, so a keyboard is the only way
 in. And a voice session is a terrible place to debug a model: the tool calls are invisible,
 there is nothing to scroll back through, and every experiment costs a sentence read out loud
-at conversational pace. Code mode prints each call as it goes, which is how most of the
+at conversational pace. The terminal front end prints each call as it goes, which is how most of the
 prompt wording in `brain.py` got settled.
 
 `hear(0.0)` - the loop's mid-task check for somebody talking over the work - used to return

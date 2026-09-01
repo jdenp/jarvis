@@ -1,7 +1,7 @@
 """The terminal JARVIS runs in.
 
 One renderer for both front ends, because there is one conversation whether it
-arrived by microphone or by keyboard. Voice mode and `jarvis code` look the same
+arrived by microphone or by keyboard. The voice service and the terminal front end look the same
 and the difference is only where the words came from.
 
 Not a full screen application. Permanent lines scroll normally and a single live
@@ -14,7 +14,7 @@ five colours.
 
 Everything is guarded on the output actually being a terminal. Piped or
 redirected, it degrades to plain lines with no escape codes and no animation, so
-`jarvis code < script.txt` produces something readable rather than a file full of
+Piped input produces something readable rather than a file full of
 brackets.
 """
 

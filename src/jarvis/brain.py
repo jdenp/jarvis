@@ -788,9 +788,9 @@ class Brain:
         the worst moment to spend a model call on last week's lesson, and they
         are about to say something else anyway - see `settle`.
         """
-        # For a front end whose `hear` blocks, which is code mode: there is no
-        # idle moment to notice in its loop, so the moment they come back after
-        # one is the next best thing.
+        # For a front end whose `hear` blocks - there is no idle moment to
+        # notice in its loop, so the moment they come back after one is the
+        # next best thing.
         self.settle()
         before = len(self.messages)
         self.stopped.clear()

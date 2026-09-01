@@ -281,7 +281,7 @@ def test_a_wait_that_runs_out_says_why_rather_than_going_on_forever():
 
 
 def test_the_waiting_can_be_switched_off():
-    """Which is what `jarvis code` gets: somebody sitting at a keyboard is
+    """Which is what the terminal front end gets: somebody sitting at a keyboard is
     better told at once than left in front of a prompt that never returns."""
     tries, client = refusing_until(10_000)
     model = Model(Config().brain, client=client)
@@ -544,7 +544,7 @@ def test_running_out_of_steps_still_ends_in_an_answer():
 
 
 def test_max_steps_zero_means_no_cap():
-    """`jarvis code` sets this to 0, since nobody watching a screen fill with
+    """The terminal front end sets this to 0, since nobody watching a screen fill with
     edits is spending the patience somebody listening would be."""
     config = replace(Config(), brain=replace(Config().brain, max_steps=0))
     box = toolbox(look_at_screen="ok")
