@@ -702,7 +702,7 @@ def _web_tools(config: Config) -> list[Tool]:
 def _ear_tools(config: Config, ears) -> list[Tool]:
     """Stopping the microphone, if there is one to stop.
 
-    Absent in chat mode, where there are no ears to close. `hasattr` rather than
+    Absent in code mode, where there are no ears to close. `hasattr` rather than
     a flag because that is the only difference between the two front ends.
 
     Stopping only. There was a `resume_transcription` beside this and it went:

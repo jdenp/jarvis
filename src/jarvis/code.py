@@ -9,6 +9,11 @@ scroll back, and every experiment costs a sentence read out loud.
 Nothing here is a second implementation. `ConsoleVoice` has the same two methods
 `ServiceVoice` does, and `Brain.run_forever` cannot tell them apart. The drawing
 is `ui.py`, shared with voice mode, so the two look the same.
+
+The one difference on purpose: `brain.max_steps` is uncapped here. It exists
+because somebody listening is spending patience on every tool call; somebody
+watching a screen fill with edits is not, and a task that genuinely needs
+sixty tool calls should get sixty rather than an answer cut short at sixteen.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from dataclasses import replace
 
 from . import __version__
 from . import ui as terminal
@@ -158,6 +164,9 @@ class ConsoleVoice:
 
 def run(config, verbose: bool = False) -> int:
     """One interactive session. Needs no microphone and no voice service."""
+    # Uncapped: see the module docstring for why code mode does not take the
+    # voice path's step budget.
+    config = replace(config, brain=replace(config.brain, max_steps=0))
     ui = terminal.Ui()
     model = Model(config.brain, terminal=ui)
     if why := model.available():
@@ -171,7 +180,7 @@ def run(config, verbose: bool = False) -> int:
     voice.start()
 
     notes = [
-        f"chat mode - {config.brain.url}, {len(brain.toolbox.names)} tools",
+        f"code mode - {config.brain.url}, {len(brain.toolbox.names)} tools",
         "/help for what else there is",
     ]
     if not verbose:

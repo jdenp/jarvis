@@ -788,7 +788,7 @@ class Brain:
         the worst moment to spend a model call on last week's lesson, and they
         are about to say something else anyway - see `settle`.
         """
-        # For a front end whose `hear` blocks, which is chat mode: there is no
+        # For a front end whose `hear` blocks, which is code mode: there is no
         # idle moment to notice in its loop, so the moment they come back after
         # one is the next best thing.
         self.settle()
@@ -980,7 +980,8 @@ class Brain:
         used_tools = False
 
         step = 0
-        while step < max(1, self.settings.max_steps):
+        limit = self.settings.max_steps
+        while limit <= 0 or step < limit:
             step += 1
             # Checked here as well as mid stream, so a cancel that arrives while
             # a tool is running lands the moment it finishes rather than costing

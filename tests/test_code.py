@@ -1,4 +1,4 @@
-"""Chat mode - the same loop with the microphone taken out.
+"""Code mode - the same loop with the microphone taken out.
 
 The thing worth testing is that it really is the same loop: `ConsoleVoice` has to
 satisfy exactly what `Brain.run_forever` asks of `ServiceVoice`, or this is a
@@ -12,7 +12,7 @@ import io
 
 import pytest
 
-from jarvis.chat import ConsoleVoice, Quit
+from jarvis.code import ConsoleVoice, Quit
 from jarvis.ui import Ui
 
 
@@ -29,7 +29,7 @@ def typing(monkeypatch, *lines):
 
 
 def voice(written=None):
-    """A chat front end drawing into something readable back."""
+    """A code front end drawing into something readable back."""
     return ConsoleVoice(Ui(written or io.StringIO(), colour=False))
 
 
@@ -85,7 +85,7 @@ def test_the_reply_is_drawn_and_kept():
 
 
 def queued(written=None):
-    """A chat front end in queued mode, without a real keyboard thread behind it.
+    """A code front end in queued mode, without a real keyboard thread behind it.
 
     `_typing` is only ever checked for `None`-ness by `hear`, so anything else
     flips it onto the queue path that the background reader would otherwise
@@ -142,7 +142,7 @@ def test_a_command_from_the_queue_is_answered_immediately():
 
 def test_the_console_voice_is_what_the_loop_expects():
     """Both front ends are duck-typed against the same two methods. If one grows
-    an argument, this fails rather than only chat mode failing at runtime."""
+    an argument, this fails rather than only code mode failing at runtime."""
     import inspect
 
     from jarvis.brain import ServiceVoice
@@ -175,7 +175,7 @@ def test_the_tool_list_reads_as_a_list(monkeypatch):
     assert "numbered" in printed, "and the first sentence of what it does"
 
 
-def test_chat_mode_cannot_close_ears_it_does_not_have():
+def test_code_mode_cannot_close_ears_it_does_not_have():
     """No microphone here, so the two transcription tools are absent and the
     prompt does not mention them."""
     from dataclasses import replace

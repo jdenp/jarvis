@@ -265,7 +265,7 @@ enough to be dumb. It says what it is waiting for and repeats itself once a minu
 because a process that sits silent for two minutes and then works is indistinguishable
 from one that has hung - and this one is holding the microphone while it does it.
 
-Only the service waits. `jarvis chat` is somebody sitting at a keyboard who asked a
+Only the service waits. `jarvis code` is somebody sitting at a keyboard who asked a
 question, and they are better told the endpoint is down than left in front of a prompt
 that never comes back.
 
@@ -788,7 +788,7 @@ eleven seconds of nothing on a phone, and half of what JARVIS does out loud only
 sense if you can see that it looked at the screen first. They go the way the live line
 goes: the brain draws them on the terminal, the terminal hands them to whoever is
 watching, and the service publishes them on a stream beside what was heard and what was
-said. The brain never learns whether anything is drawing it, which is what keeps chat
+said. The brain never learns whether anything is drawing it, which is what keeps code
 mode - where there is no service at all - from needing to know either.
 
 A row is published when the call finishes, with what it gave back already in it, rather
@@ -956,7 +956,7 @@ is posted, and a refused microphone leaves its error in the status line rather t
 overwritten by the next poll. A meter that does not move is a device problem; a meter that
 moves with nothing transcribed is this end's problem. That distinction is the whole point.
 
-**Chat mode is a front end, not a second implementation.** `jarvis chat` is the same
+**Code mode is a front end, not a second implementation.** `jarvis code` is the same
 `Brain`, the same `Toolbox` and the same memories, with `ConsoleVoice` in place of
 `ServiceVoice` - two methods, `hear(timeout)` and `say(text)`, and `run_forever` cannot tell
 them apart. A test compares the two signatures so that adding an argument to one breaks
@@ -965,13 +965,20 @@ loudly rather than only at runtime in the other.
 It earns its place twice. Over SSH there is no audio device, so a keyboard is the only way
 in. And a voice session is a terrible place to debug a model: the tool calls are invisible,
 there is nothing to scroll back through, and every experiment costs a sentence read out loud
-at conversational pace. Chat mode prints each call as it goes, which is how most of the
+at conversational pace. Code mode prints each call as it goes, which is how most of the
 prompt wording in `brain.py` got settled.
 
-`hear(0.0)` - the loop's mid-task check for somebody talking over the work - returns nothing
-here rather than reading stdin. One line is read at a time in a chat, so barge-in is
-genuinely absent rather than faked, and pretending otherwise would mean a half-typed line
-being snatched mid-task.
+`hear(0.0)` - the loop's mid-task check for somebody talking over the work - used to return
+nothing here, because `input()` owns the terminal until Enter is pressed and there was
+nothing to poll without blocking on it. It now borrows `typed.Typing`, the same background
+reader the voice path already had: a thread polls the keyboard without blocking and lines
+land in a queue, so a correction typed mid-task is actually found instead of always coming
+back empty. Piped or redirected there is no console to poll, so that path falls back to the
+plain blocking read it always did.
+
+`brain.max_steps` is uncapped here, unlike the voice path's sixteen. That cap spends
+somebody's patience on every tool call while they wait and listen; nobody watching a
+screen fill with edits is spending anything by letting the sixty-third one run.
 
 **One terminal, and no dependency for it.** `ui.py` draws both front ends, because there is
 one conversation whether it arrived by microphone or keyboard, and two renderers would drift.
@@ -1268,7 +1275,7 @@ and failing means it was already set, which is the outcome wanted anyway.
 | `service.py` | Owns the hardware, serves loopback HTTP |
 | `brain.py` | The agent loop, the model client, and the system prompt |
 | `tools.py` | What the brain can do, as schemas and dispatch |
-| `chat.py` | The same loop with a keyboard instead of a microphone |
+| `code.py` | The same loop with a keyboard instead of a microphone, no step limit |
 | `ui.py` | The terminal: scrolling conversation, one live line, no dependency |
 | `typed.py` | A line typed into the voice session, taken as though it were heard |
 | `memories.py` | The list JARVIS writes for itself and reads back every turn |

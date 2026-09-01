@@ -281,7 +281,7 @@ def test_a_wait_that_runs_out_says_why_rather_than_going_on_forever():
 
 
 def test_the_waiting_can_be_switched_off():
-    """Which is what `jarvis chat` gets: somebody sitting at a keyboard is
+    """Which is what `jarvis code` gets: somebody sitting at a keyboard is
     better told at once than left in front of a prompt that never returns."""
     tries, client = refusing_until(10_000)
     model = Model(Config().brain, client=client)
@@ -541,6 +541,22 @@ def test_running_out_of_steps_still_ends_in_an_answer():
     assert it.turn(["find the reply button"]) == "I could not find it, sir."
     assert it.model.asked[-1][1] is False, "the last call offered no tools"
     assert [offered for _, offered in it.model.asked[:-1]] == [True, True]
+
+
+def test_max_steps_zero_means_no_cap():
+    """`jarvis code` sets this to 0, since nobody watching a screen fill with
+    edits is spending the patience somebody listening would be."""
+    config = replace(Config(), brain=replace(Config().brain, max_steps=0))
+    box = toolbox(look_at_screen="ok")
+    steps = 20  # more than the default cap of 16
+    it = brain(
+        *([calling("look_at_screen")] * steps),
+        said("Done, sir."),
+        box=box,
+        config=config,
+    )
+    assert it.turn(["keep looking"]) == "Done, sir."
+    assert [offered for _, offered in it.model.asked] == [True] * steps + [True]
 
 
 def test_work_done_and_nothing_to_say_is_reported_out_loud():
