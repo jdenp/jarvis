@@ -84,6 +84,62 @@ def test_the_reply_is_drawn_and_kept():
     assert talking.spoken == ["Half past two, sir."]
 
 
+def queued(written=None):
+    """A chat front end in queued mode, without a real keyboard thread behind it.
+
+    `_typing` is only ever checked for `None`-ness by `hear`, so anything else
+    flips it onto the queue path that the background reader would otherwise
+    feed - without spinning up `typed.Typing` itself, which polls a console
+    that does not exist under a test runner.
+    """
+    talking = ConsoleVoice(Ui(written or io.StringIO(), colour=False))
+    talking._typing = object()
+    return talking
+
+
+def test_start_stays_on_the_blocking_path_without_colour():
+    """No live line to draw a background prompt on, so nothing is started."""
+    talking = ConsoleVoice(Ui(io.StringIO(), colour=False))
+    talking.start()
+    assert talking._typing is None
+
+
+def test_a_line_from_the_queue_is_heard():
+    talking = queued()
+    talking._enqueue("play some music")
+    assert talking.hear(1.0) == ["play some music"]
+
+
+def test_the_mid_task_check_returns_what_was_typed_without_blocking():
+    """This is the whole fix: steering a turn in progress needs `hear(0.0)` to
+    actually find something, unlike the blocking path above it."""
+    talking = queued()
+    talking._enqueue("no, the other one")
+    assert talking.hear(0.0) == ["no, the other one"]
+
+
+def test_mid_task_quit_is_deferred_until_the_turn_ends():
+    """`/quit` mid-task must not abort the turn - only the next fresh listen."""
+    talking = queued()
+    talking._enqueue("/quit")
+    assert talking.hear(0.0) == []
+
+
+def test_quit_from_the_queue_raises_on_the_next_fresh_listen():
+    talking = queued()
+    talking._enqueue("/quit")
+    with pytest.raises(Quit):
+        talking.hear(1.0)
+
+
+def test_a_command_from_the_queue_is_answered_immediately():
+    written = io.StringIO()
+    talking = queued(written)
+    talking._enqueue("/dance")
+    assert talking.hear(0.0) == []
+    assert "No such command as /dance" in written.getvalue()
+
+
 def test_the_console_voice_is_what_the_loop_expects():
     """Both front ends are duck-typed against the same two methods. If one grows
     an argument, this fails rather than only chat mode failing at runtime."""
